@@ -6,25 +6,26 @@
 
 | prior_family | model | block | index | feature | prior_mean | prior_variance |
 | --- | --- | --- | --- | --- | --- | --- |
-| PF | fourSC | theta | 0 | intercept | -0.077843 | 0.052657 |
-| PF | fourSC | theta | 1 | stepCountNext4HourLag1 | 0.486631 | 0.044052 |
-| PF | fourSC | theta | 2 | yesterdayStepCount | -0.148510 | 0.010915 |
-| PF | fourSC | theta | 3 | stepCountLast7DaysEma | 0.358334 | 0.034164 |
-| PF | fourSC | theta | 4 | prior2HourStepCount | 0.097988 | 0.033684 |
-| PF | fourSC | theta | 5 | activitySuggestionsSentLast7Days | -0.037568 | 0.027602 |
-| PF | fourSC | theta | 6 | activitySuggestionInteractLast7Days | 0.037534 | 0.064859 |
-| PF | fourSC | theta | 7 | activeDaysLast7Days | 0.157462 | 0.042702 |
-| PF | fourSC | theta | 8 | isWeekend | -0.034017 | 0.046565 |
-| PF | fourSC | theta | 9 | decisionTimeSlot | -0.034384 | 0.143728 |
-| PF | fourSC | theta | 10 | perceivedUtilityLastWeek | 0.020972 | 0.014344 |
-| PF | fourSC | theta | 11 | caeAverageLastWeek | -0.053702 | 0.098342 |
-| PF | fourSC | theta | 12 | Ah | -0.116266 | 0.075658 |
-| PF | fourSC | theta | 13 | Ah*yesterdayStepCount | 0.005743 | 0.018772 |
-| PF | fourSC | theta | 14 | Ah*prior2HourStepCount | 0.009660 | 0.023679 |
-| PF | fourSC | theta | 15 | Ah*activitySuggestionsSentLast7Days | 0.029985 | 0.024949 |
-| PF | fourSC | theta | 16 | Ah*activitySuggestionInteractLast7Days | 0.087900 | 0.103011 |
-| PF | fourSC | theta | 17 | Ah*perceivedUtilityLastWeek | 0.020755 | 0.022559 |
-| PF | fourSC | theta | 18 | Ah*caeAverageLastWeek | -0.014121 | 0.076718 |
+| PF | fourSC | theta | 0 | intercept | -0.064155 | 0.051124 |
+| PF | fourSC | theta | 1 | stepCountNext4HourLag1 | 0.485640 | 0.044035 |
+| PF | fourSC | theta | 2 | yesterdayStepCount | -0.148401 | 0.011163 |
+| PF | fourSC | theta | 3 | stepCountLast7DaysEma | 0.358050 | 0.034993 |
+| PF | fourSC | theta | 4 | prior2HourStepCount | 0.097754 | 0.034164 |
+| PF | fourSC | theta | 5 | activitySuggestionsSentLast7Days | -0.037946 | 0.026999 |
+| PF | fourSC | theta | 6 | activitySuggestionInteractLast7Days | 0.037768 | 0.061428 |
+| PF | fourSC | theta | 7 | activeDaysLast7Days | 0.158754 | 0.043973 |
+| PF | fourSC | theta | 8 | isWeekend | -0.034373 | 0.046135 |
+| PF | fourSC | theta | 9 | decisionTimeSlot | -0.066423 | 0.123913 |
+| PF | fourSC | theta | 10 | perceivedUtilityLastWeek | 0.021186 | 0.014038 |
+| PF | fourSC | theta | 11 | caeAverageLastWeek | -0.053808 | 0.097074 |
+| PF | fourSC | theta | 12 | Ah | -0.142819 | 0.077520 |
+| PF | fourSC | theta | 13 | Ah*yesterdayStepCount | 0.005743 | 0.019237 |
+| PF | fourSC | theta | 14 | Ah*prior2HourStepCount | 0.010735 | 0.024257 |
+| PF | fourSC | theta | 15 | Ah*activitySuggestionsSentLast7Days | 0.030233 | 0.024848 |
+| PF | fourSC | theta | 16 | Ah*activitySuggestionInteractLast7Days | 0.083931 | 0.098780 |
+| PF | fourSC | theta | 17 | Ah*perceivedUtilityLastWeek | 0.020380 | 0.021050 |
+| PF | fourSC | theta | 18 | Ah*caeAverageLastWeek | -0.013623 | 0.076366 |
+| PF | fourSC | theta | 19 | Ah*decisionTimeSlot | 0.064549 | 0.021185 |
 | PF | antic | theta | 0 | intercept | 0.340290 | 0.012202 |
 | PF | antic | theta | 1 | anticipated_affect_yesterday | 0.216039 | 0.005106 |
 | PF | antic | theta | 2 | active_status_fraction_7days | 0.087343 | 0.008163 |
@@ -67,329 +68,374 @@
 | RL | reward_shaping | eta | 13 | active_status_fraction_7days | 0.006800 | 0.034555 |
 | RL | reward_shaping | eta | 14 | recent_burden | -0.000133 | 0.003091 |
 | RL | reward_shaping | eta | 15 | walk_interaction_7d | 0.016573 | 0.037141 |
-| RL | redistribution_stage1_AA | eta | 0 | redistribution_stage1_AA_coef_0 | 0.222874 | 0.007288 |
-| RL | redistribution_stage1_AA | eta | 1 | redistribution_stage1_AA_coef_1 | 0.001377 | 0.001146 |
-| RL | redistribution_stage1_AA | eta | 2 | redistribution_stage1_AA_coef_2 | 0.084417 | 0.002518 |
-| RL | redistribution_stage1_AA | eta | 3 | redistribution_stage1_AA_coef_3 | 0.000000 | 1.000000 |
-| RL | redistribution_stage1_AA | eta | 4 | redistribution_stage1_AA_coef_4 | 0.173730 | 0.002020 |
-| RL | redistribution_stage1_AA | eta | 5 | redistribution_stage1_AA_coef_5 | -0.011266 | 0.003613 |
-| RL | redistribution_stage1_AA | eta | 6 | redistribution_stage1_AA_coef_6 | 0.013090 | 0.000507 |
-| RL | redistribution_stage1_AA | eta | 7 | redistribution_stage1_AA_coef_7 | -0.033435 | 0.001449 |
-| RL | redistribution_stage1_AA | eta | 8 | redistribution_stage1_AA_coef_8 | -0.027310 | 0.001645 |
-| RL | redistribution_stage1_AA | eta | 9 | redistribution_stage1_AA_coef_9 | 0.007289 | 0.000214 |
-| RL | redistribution_stage1_AA | eta | 10 | redistribution_stage1_AA_coef_10 | 0.010540 | 0.000374 |
-| RL | redistribution_stage1_AA | eta | 11 | redistribution_stage1_AA_coef_11 | 0.025573 | 0.004570 |
-| RL | redistribution_stage1_AA | eta | 12 | redistribution_stage1_AA_coef_12 | 0.000339 | 0.000128 |
-| RL | redistribution_stage1_AA | eta | 13 | redistribution_stage1_AA_coef_13 | -0.003126 | 0.002941 |
-| RL | redistribution_stage1_AA | eta | 14 | redistribution_stage1_AA_coef_14 | 0.011233 | 0.001336 |
-| RL | redistribution_stage1_AA | eta | 15 | redistribution_stage1_AA_coef_15 | 3.110337e-05 | 0.000425 |
-| RL | redistribution_stage1_AA | eta | 16 | redistribution_stage1_AA_coef_16 | -0.007456 | 0.002126 |
-| RL | redistribution_stage1_AA | eta | 17 | redistribution_stage1_AA_coef_17 | 0.000000 | 1.000000 |
-| RL | redistribution_stage1_AA | eta | 18 | redistribution_stage1_AA_coef_18 | -0.000295 | 0.000612 |
-| RL | redistribution_stage1_AA | eta | 19 | redistribution_stage1_AA_coef_19 | 0.008142 | 0.000402 |
-| RL | redistribution_stage1_AA | eta | 20 | redistribution_stage1_AA_coef_20 | -0.008475 | 0.002592 |
-| RL | redistribution_stage1_AA | eta | 21 | redistribution_stage1_AA_coef_21 | 0.003168 | 0.000300 |
-| RL | redistribution_stage1_AA | eta | 22 | redistribution_stage1_AA_coef_22 | -0.000629 | 0.000762 |
-| RL | redistribution_stage1_FW | eta | 0 | redistribution_stage1_FW_coef_0 | 0.363291 | 0.024664 |
-| RL | redistribution_stage1_FW | eta | 1 | redistribution_stage1_FW_coef_1 | 0.006563 | 0.005946 |
-| RL | redistribution_stage1_FW | eta | 2 | redistribution_stage1_FW_coef_2 | 0.000760 | 0.008520 |
-| RL | redistribution_stage1_FW | eta | 3 | redistribution_stage1_FW_coef_3 | 0.000000 | 1.000000 |
-| RL | redistribution_stage1_FW | eta | 4 | redistribution_stage1_FW_coef_4 | -0.122290 | 0.028653 |
-| RL | redistribution_stage1_FW | eta | 5 | redistribution_stage1_FW_coef_5 | -0.029540 | 0.009999 |
-| RL | redistribution_stage1_FW | eta | 6 | redistribution_stage1_FW_coef_6 | 0.028648 | 0.001500 |
-| RL | redistribution_stage1_FW | eta | 7 | redistribution_stage1_FW_coef_7 | 0.160463 | 0.017493 |
-| RL | redistribution_stage1_FW | eta | 8 | redistribution_stage1_FW_coef_8 | -0.011918 | 0.009944 |
-| RL | redistribution_stage1_FW | eta | 9 | redistribution_stage1_FW_coef_9 | 0.004154 | 0.003503 |
-| RL | redistribution_stage1_FW | eta | 10 | redistribution_stage1_FW_coef_10 | 0.004761 | 0.002673 |
-| RL | redistribution_stage1_FW | eta | 11 | redistribution_stage1_FW_coef_11 | 0.045122 | 0.016601 |
-| RL | redistribution_stage1_FW | eta | 12 | redistribution_stage1_FW_coef_12 | -0.010701 | 0.003106 |
-| RL | redistribution_stage1_FW | eta | 13 | redistribution_stage1_FW_coef_13 | 0.027637 | 0.025439 |
-| RL | redistribution_stage1_FW | eta | 14 | redistribution_stage1_FW_coef_14 | 0.019529 | 0.010590 |
-| RL | redistribution_stage1_FW | eta | 15 | redistribution_stage1_FW_coef_15 | -0.002129 | 0.006144 |
-| RL | redistribution_stage1_FW | eta | 16 | redistribution_stage1_FW_coef_16 | -0.005741 | 0.014831 |
-| RL | redistribution_stage1_FW | eta | 17 | redistribution_stage1_FW_coef_17 | 0.000000 | 1.000000 |
-| RL | redistribution_stage1_FW | eta | 18 | redistribution_stage1_FW_coef_18 | -0.001101 | 0.007624 |
-| RL | redistribution_stage1_FW | eta | 19 | redistribution_stage1_FW_coef_19 | -0.002334 | 0.005002 |
-| RL | redistribution_stage1_FW | eta | 20 | redistribution_stage1_FW_coef_20 | -0.024201 | 0.022744 |
-| RL | redistribution_stage1_FW | eta | 21 | redistribution_stage1_FW_coef_21 | 0.006174 | 0.003980 |
-| RL | redistribution_stage1_FW | eta | 22 | redistribution_stage1_FW_coef_22 | -0.013116 | 0.023700 |
-| RL | redistribution_stage1_PJ | eta | 0 | redistribution_stage1_PJ_coef_0 | 0.104080 | 0.036917 |
-| RL | redistribution_stage1_PJ | eta | 1 | redistribution_stage1_PJ_coef_1 | 0.004667 | 0.007817 |
-| RL | redistribution_stage1_PJ | eta | 2 | redistribution_stage1_PJ_coef_2 | 0.020230 | 0.020094 |
-| RL | redistribution_stage1_PJ | eta | 3 | redistribution_stage1_PJ_coef_3 | 0.000000 | 1.000000 |
-| RL | redistribution_stage1_PJ | eta | 4 | redistribution_stage1_PJ_coef_4 | -0.139508 | 0.031186 |
-| RL | redistribution_stage1_PJ | eta | 5 | redistribution_stage1_PJ_coef_5 | -0.016799 | 0.022434 |
-| RL | redistribution_stage1_PJ | eta | 6 | redistribution_stage1_PJ_coef_6 | 0.013145 | 0.002327 |
-| RL | redistribution_stage1_PJ | eta | 7 | redistribution_stage1_PJ_coef_7 | 0.015723 | 0.007224 |
-| RL | redistribution_stage1_PJ | eta | 8 | redistribution_stage1_PJ_coef_8 | 0.160158 | 0.011900 |
-| RL | redistribution_stage1_PJ | eta | 9 | redistribution_stage1_PJ_coef_9 | 0.001081 | 0.007660 |
-| RL | redistribution_stage1_PJ | eta | 10 | redistribution_stage1_PJ_coef_10 | 0.024062 | 0.002571 |
-| RL | redistribution_stage1_PJ | eta | 11 | redistribution_stage1_PJ_coef_11 | 0.074192 | 0.033846 |
-| RL | redistribution_stage1_PJ | eta | 12 | redistribution_stage1_PJ_coef_12 | 0.014299 | 0.005121 |
-| RL | redistribution_stage1_PJ | eta | 13 | redistribution_stage1_PJ_coef_13 | 0.187313 | 0.024023 |
-| RL | redistribution_stage1_PJ | eta | 14 | redistribution_stage1_PJ_coef_14 | 0.041669 | 0.011210 |
-| RL | redistribution_stage1_PJ | eta | 15 | redistribution_stage1_PJ_coef_15 | 0.005630 | 0.008859 |
-| RL | redistribution_stage1_PJ | eta | 16 | redistribution_stage1_PJ_coef_16 | 0.008554 | 0.023867 |
-| RL | redistribution_stage1_PJ | eta | 17 | redistribution_stage1_PJ_coef_17 | 0.000000 | 1.000000 |
-| RL | redistribution_stage1_PJ | eta | 18 | redistribution_stage1_PJ_coef_18 | 0.011872 | 0.013299 |
-| RL | redistribution_stage1_PJ | eta | 19 | redistribution_stage1_PJ_coef_19 | -0.002359 | 0.010828 |
-| RL | redistribution_stage1_PJ | eta | 20 | redistribution_stage1_PJ_coef_20 | -0.059199 | 0.031600 |
-| RL | redistribution_stage1_PJ | eta | 21 | redistribution_stage1_PJ_coef_21 | -0.006653 | 0.010222 |
-| RL | redistribution_stage1_PJ | eta | 22 | redistribution_stage1_PJ_coef_22 | -0.050083 | 0.020368 |
-| RL | redistribution_stage2_v2 | eta | 0 | redistribution_stage2_v2_coef_0 | -0.574256 | 0.001245 |
-| RL | redistribution_stage2_v2 | eta | 1 | redistribution_stage2_v2_coef_1 | -0.095709 | 3.457090e-05 |
-| RL | redistribution_stage2_v2 | eta | 2 | redistribution_stage2_v2_coef_2 | 0.034147 | 0.000922 |
-| RL | redistribution_stage2_v2 | eta | 3 | redistribution_stage2_v2_coef_3 | -0.085433 | 0.001618 |
+| RL | redistribution_stage1_AA | eta | 0 | intercept | 0.222969 | 0.007320 |
+| RL | redistribution_stage1_AA | eta | 1 | E_w | 0.001377 | 0.001126 |
+| RL | redistribution_stage1_AA | eta | 2 | b_hat | 0.084304 | 0.002502 |
+| RL | redistribution_stage1_AA | eta | 3 | b_tilde | 0.000000 | 1.000000 |
+| RL | redistribution_stage1_AA | eta | 4 | M_Y_anticipated_affect_ewma | 0.174362 | 0.001935 |
+| RL | redistribution_stage1_AA | eta | 5 | M_Y_fourSC_ewma | -0.011469 | 0.002822 |
+| RL | redistribution_stage1_AA | eta | 6 | M_E_pageview_ewma | 0.013249 | 0.000549 |
+| RL | redistribution_stage1_AA | eta | 7 | M_E_fitbit_wear_ewma | -0.033483 | 0.001424 |
+| RL | redistribution_stage1_AA | eta | 8 | M_E_survey_complete_ewma | -0.027182 | 0.001595 |
+| RL | redistribution_stage1_AA | eta | 9 | yesterday_step_count | 0.007297 | 0.000216 |
+| RL | redistribution_stage1_AA | eta | 10 | prior2hour_step_count | 0.010348 | 0.000478 |
+| RL | redistribution_stage1_AA | eta | 11 | active_status_fraction_7days | 0.025958 | 0.004648 |
+| RL | redistribution_stage1_AA | eta | 12 | recent_burden | 0.000336 | 0.000118 |
+| RL | redistribution_stage1_AA | eta | 13 | walk_interaction_7d | -0.003652 | 0.002932 |
+| RL | redistribution_stage1_AA | eta | 14 | A | 0.004928 | 0.001389 |
+| RL | redistribution_stage1_AA | eta | 15 | A*E_w | 4.743482e-05 | 0.000420 |
+| RL | redistribution_stage1_AA | eta | 16 | A*b_hat | -0.007451 | 0.002134 |
+| RL | redistribution_stage1_AA | eta | 17 | A*b_tilde | 0.000000 | 1.000000 |
+| RL | redistribution_stage1_AA | eta | 18 | A*yesterday_step_count | -0.000406 | 0.000582 |
+| RL | redistribution_stage1_AA | eta | 19 | A*prior2hour_step_count | 0.008620 | 0.000482 |
+| RL | redistribution_stage1_AA | eta | 20 | A*active_status_fraction_7days | -0.008784 | 0.002604 |
+| RL | redistribution_stage1_AA | eta | 21 | A*recent_burden | 0.003156 | 0.000297 |
+| RL | redistribution_stage1_AA | eta | 22 | A*walk_interaction_7d | -0.000755 | 0.000842 |
+| RL | redistribution_stage1_AA | eta | 23 | A*slot_pm | 0.012964 | 0.001697 |
+| RL | redistribution_stage1_FW | eta | 0 | intercept | 0.363061 | 0.024519 |
+| RL | redistribution_stage1_FW | eta | 1 | E_w | 0.006563 | 0.005689 |
+| RL | redistribution_stage1_FW | eta | 2 | b_hat | 0.001032 | 0.008942 |
+| RL | redistribution_stage1_FW | eta | 3 | b_tilde | 0.000000 | 1.000000 |
+| RL | redistribution_stage1_FW | eta | 4 | M_Y_anticipated_affect_ewma | -0.123811 | 0.027769 |
+| RL | redistribution_stage1_FW | eta | 5 | M_Y_fourSC_ewma | -0.029052 | 0.011063 |
+| RL | redistribution_stage1_FW | eta | 6 | M_E_pageview_ewma | 0.028266 | 0.001493 |
+| RL | redistribution_stage1_FW | eta | 7 | M_E_fitbit_wear_ewma | 0.160578 | 0.018363 |
+| RL | redistribution_stage1_FW | eta | 8 | M_E_survey_complete_ewma | -0.012227 | 0.009850 |
+| RL | redistribution_stage1_FW | eta | 9 | yesterday_step_count | 0.004136 | 0.003544 |
+| RL | redistribution_stage1_FW | eta | 10 | prior2hour_step_count | 0.005224 | 0.002698 |
+| RL | redistribution_stage1_FW | eta | 11 | active_status_fraction_7days | 0.044195 | 0.015556 |
+| RL | redistribution_stage1_FW | eta | 12 | recent_burden | -0.010694 | 0.003197 |
+| RL | redistribution_stage1_FW | eta | 13 | walk_interaction_7d | 0.028904 | 0.025930 |
+| RL | redistribution_stage1_FW | eta | 14 | A | 0.034705 | 0.010074 |
+| RL | redistribution_stage1_FW | eta | 15 | A*E_w | -0.002168 | 0.006426 |
+| RL | redistribution_stage1_FW | eta | 16 | A*b_hat | -0.005751 | 0.014031 |
+| RL | redistribution_stage1_FW | eta | 17 | A*b_tilde | 0.000000 | 1.000000 |
+| RL | redistribution_stage1_FW | eta | 18 | A*yesterday_step_count | -0.000833 | 0.007621 |
+| RL | redistribution_stage1_FW | eta | 19 | A*prior2hour_step_count | -0.003484 | 0.005169 |
+| RL | redistribution_stage1_FW | eta | 20 | A*active_status_fraction_7days | -0.023458 | 0.024079 |
+| RL | redistribution_stage1_FW | eta | 21 | A*recent_burden | 0.006203 | 0.004120 |
+| RL | redistribution_stage1_FW | eta | 22 | A*walk_interaction_7d | -0.012811 | 0.023791 |
+| RL | redistribution_stage1_FW | eta | 23 | A*slot_pm | -0.031203 | 0.012399 |
+| RL | redistribution_stage1_PJ | eta | 0 | intercept | 0.103925 | 0.035849 |
+| RL | redistribution_stage1_PJ | eta | 1 | E_w | 0.004667 | 0.008531 |
+| RL | redistribution_stage1_PJ | eta | 2 | b_hat | 0.020412 | 0.019403 |
+| RL | redistribution_stage1_PJ | eta | 3 | b_tilde | 0.000000 | 1.000000 |
+| RL | redistribution_stage1_PJ | eta | 4 | M_Y_anticipated_affect_ewma | -0.140528 | 0.030398 |
+| RL | redistribution_stage1_PJ | eta | 5 | M_Y_fourSC_ewma | -0.016472 | 0.022762 |
+| RL | redistribution_stage1_PJ | eta | 6 | M_E_pageview_ewma | 0.012888 | 0.002279 |
+| RL | redistribution_stage1_PJ | eta | 7 | M_E_fitbit_wear_ewma | 0.015800 | 0.007100 |
+| RL | redistribution_stage1_PJ | eta | 8 | M_E_survey_complete_ewma | 0.159951 | 0.011044 |
+| RL | redistribution_stage1_PJ | eta | 9 | yesterday_step_count | 0.001069 | 0.007391 |
+| RL | redistribution_stage1_PJ | eta | 10 | prior2hour_step_count | 0.024372 | 0.002801 |
+| RL | redistribution_stage1_PJ | eta | 11 | active_status_fraction_7days | 0.073571 | 0.034628 |
+| RL | redistribution_stage1_PJ | eta | 12 | recent_burden | 0.014304 | 0.005100 |
+| RL | redistribution_stage1_PJ | eta | 13 | walk_interaction_7d | 0.188163 | 0.023156 |
+| RL | redistribution_stage1_PJ | eta | 14 | A | 0.051847 | 0.012479 |
+| RL | redistribution_stage1_PJ | eta | 15 | A*E_w | 0.005603 | 0.009282 |
+| RL | redistribution_stage1_PJ | eta | 16 | A*b_hat | 0.008547 | 0.023838 |
+| RL | redistribution_stage1_PJ | eta | 17 | A*b_tilde | 0.000000 | 1.000000 |
+| RL | redistribution_stage1_PJ | eta | 18 | A*yesterday_step_count | 0.012052 | 0.013079 |
+| RL | redistribution_stage1_PJ | eta | 19 | A*prior2hour_step_count | -0.003130 | 0.012208 |
+| RL | redistribution_stage1_PJ | eta | 20 | A*active_status_fraction_7days | -0.058701 | 0.032340 |
+| RL | redistribution_stage1_PJ | eta | 21 | A*recent_burden | -0.006634 | 0.010734 |
+| RL | redistribution_stage1_PJ | eta | 22 | A*walk_interaction_7d | -0.049878 | 0.019150 |
+| RL | redistribution_stage1_PJ | eta | 23 | A*slot_pm | -0.020927 | 0.018829 |
+| RL | redistribution_stage1_SC | eta | 0 | intercept | -0.705132 | 0.351709 |
+| RL | redistribution_stage1_SC | eta | 1 | weekday_vs_weekend | -0.007309 | 0.025683 |
+| RL | redistribution_stage1_SC | eta | 2 | slot_pm | -0.153867 | 0.090372 |
+| RL | redistribution_stage1_SC | eta | 3 | E_w | 0.144278 | 0.018131 |
+| RL | redistribution_stage1_SC | eta | 4 | b_hat | -0.232069 | 0.070862 |
+| RL | redistribution_stage1_SC | eta | 5 | b_tilde | 0.000000 | 1.000000 |
+| RL | redistribution_stage1_SC | eta | 6 | yesterday_step_count | 0.057615 | 0.003956 |
+| RL | redistribution_stage1_SC | eta | 7 | prior2hour_step_count | 0.302017 | 0.020929 |
+| RL | redistribution_stage1_SC | eta | 8 | active_status_fraction_7days | 0.879395 | 0.042327 |
+| RL | redistribution_stage1_SC | eta | 9 | recent_burden | -0.063057 | 0.002461 |
+| RL | redistribution_stage1_SC | eta | 10 | walk_interaction_7d | 0.100917 | 0.055888 |
+| RL | redistribution_stage1_SC | eta | 11 | A | -0.144828 | 0.015284 |
+| RL | redistribution_stage1_SC | eta | 12 | A*slot_pm | 0.124689 | 0.023721 |
+| RL | redistribution_stage1_PV | eta | 0 | intercept | -2.789009 | 0.681921 |
+| RL | redistribution_stage1_PV | eta | 1 | weekday_vs_weekend | -0.165289 | 0.172679 |
+| RL | redistribution_stage1_PV | eta | 2 | slot_pm | -0.160459 | 0.143064 |
+| RL | redistribution_stage1_PV | eta | 3 | E_w | 0.046370 | 0.193018 |
+| RL | redistribution_stage1_PV | eta | 4 | b_hat | 0.001551 | 0.203445 |
+| RL | redistribution_stage1_PV | eta | 5 | b_tilde | 0.000000 | 1.000000 |
+| RL | redistribution_stage1_PV | eta | 6 | yesterday_step_count | -0.071943 | 0.027039 |
+| RL | redistribution_stage1_PV | eta | 7 | prior2hour_step_count | 0.097826 | 0.029345 |
+| RL | redistribution_stage1_PV | eta | 8 | active_status_fraction_7days | 0.089289 | 0.541693 |
+| RL | redistribution_stage1_PV | eta | 9 | recent_burden | -0.046387 | 0.035630 |
+| RL | redistribution_stage1_PV | eta | 10 | walk_interaction_7d | 0.991033 | 0.222607 |
+| RL | redistribution_stage1_PV | eta | 11 | A | 0.532358 | 0.497144 |
+| RL | redistribution_stage1_PV | eta | 12 | A*slot_pm | 0.116056 | 0.117668 |
+| RL | redistribution_stage2_v2 | eta | 0 | redistribution_stage2_v2_coef_0 | -0.746000 | 0.001348 |
+| RL | redistribution_stage2_v2 | eta | 1 | redistribution_stage2_v2_coef_1 | -0.124333 | 3.744789e-05 |
+| RL | redistribution_stage2_v2 | eta | 2 | redistribution_stage2_v2_coef_2 | 0.052255 | 0.000941 |
+| RL | redistribution_stage2_v2 | eta | 3 | redistribution_stage2_v2_coef_3 | -0.104549 | 0.001634 |
 | RL | redistribution_stage2_v2 | eta | 4 | redistribution_stage2_v2_coef_4 | 0.000000 | 1.000000 |
-| RL | redistribution_stage2_v2 | eta | 5 | redistribution_stage2_v2_coef_5 | 0.627728 | 0.003086 |
-| RL | redistribution_stage2_v2 | eta | 6 | redistribution_stage2_v2_coef_6 | 0.043908 | 0.002630 |
-| RL | redistribution_stage2_v2 | eta | 7 | redistribution_stage2_v2_coef_7 | -0.084152 | 0.002041 |
-| RL | redistribution_stage2_v2 | eta | 8 | redistribution_stage2_v2_coef_8 | -0.121924 | 0.001843 |
-| RL | redistribution_stage2_v2 | eta | 9 | redistribution_stage2_v2_coef_9 | -0.128397 | 0.002562 |
-| RL | redistribution_stage2_v2 | eta | 10 | redistribution_stage2_v2_coef_10 | 0.036104 | 0.002357 |
-| RL | redistribution_stage2_v2 | eta | 11 | redistribution_stage2_v2_coef_11 | -0.060965 | 0.001160 |
-| RL | redistribution_stage2_v2 | eta | 12 | redistribution_stage2_v2_coef_12 | -0.048044 | 0.001228 |
-| RL | redistribution_stage2_v2 | eta | 13 | redistribution_stage2_v2_coef_13 | 0.010080 | 0.000345 |
-| RL | redistribution_stage2_v2 | eta | 14 | redistribution_stage2_v2_coef_14 | -0.030650 | 0.004101 |
-| RL | redistribution_stage2_v2 | eta | 15 | redistribution_stage2_v2_coef_15 | -0.028293 | 0.001255 |
-| RL | redistribution_stage2_v2 | eta | 16 | redistribution_stage2_v2_coef_16 | 0.045306 | 0.002303 |
-| RL | redistribution_stage2_v2 | eta | 17 | redistribution_stage2_v2_coef_17 | 0.340279 | 0.000181 |
-| RL | redistribution_stage2_v2 | eta | 18 | redistribution_stage2_v2_coef_18 | 0.482604 | 0.000431 |
-| RL | redistribution_stage2_v2 | eta | 19 | redistribution_stage2_v2_coef_19 | 0.832170 | 0.000353 |
-| RL | redistribution_stage2_v4 | eta | 0 | redistribution_stage2_v4_coef_0 | -0.373170 | 0.005790 |
-| RL | redistribution_stage2_v4 | eta | 1 | redistribution_stage2_v4_coef_1 | -0.062195 | 0.000161 |
-| RL | redistribution_stage2_v4 | eta | 2 | redistribution_stage2_v4_coef_2 | -0.031061 | 0.002459 |
-| RL | redistribution_stage2_v4 | eta | 3 | redistribution_stage2_v4_coef_3 | 0.021286 | 0.018858 |
+| RL | redistribution_stage2_v2 | eta | 5 | redistribution_stage2_v2_coef_5 | 0.716815 | 0.003279 |
+| RL | redistribution_stage2_v2 | eta | 6 | redistribution_stage2_v2_coef_6 | 0.022342 | 0.003028 |
+| RL | redistribution_stage2_v2 | eta | 7 | redistribution_stage2_v2_coef_7 | -0.089218 | 0.002292 |
+| RL | redistribution_stage2_v2 | eta | 8 | redistribution_stage2_v2_coef_8 | -0.164891 | 0.001886 |
+| RL | redistribution_stage2_v2 | eta | 9 | redistribution_stage2_v2_coef_9 | -0.159278 | 0.002538 |
+| RL | redistribution_stage2_v2 | eta | 10 | redistribution_stage2_v2_coef_10 | 0.043484 | 0.002711 |
+| RL | redistribution_stage2_v2 | eta | 11 | redistribution_stage2_v2_coef_11 | -0.019601 | 0.001276 |
+| RL | redistribution_stage2_v2 | eta | 12 | redistribution_stage2_v2_coef_12 | 0.066967 | 0.001260 |
+| RL | redistribution_stage2_v2 | eta | 13 | redistribution_stage2_v2_coef_13 | 0.000734 | 0.000365 |
+| RL | redistribution_stage2_v2 | eta | 14 | redistribution_stage2_v2_coef_14 | -0.047275 | 0.004041 |
+| RL | redistribution_stage2_v2 | eta | 15 | redistribution_stage2_v2_coef_15 | 0.044416 | 0.002375 |
+| RL | redistribution_stage2_v2 | eta | 16 | redistribution_stage2_v2_coef_16 | 0.127519 | 0.000201 |
+| RL | redistribution_stage2_v2 | eta | 17 | redistribution_stage2_v2_coef_17 | 0.709298 | 0.000540 |
+| RL | redistribution_stage2_v2 | eta | 18 | redistribution_stage2_v2_coef_18 | 0.996091 | 0.000328 |
+| RL | redistribution_stage2_v2 | eta | 19 | redistribution_stage2_v2_coef_19 | -0.141645 | 0.000347 |
+| RL | redistribution_stage2_v4 | eta | 0 | redistribution_stage2_v4_coef_0 | 0.100663 | 0.006338 |
+| RL | redistribution_stage2_v4 | eta | 1 | redistribution_stage2_v4_coef_1 | 0.016777 | 0.000176 |
+| RL | redistribution_stage2_v4 | eta | 2 | redistribution_stage2_v4_coef_2 | -0.117818 | 0.002298 |
+| RL | redistribution_stage2_v4 | eta | 3 | redistribution_stage2_v4_coef_3 | 0.148301 | 0.013714 |
 | RL | redistribution_stage2_v4 | eta | 4 | redistribution_stage2_v4_coef_4 | 0.000000 | 1.000000 |
-| RL | redistribution_stage2_v4 | eta | 5 | redistribution_stage2_v4_coef_5 | 0.373639 | 0.010722 |
-| RL | redistribution_stage2_v4 | eta | 6 | redistribution_stage2_v4_coef_6 | 0.098946 | 0.039202 |
-| RL | redistribution_stage2_v4 | eta | 7 | redistribution_stage2_v4_coef_7 | -0.050662 | 0.005354 |
-| RL | redistribution_stage2_v4 | eta | 8 | redistribution_stage2_v4_coef_8 | -0.086523 | 0.004936 |
-| RL | redistribution_stage2_v4 | eta | 9 | redistribution_stage2_v4_coef_9 | -0.290615 | 0.020952 |
-| RL | redistribution_stage2_v4 | eta | 10 | redistribution_stage2_v4_coef_10 | -0.011133 | 0.016220 |
-| RL | redistribution_stage2_v4 | eta | 11 | redistribution_stage2_v4_coef_11 | -0.068862 | 0.005327 |
-| RL | redistribution_stage2_v4 | eta | 12 | redistribution_stage2_v4_coef_12 | -0.083275 | 0.006437 |
-| RL | redistribution_stage2_v4 | eta | 13 | redistribution_stage2_v4_coef_13 | -0.013496 | 0.003039 |
-| RL | redistribution_stage2_v4 | eta | 14 | redistribution_stage2_v4_coef_14 | -0.294472 | 0.016041 |
-| RL | redistribution_stage2_v4 | eta | 15 | redistribution_stage2_v4_coef_15 | -0.042654 | 0.028818 |
-| RL | redistribution_stage2_v4 | eta | 16 | redistribution_stage2_v4_coef_16 | 0.016370 | 0.011146 |
-| RL | redistribution_stage2_v4 | eta | 17 | redistribution_stage2_v4_coef_17 | 0.023226 | 0.001051 |
-| RL | redistribution_stage2_v4 | eta | 18 | redistribution_stage2_v4_coef_18 | 0.312929 | 0.001608 |
-| RL | redistribution_stage2_v4 | eta | 19 | redistribution_stage2_v4_coef_19 | 1.838330 | 0.002006 |
-| RL | q_no_td_modify | beta | 0 | intercept | 0.095386 | 0.086030 |
-| RL | q_no_td_modify | beta | 1 | weekday_vs_weekend | -0.047426 | 0.090180 |
-| RL | q_no_td_modify | beta | 2 | slot_pm | -0.002001 | 0.002037 |
-| RL | q_no_td_modify | beta | 3 | E_w | 0.022913 | 0.040842 |
-| RL | q_no_td_modify | beta | 4 | b_hat | 1.151216 | 0.039430 |
+| RL | redistribution_stage2_v4 | eta | 5 | redistribution_stage2_v4_coef_5 | 0.310320 | 0.008028 |
+| RL | redistribution_stage2_v4 | eta | 6 | redistribution_stage2_v4_coef_6 | 0.052028 | 0.017660 |
+| RL | redistribution_stage2_v4 | eta | 7 | redistribution_stage2_v4_coef_7 | -0.051810 | 0.005886 |
+| RL | redistribution_stage2_v4 | eta | 8 | redistribution_stage2_v4_coef_8 | -0.069528 | 0.005247 |
+| RL | redistribution_stage2_v4 | eta | 9 | redistribution_stage2_v4_coef_9 | -0.253482 | 0.008457 |
+| RL | redistribution_stage2_v4 | eta | 10 | redistribution_stage2_v4_coef_10 | -0.045762 | 0.015378 |
+| RL | redistribution_stage2_v4 | eta | 11 | redistribution_stage2_v4_coef_11 | -0.253583 | 0.004759 |
+| RL | redistribution_stage2_v4 | eta | 12 | redistribution_stage2_v4_coef_12 | -0.612637 | 0.005273 |
+| RL | redistribution_stage2_v4 | eta | 13 | redistribution_stage2_v4_coef_13 | 0.033090 | 0.002823 |
+| RL | redistribution_stage2_v4 | eta | 14 | redistribution_stage2_v4_coef_14 | -0.326770 | 0.016208 |
+| RL | redistribution_stage2_v4 | eta | 15 | redistribution_stage2_v4_coef_15 | 0.020750 | 0.011054 |
+| RL | redistribution_stage2_v4 | eta | 16 | redistribution_stage2_v4_coef_16 | 0.254772 | 0.000921 |
+| RL | redistribution_stage2_v4 | eta | 17 | redistribution_stage2_v4_coef_17 | 0.289924 | 0.001400 |
+| RL | redistribution_stage2_v4 | eta | 18 | redistribution_stage2_v4_coef_18 | 1.636309 | 0.000957 |
+| RL | redistribution_stage2_v4 | eta | 19 | redistribution_stage2_v4_coef_19 | 0.608859 | 0.002845 |
+| RL | q_no_td_modify | beta | 0 | intercept | 0.113675 | 0.084997 |
+| RL | q_no_td_modify | beta | 1 | weekday_vs_weekend | -0.071093 | 0.102456 |
+| RL | q_no_td_modify | beta | 2 | slot_pm | -0.008039 | 0.002440 |
+| RL | q_no_td_modify | beta | 3 | E_w | 0.020835 | 0.039664 |
+| RL | q_no_td_modify | beta | 4 | b_hat | 1.149582 | 0.037594 |
 | RL | q_no_td_modify | beta | 5 | b_tilde | 0.000000 | 1.000000 |
-| RL | q_no_td_modify | beta | 6 | M_Y_anticipated_affect_ewma | 0.296152 | 0.008652 |
-| RL | q_no_td_modify | beta | 7 | M_Y_fourSC_ewma | -0.023823 | 0.006627 |
-| RL | q_no_td_modify | beta | 8 | M_E_pageview_ewma | 0.002285 | 0.000247 |
-| RL | q_no_td_modify | beta | 9 | M_E_fitbit_wear_ewma | -0.134112 | 0.003994 |
-| RL | q_no_td_modify | beta | 10 | M_E_survey_complete_ewma | -0.043636 | 0.004812 |
-| RL | q_no_td_modify | beta | 11 | yesterday_step_count | -0.005347 | 0.001208 |
-| RL | q_no_td_modify | beta | 12 | prior2hour_step_count | -0.010379 | 0.000664 |
-| RL | q_no_td_modify | beta | 13 | active_status_fraction_7days | -0.027710 | 0.025667 |
-| RL | q_no_td_modify | beta | 14 | recent_burden | -0.012425 | 0.002421 |
-| RL | q_no_td_modify | beta | 15 | walk_interaction_7d | -0.061136 | 0.023232 |
-| RL | q_no_td_modify | beta | 16 | A | 0.012236 | 0.001439 |
-| RL | q_no_td_modify | beta | 17 | A*E_w | 0.002134 | 0.001055 |
-| RL | q_no_td_modify | beta | 18 | A*b_hat | -0.000243 | 0.002456 |
+| RL | q_no_td_modify | beta | 6 | M_Y_anticipated_affect_ewma | 0.291744 | 0.010067 |
+| RL | q_no_td_modify | beta | 7 | M_Y_fourSC_ewma | -0.024196 | 0.006828 |
+| RL | q_no_td_modify | beta | 8 | M_E_pageview_ewma | 0.001350 | 0.000228 |
+| RL | q_no_td_modify | beta | 9 | M_E_fitbit_wear_ewma | -0.132628 | 0.004399 |
+| RL | q_no_td_modify | beta | 10 | M_E_survey_complete_ewma | -0.040520 | 0.004034 |
+| RL | q_no_td_modify | beta | 11 | yesterday_step_count | -0.005486 | 0.001592 |
+| RL | q_no_td_modify | beta | 12 | prior2hour_step_count | -0.009700 | 0.000751 |
+| RL | q_no_td_modify | beta | 13 | active_status_fraction_7days | 0.006992 | 0.024485 |
+| RL | q_no_td_modify | beta | 14 | recent_burden | -0.011190 | 0.002337 |
+| RL | q_no_td_modify | beta | 15 | walk_interaction_7d | -0.065415 | 0.026574 |
+| RL | q_no_td_modify | beta | 16 | A | 0.002052 | 0.001255 |
+| RL | q_no_td_modify | beta | 17 | A*E_w | 0.002054 | 0.001100 |
+| RL | q_no_td_modify | beta | 18 | A*b_hat | 0.000230 | 0.002239 |
 | RL | q_no_td_modify | beta | 19 | A*b_tilde | 0.000000 | 1.000000 |
-| RL | q_no_td_modify | beta | 20 | A*yesterday_step_count | -0.003693 | 0.002665 |
-| RL | q_no_td_modify | beta | 21 | A*prior2hour_step_count | 0.006629 | 0.001128 |
-| RL | q_no_td_modify | beta | 22 | A*active_status_fraction_7days | -0.011960 | 0.001427 |
-| RL | q_no_td_modify | beta | 23 | A*recent_burden | -0.003028 | 0.000854 |
-| RL | q_no_td_modify | beta | 24 | A*walk_interaction_7d | -0.004677 | 0.002166 |
-| RL | q_no_td_modify_g09 | beta | 0 | intercept | 0.112094 | 0.152331 |
-| RL | q_no_td_modify_g09 | beta | 1 | weekday_vs_weekend | -0.044791 | 0.250970 |
-| RL | q_no_td_modify_g09 | beta | 2 | slot_pm | 0.001357 | 0.007562 |
-| RL | q_no_td_modify_g09 | beta | 3 | E_w | 0.040714 | 0.067453 |
-| RL | q_no_td_modify_g09 | beta | 4 | b_hat | 1.555100 | 0.062612 |
+| RL | q_no_td_modify | beta | 20 | A*yesterday_step_count | -0.003479 | 0.003409 |
+| RL | q_no_td_modify | beta | 21 | A*prior2hour_step_count | 0.006049 | 0.001273 |
+| RL | q_no_td_modify | beta | 22 | A*active_status_fraction_7days | -0.012574 | 0.001346 |
+| RL | q_no_td_modify | beta | 23 | A*recent_burden | -0.003053 | 0.000984 |
+| RL | q_no_td_modify | beta | 24 | A*walk_interaction_7d | -0.004083 | 0.002206 |
+| RL | q_no_td_modify | beta | 25 | A*weekday_vs_weekend | 0.040212 | 0.004830 |
+| RL | q_no_td_modify | beta | 26 | A*slot_pm | 0.008674 | 0.001847 |
+| RL | q_no_td_modify_g09 | beta | 0 | intercept | 0.138555 | 0.149838 |
+| RL | q_no_td_modify_g09 | beta | 1 | weekday_vs_weekend | -0.065512 | 0.249483 |
+| RL | q_no_td_modify_g09 | beta | 2 | slot_pm | -0.006419 | 0.008029 |
+| RL | q_no_td_modify_g09 | beta | 3 | E_w | 0.038245 | 0.067596 |
+| RL | q_no_td_modify_g09 | beta | 4 | b_hat | 1.551511 | 0.060741 |
 | RL | q_no_td_modify_g09 | beta | 5 | b_tilde | 0.000000 | 1.000000 |
-| RL | q_no_td_modify_g09 | beta | 6 | M_Y_anticipated_affect_ewma | 0.483698 | 0.021707 |
-| RL | q_no_td_modify_g09 | beta | 7 | M_Y_fourSC_ewma | -0.034287 | 0.011359 |
-| RL | q_no_td_modify_g09 | beta | 8 | M_E_pageview_ewma | 0.005238 | 0.000485 |
-| RL | q_no_td_modify_g09 | beta | 9 | M_E_fitbit_wear_ewma | -0.212861 | 0.007967 |
-| RL | q_no_td_modify_g09 | beta | 10 | M_E_survey_complete_ewma | -0.062399 | 0.009343 |
-| RL | q_no_td_modify_g09 | beta | 11 | yesterday_step_count | -0.001705 | 0.002603 |
-| RL | q_no_td_modify_g09 | beta | 12 | prior2hour_step_count | -0.016653 | 0.001153 |
-| RL | q_no_td_modify_g09 | beta | 13 | active_status_fraction_7days | -0.017481 | 0.051035 |
-| RL | q_no_td_modify_g09 | beta | 14 | recent_burden | -0.017942 | 0.004518 |
-| RL | q_no_td_modify_g09 | beta | 15 | walk_interaction_7d | -0.066107 | 0.037074 |
-| RL | q_no_td_modify_g09 | beta | 16 | A | 0.016998 | 0.004640 |
-| RL | q_no_td_modify_g09 | beta | 17 | A*E_w | 0.002957 | 0.003094 |
-| RL | q_no_td_modify_g09 | beta | 18 | A*b_hat | -0.000594 | 0.005287 |
+| RL | q_no_td_modify_g09 | beta | 6 | M_Y_anticipated_affect_ewma | 0.480382 | 0.023600 |
+| RL | q_no_td_modify_g09 | beta | 7 | M_Y_fourSC_ewma | -0.034393 | 0.011422 |
+| RL | q_no_td_modify_g09 | beta | 8 | M_E_pageview_ewma | 0.004011 | 0.000435 |
+| RL | q_no_td_modify_g09 | beta | 9 | M_E_fitbit_wear_ewma | -0.210532 | 0.007868 |
+| RL | q_no_td_modify_g09 | beta | 10 | M_E_survey_complete_ewma | -0.058451 | 0.007966 |
+| RL | q_no_td_modify_g09 | beta | 11 | yesterday_step_count | -0.001844 | 0.003350 |
+| RL | q_no_td_modify_g09 | beta | 12 | prior2hour_step_count | -0.015708 | 0.001207 |
+| RL | q_no_td_modify_g09 | beta | 13 | active_status_fraction_7days | 0.041455 | 0.052210 |
+| RL | q_no_td_modify_g09 | beta | 14 | recent_burden | -0.016466 | 0.005391 |
+| RL | q_no_td_modify_g09 | beta | 15 | walk_interaction_7d | -0.083348 | 0.046839 |
+| RL | q_no_td_modify_g09 | beta | 16 | A | 0.002667 | 0.004088 |
+| RL | q_no_td_modify_g09 | beta | 17 | A*E_w | 0.002832 | 0.003146 |
+| RL | q_no_td_modify_g09 | beta | 18 | A*b_hat | 0.000121 | 0.004670 |
 | RL | q_no_td_modify_g09 | beta | 19 | A*b_tilde | 0.000000 | 1.000000 |
-| RL | q_no_td_modify_g09 | beta | 20 | A*yesterday_step_count | -0.006732 | 0.005107 |
-| RL | q_no_td_modify_g09 | beta | 21 | A*prior2hour_step_count | 0.010436 | 0.001997 |
-| RL | q_no_td_modify_g09 | beta | 22 | A*active_status_fraction_7days | -0.020881 | 0.003762 |
-| RL | q_no_td_modify_g09 | beta | 23 | A*recent_burden | -0.004927 | 0.001830 |
-| RL | q_no_td_modify_g09 | beta | 24 | A*walk_interaction_7d | -0.000254 | 0.004399 |
-| RL | q_no_td_modify_g099 | beta | 0 | intercept | 0.114106 | 0.174228 |
-| RL | q_no_td_modify_g099 | beta | 1 | weekday_vs_weekend | -0.042474 | 0.318175 |
-| RL | q_no_td_modify_g099 | beta | 2 | slot_pm | 0.002642 | 0.010170 |
-| RL | q_no_td_modify_g099 | beta | 3 | E_w | 0.046442 | 0.075911 |
-| RL | q_no_td_modify_g099 | beta | 4 | b_hat | 1.669690 | 0.069990 |
+| RL | q_no_td_modify_g09 | beta | 20 | A*yesterday_step_count | -0.006318 | 0.005818 |
+| RL | q_no_td_modify_g09 | beta | 21 | A*prior2hour_step_count | 0.009695 | 0.002041 |
+| RL | q_no_td_modify_g09 | beta | 22 | A*active_status_fraction_7days | -0.022035 | 0.004096 |
+| RL | q_no_td_modify_g09 | beta | 23 | A*recent_burden | -0.004925 | 0.002056 |
+| RL | q_no_td_modify_g09 | beta | 24 | A*walk_interaction_7d | 0.000545 | 0.004489 |
+| RL | q_no_td_modify_g09 | beta | 25 | A*weekday_vs_weekend | 0.053499 | 0.007139 |
+| RL | q_no_td_modify_g09 | beta | 26 | A*slot_pm | 0.013438 | 0.005035 |
+| RL | q_no_td_modify_g099 | beta | 0 | intercept | 0.142570 | 0.172997 |
+| RL | q_no_td_modify_g099 | beta | 1 | weekday_vs_weekend | -0.061689 | 0.309976 |
+| RL | q_no_td_modify_g099 | beta | 2 | slot_pm | -0.005581 | 0.010556 |
+| RL | q_no_td_modify_g099 | beta | 3 | E_w | 0.043923 | 0.076374 |
+| RL | q_no_td_modify_g099 | beta | 4 | b_hat | 1.665509 | 0.068730 |
 | RL | q_no_td_modify_g099 | beta | 5 | b_tilde | 0.000000 | 1.000000 |
-| RL | q_no_td_modify_g099 | beta | 6 | M_Y_anticipated_affect_ewma | 0.541223 | 0.027725 |
-| RL | q_no_td_modify_g099 | beta | 7 | M_Y_fourSC_ewma | -0.037330 | 0.012771 |
-| RL | q_no_td_modify_g099 | beta | 8 | M_E_pageview_ewma | 0.006258 | 0.000584 |
-| RL | q_no_td_modify_g099 | beta | 9 | M_E_fitbit_wear_ewma | -0.236628 | 0.009947 |
-| RL | q_no_td_modify_g099 | beta | 10 | M_E_survey_complete_ewma | -0.067896 | 0.011445 |
-| RL | q_no_td_modify_g099 | beta | 11 | yesterday_step_count | -0.000318 | 0.003240 |
-| RL | q_no_td_modify_g099 | beta | 12 | prior2hour_step_count | -0.018615 | 0.001336 |
-| RL | q_no_td_modify_g099 | beta | 13 | active_status_fraction_7days | -0.012662 | 0.060751 |
-| RL | q_no_td_modify_g099 | beta | 14 | recent_burden | -0.019579 | 0.005493 |
-| RL | q_no_td_modify_g099 | beta | 15 | walk_interaction_7d | -0.066464 | 0.042498 |
-| RL | q_no_td_modify_g099 | beta | 16 | A | 0.018387 | 0.006224 |
-| RL | q_no_td_modify_g099 | beta | 17 | A*E_w | 0.003203 | 0.004048 |
-| RL | q_no_td_modify_g099 | beta | 18 | A*b_hat | -0.000751 | 0.006398 |
+| RL | q_no_td_modify_g099 | beta | 6 | M_Y_anticipated_affect_ewma | 0.538293 | 0.030058 |
+| RL | q_no_td_modify_g099 | beta | 7 | M_Y_fourSC_ewma | -0.037351 | 0.012877 |
+| RL | q_no_td_modify_g099 | beta | 8 | M_E_pageview_ewma | 0.004953 | 0.000535 |
+| RL | q_no_td_modify_g099 | beta | 9 | M_E_fitbit_wear_ewma | -0.234054 | 0.009951 |
+| RL | q_no_td_modify_g099 | beta | 10 | M_E_survey_complete_ewma | -0.063766 | 0.009850 |
+| RL | q_no_td_modify_g099 | beta | 11 | yesterday_step_count | -0.000454 | 0.004075 |
+| RL | q_no_td_modify_g099 | beta | 12 | prior2hour_step_count | -0.017609 | 0.001386 |
+| RL | q_no_td_modify_g099 | beta | 13 | active_status_fraction_7days | 0.053356 | 0.063837 |
+| RL | q_no_td_modify_g099 | beta | 14 | recent_burden | -0.018053 | 0.006858 |
+| RL | q_no_td_modify_g099 | beta | 15 | walk_interaction_7d | -0.087896 | 0.054523 |
+| RL | q_no_td_modify_g099 | beta | 16 | A | 0.002877 | 0.005504 |
+| RL | q_no_td_modify_g099 | beta | 17 | A*E_w | 0.003057 | 0.004185 |
+| RL | q_no_td_modify_g099 | beta | 18 | A*b_hat | 2.566757e-05 | 0.005718 |
 | RL | q_no_td_modify_g099 | beta | 19 | A*b_tilde | 0.000000 | 1.000000 |
-| RL | q_no_td_modify_g099 | beta | 20 | A*yesterday_step_count | -0.007701 | 0.005926 |
-| RL | q_no_td_modify_g099 | beta | 21 | A*prior2hour_step_count | 0.011610 | 0.002359 |
-| RL | q_no_td_modify_g099 | beta | 22 | A*active_status_fraction_7days | -0.023695 | 0.005047 |
-| RL | q_no_td_modify_g099 | beta | 23 | A*recent_burden | -0.005574 | 0.002243 |
-| RL | q_no_td_modify_g099 | beta | 24 | A*walk_interaction_7d | 0.001262 | 0.005324 |
-| RL | q_redistribution_v2 | beta | 0 | intercept | 0.256570 | 0.260485 |
-| RL | q_redistribution_v2 | beta | 1 | weekday_vs_weekend | -0.292110 | 0.096724 |
-| RL | q_redistribution_v2 | beta | 2 | slot_pm | -0.020615 | 0.002720 |
-| RL | q_redistribution_v2 | beta | 3 | E_w | 0.839653 | 0.652146 |
-| RL | q_redistribution_v2 | beta | 4 | b_hat | 1.068679 | 0.081300 |
+| RL | q_no_td_modify_g099 | beta | 20 | A*yesterday_step_count | -0.007239 | 0.006611 |
+| RL | q_no_td_modify_g099 | beta | 21 | A*prior2hour_step_count | 0.010833 | 0.002359 |
+| RL | q_no_td_modify_g099 | beta | 22 | A*active_status_fraction_7days | -0.025016 | 0.005621 |
+| RL | q_no_td_modify_g099 | beta | 23 | A*recent_burden | -0.005566 | 0.002475 |
+| RL | q_no_td_modify_g099 | beta | 24 | A*walk_interaction_7d | 0.002200 | 0.005356 |
+| RL | q_no_td_modify_g099 | beta | 25 | A*weekday_vs_weekend | 0.056981 | 0.007991 |
+| RL | q_no_td_modify_g099 | beta | 26 | A*slot_pm | 0.014820 | 0.006780 |
+| RL | q_redistribution_v2 | beta | 0 | intercept | 0.393847 | 0.274909 |
+| RL | q_redistribution_v2 | beta | 1 | weekday_vs_weekend | -0.293985 | 0.099593 |
+| RL | q_redistribution_v2 | beta | 2 | slot_pm | -0.094329 | 0.012712 |
+| RL | q_redistribution_v2 | beta | 3 | E_w | 0.837382 | 0.703841 |
+| RL | q_redistribution_v2 | beta | 4 | b_hat | 1.119051 | 0.087346 |
 | RL | q_redistribution_v2 | beta | 5 | b_tilde | 0.000000 | 1.000000 |
-| RL | q_redistribution_v2 | beta | 6 | M_Y_anticipated_affect_ewma | 0.672974 | 0.035289 |
-| RL | q_redistribution_v2 | beta | 7 | M_Y_fourSC_ewma | -0.086796 | 0.028144 |
-| RL | q_redistribution_v2 | beta | 8 | M_E_pageview_ewma | -0.010486 | 0.007184 |
-| RL | q_redistribution_v2 | beta | 9 | M_E_fitbit_wear_ewma | -0.343932 | 0.022946 |
-| RL | q_redistribution_v2 | beta | 10 | M_E_survey_complete_ewma | -0.016968 | 0.022509 |
-| RL | q_redistribution_v2 | beta | 11 | yesterday_step_count | 0.066397 | 0.008704 |
-| RL | q_redistribution_v2 | beta | 12 | prior2hour_step_count | 0.045012 | 0.003875 |
-| RL | q_redistribution_v2 | beta | 13 | active_status_fraction_7days | 0.745450 | 0.198642 |
-| RL | q_redistribution_v2 | beta | 14 | recent_burden | 0.145796 | 0.014897 |
-| RL | q_redistribution_v2 | beta | 15 | walk_interaction_7d | 1.165145 | 0.125143 |
-| RL | q_redistribution_v2 | beta | 16 | A | 0.067200 | 0.012291 |
-| RL | q_redistribution_v2 | beta | 17 | A*E_w | 0.004463 | 0.001672 |
-| RL | q_redistribution_v2 | beta | 18 | A*b_hat | -0.025432 | 0.003383 |
+| RL | q_redistribution_v2 | beta | 6 | M_Y_anticipated_affect_ewma | 0.703490 | 0.037229 |
+| RL | q_redistribution_v2 | beta | 7 | M_Y_fourSC_ewma | -0.073244 | 0.034858 |
+| RL | q_redistribution_v2 | beta | 8 | M_E_pageview_ewma | -0.009390 | 0.007606 |
+| RL | q_redistribution_v2 | beta | 9 | M_E_fitbit_wear_ewma | -0.355365 | 0.021440 |
+| RL | q_redistribution_v2 | beta | 10 | M_E_survey_complete_ewma | -0.024785 | 0.025393 |
+| RL | q_redistribution_v2 | beta | 11 | yesterday_step_count | 0.065013 | 0.010131 |
+| RL | q_redistribution_v2 | beta | 12 | prior2hour_step_count | 0.035191 | 0.004009 |
+| RL | q_redistribution_v2 | beta | 13 | active_status_fraction_7days | 0.698258 | 0.205946 |
+| RL | q_redistribution_v2 | beta | 14 | recent_burden | 0.132252 | 0.015293 |
+| RL | q_redistribution_v2 | beta | 15 | walk_interaction_7d | 1.176970 | 0.116917 |
+| RL | q_redistribution_v2 | beta | 16 | A | 0.014239 | 0.010261 |
+| RL | q_redistribution_v2 | beta | 17 | A*E_w | 0.005523 | 0.001818 |
+| RL | q_redistribution_v2 | beta | 18 | A*b_hat | -0.025965 | 0.003480 |
 | RL | q_redistribution_v2 | beta | 19 | A*b_tilde | 0.000000 | 1.000000 |
-| RL | q_redistribution_v2 | beta | 20 | A*yesterday_step_count | 0.032800 | 0.001475 |
-| RL | q_redistribution_v2 | beta | 21 | A*prior2hour_step_count | 0.000392 | 0.003560 |
-| RL | q_redistribution_v2 | beta | 22 | A*active_status_fraction_7days | 0.012607 | 0.009520 |
-| RL | q_redistribution_v2 | beta | 23 | A*recent_burden | 0.026321 | 0.001323 |
-| RL | q_redistribution_v2 | beta | 24 | A*walk_interaction_7d | -0.024198 | 0.010795 |
-| RL | q_redistribution_v4 | beta | 0 | intercept | 0.053079 | 0.428534 |
-| RL | q_redistribution_v4 | beta | 1 | weekday_vs_weekend | -0.129647 | 0.071390 |
-| RL | q_redistribution_v4 | beta | 2 | slot_pm | -0.007665 | 0.001617 |
-| RL | q_redistribution_v4 | beta | 3 | E_w | -0.258095 | 0.143078 |
-| RL | q_redistribution_v4 | beta | 4 | b_hat | 1.696138 | 0.106347 |
+| RL | q_redistribution_v2 | beta | 20 | A*yesterday_step_count | 0.032249 | 0.001640 |
+| RL | q_redistribution_v2 | beta | 21 | A*prior2hour_step_count | 0.010646 | 0.003268 |
+| RL | q_redistribution_v2 | beta | 22 | A*active_status_fraction_7days | 0.006078 | 0.009083 |
+| RL | q_redistribution_v2 | beta | 23 | A*recent_burden | 0.028866 | 0.001378 |
+| RL | q_redistribution_v2 | beta | 24 | A*walk_interaction_7d | -0.031602 | 0.012141 |
+| RL | q_redistribution_v2 | beta | 25 | A*weekday_vs_weekend | -0.020054 | 0.005258 |
+| RL | q_redistribution_v2 | beta | 26 | A*slot_pm | 0.110712 | 0.010328 |
+| RL | q_redistribution_v4 | beta | 0 | intercept | 0.225510 | 0.537248 |
+| RL | q_redistribution_v4 | beta | 1 | weekday_vs_weekend | -0.113020 | 0.047482 |
+| RL | q_redistribution_v4 | beta | 2 | slot_pm | -0.025272 | 0.014591 |
+| RL | q_redistribution_v4 | beta | 3 | E_w | -0.274086 | 0.156554 |
+| RL | q_redistribution_v4 | beta | 4 | b_hat | 1.695745 | 0.209762 |
 | RL | q_redistribution_v4 | beta | 5 | b_tilde | 0.000000 | 1.000000 |
-| RL | q_redistribution_v4 | beta | 6 | M_Y_anticipated_affect_ewma | 0.231019 | 0.042511 |
-| RL | q_redistribution_v4 | beta | 7 | M_Y_fourSC_ewma | -0.164619 | 0.112482 |
-| RL | q_redistribution_v4 | beta | 8 | M_E_pageview_ewma | -0.023687 | 0.023649 |
-| RL | q_redistribution_v4 | beta | 9 | M_E_fitbit_wear_ewma | -0.107480 | 0.021299 |
-| RL | q_redistribution_v4 | beta | 10 | M_E_survey_complete_ewma | 0.007873 | 0.074110 |
-| RL | q_redistribution_v4 | beta | 11 | yesterday_step_count | -0.049132 | 0.047864 |
-| RL | q_redistribution_v4 | beta | 12 | prior2hour_step_count | 0.058698 | 0.010509 |
-| RL | q_redistribution_v4 | beta | 13 | active_status_fraction_7days | 0.423882 | 0.240154 |
-| RL | q_redistribution_v4 | beta | 14 | recent_burden | 0.011678 | 0.081284 |
-| RL | q_redistribution_v4 | beta | 15 | walk_interaction_7d | 0.363957 | 0.335265 |
-| RL | q_redistribution_v4 | beta | 16 | A | 0.077825 | 0.026723 |
-| RL | q_redistribution_v4 | beta | 17 | A*E_w | -0.004866 | 0.004383 |
-| RL | q_redistribution_v4 | beta | 18 | A*b_hat | 0.000465 | 0.006581 |
+| RL | q_redistribution_v4 | beta | 6 | M_Y_anticipated_affect_ewma | 0.298098 | 0.048099 |
+| RL | q_redistribution_v4 | beta | 7 | M_Y_fourSC_ewma | 0.015017 | 0.065484 |
+| RL | q_redistribution_v4 | beta | 8 | M_E_pageview_ewma | -0.001824 | 0.020659 |
+| RL | q_redistribution_v4 | beta | 9 | M_E_fitbit_wear_ewma | -0.136178 | 0.018604 |
+| RL | q_redistribution_v4 | beta | 10 | M_E_survey_complete_ewma | 0.015157 | 0.036720 |
+| RL | q_redistribution_v4 | beta | 11 | yesterday_step_count | -0.051534 | 0.042463 |
+| RL | q_redistribution_v4 | beta | 12 | prior2hour_step_count | 0.011497 | 0.007922 |
+| RL | q_redistribution_v4 | beta | 13 | active_status_fraction_7days | 0.381110 | 0.322484 |
+| RL | q_redistribution_v4 | beta | 14 | recent_burden | 0.013454 | 0.092297 |
+| RL | q_redistribution_v4 | beta | 15 | walk_interaction_7d | 0.305166 | 0.476499 |
+| RL | q_redistribution_v4 | beta | 16 | A | 0.074267 | 0.015245 |
+| RL | q_redistribution_v4 | beta | 17 | A*E_w | -0.004824 | 0.005973 |
+| RL | q_redistribution_v4 | beta | 18 | A*b_hat | 0.004548 | 0.024421 |
 | RL | q_redistribution_v4 | beta | 19 | A*b_tilde | 0.000000 | 1.000000 |
-| RL | q_redistribution_v4 | beta | 20 | A*yesterday_step_count | 0.048196 | 0.004495 |
-| RL | q_redistribution_v4 | beta | 21 | A*prior2hour_step_count | -0.013233 | 0.014498 |
-| RL | q_redistribution_v4 | beta | 22 | A*active_status_fraction_7days | -0.076556 | 0.014583 |
-| RL | q_redistribution_v4 | beta | 23 | A*recent_burden | -0.005833 | 0.002706 |
-| RL | q_redistribution_v4 | beta | 24 | A*walk_interaction_7d | -0.077613 | 0.043610 |
-| RL | q_residual_g09 | beta | 0 | intercept | 0.086223 | 0.033186 |
-| RL | q_residual_g09 | beta | 1 | weekday_vs_weekend | 0.003851 | 0.005556 |
-| RL | q_residual_g09 | beta | 2 | slot_pm | 0.002651 | 0.000265 |
-| RL | q_residual_g09 | beta | 3 | E_w | -0.002945 | 0.017722 |
-| RL | q_residual_g09 | beta | 4 | b_hat | -0.074758 | 0.116843 |
+| RL | q_redistribution_v4 | beta | 20 | A*yesterday_step_count | 0.041675 | 0.005573 |
+| RL | q_redistribution_v4 | beta | 21 | A*prior2hour_step_count | 0.021925 | 0.007248 |
+| RL | q_redistribution_v4 | beta | 22 | A*active_status_fraction_7days | -0.104843 | 0.015332 |
+| RL | q_redistribution_v4 | beta | 23 | A*recent_burden | -0.004650 | 0.002337 |
+| RL | q_redistribution_v4 | beta | 24 | A*walk_interaction_7d | -0.096529 | 0.044130 |
+| RL | q_redistribution_v4 | beta | 25 | A*weekday_vs_weekend | 0.064317 | 0.010790 |
+| RL | q_redistribution_v4 | beta | 26 | A*slot_pm | 0.038850 | 0.030459 |
+| RL | q_residual_g09 | beta | 0 | intercept | 0.143200 | 0.034386 |
+| RL | q_residual_g09 | beta | 1 | weekday_vs_weekend | -0.024504 | 0.003929 |
+| RL | q_residual_g09 | beta | 2 | slot_pm | 0.006656 | 0.000355 |
+| RL | q_residual_g09 | beta | 3 | E_w | -0.002540 | 0.017946 |
+| RL | q_residual_g09 | beta | 4 | b_hat | -0.081496 | 0.088876 |
 | RL | q_residual_g09 | beta | 5 | b_tilde | 0.000000 | 1.000000 |
-| RL | q_residual_g09 | beta | 6 | M_Y_anticipated_affect_ewma | 0.079988 | 0.011092 |
-| RL | q_residual_g09 | beta | 7 | M_Y_fourSC_ewma | -0.013786 | 0.003646 |
-| RL | q_residual_g09 | beta | 8 | M_E_pageview_ewma | 0.001123 | 0.000136 |
-| RL | q_residual_g09 | beta | 9 | M_E_fitbit_wear_ewma | -0.014726 | 0.006390 |
-| RL | q_residual_g09 | beta | 10 | M_E_survey_complete_ewma | -0.041591 | 0.003622 |
-| RL | q_residual_g09 | beta | 11 | yesterday_step_count | -0.016750 | 0.000463 |
-| RL | q_residual_g09 | beta | 12 | prior2hour_step_count | -0.005547 | 0.000233 |
-| RL | q_residual_g09 | beta | 13 | active_status_fraction_7days | 0.053659 | 0.014030 |
-| RL | q_residual_g09 | beta | 14 | recent_burden | -0.038352 | 0.006910 |
-| RL | q_residual_g09 | beta | 15 | walk_interaction_7d | 0.004443 | 0.020104 |
-| RL | q_residual_g09 | beta | 16 | A | -0.002424 | 0.003281 |
-| RL | q_residual_g09 | beta | 17 | A*E_w | 0.001440 | 0.000595 |
-| RL | q_residual_g09 | beta | 18 | A*b_hat | -0.000565 | 0.003145 |
+| RL | q_residual_g09 | beta | 6 | M_Y_anticipated_affect_ewma | 0.077410 | 0.009838 |
+| RL | q_residual_g09 | beta | 7 | M_Y_fourSC_ewma | -0.013060 | 0.003326 |
+| RL | q_residual_g09 | beta | 8 | M_E_pageview_ewma | 0.000928 | 0.000140 |
+| RL | q_residual_g09 | beta | 9 | M_E_fitbit_wear_ewma | -0.012875 | 0.009253 |
+| RL | q_residual_g09 | beta | 10 | M_E_survey_complete_ewma | -0.039118 | 0.003913 |
+| RL | q_residual_g09 | beta | 11 | yesterday_step_count | -0.017469 | 0.000365 |
+| RL | q_residual_g09 | beta | 12 | prior2hour_step_count | -0.005104 | 0.000245 |
+| RL | q_residual_g09 | beta | 13 | active_status_fraction_7days | 0.069813 | 0.016219 |
+| RL | q_residual_g09 | beta | 14 | recent_burden | -0.038079 | 0.007193 |
+| RL | q_residual_g09 | beta | 15 | walk_interaction_7d | 0.028455 | 0.017337 |
+| RL | q_residual_g09 | beta | 16 | A | -0.003463 | 0.002078 |
+| RL | q_residual_g09 | beta | 17 | A*E_w | 0.001418 | 0.000438 |
+| RL | q_residual_g09 | beta | 18 | A*b_hat | -0.000146 | 0.002736 |
 | RL | q_residual_g09 | beta | 19 | A*b_tilde | 0.000000 | 1.000000 |
-| RL | q_residual_g09 | beta | 20 | A*yesterday_step_count | 0.002945 | 0.000581 |
-| RL | q_residual_g09 | beta | 21 | A*prior2hour_step_count | 0.001794 | 0.000371 |
-| RL | q_residual_g09 | beta | 22 | A*active_status_fraction_7days | 0.001345 | 0.002455 |
-| RL | q_residual_g09 | beta | 23 | A*recent_burden | -0.004642 | 0.000536 |
-| RL | q_residual_g09 | beta | 24 | A*walk_interaction_7d | -0.009297 | 0.003731 |
-| RL | q_adv_m_g09 | beta | 0 | intercept | 0.141432 | 0.147616 |
-| RL | q_adv_m_g09 | beta | 1 | weekday_vs_weekend | -0.047913 | 0.245919 |
-| RL | q_adv_m_g09 | beta | 2 | slot_pm | 0.001038 | 0.007739 |
-| RL | q_adv_m_g09 | beta | 3 | E_w | 0.037671 | 0.073417 |
-| RL | q_adv_m_g09 | beta | 4 | b_hat | 1.564204 | 0.068274 |
+| RL | q_residual_g09 | beta | 20 | A*yesterday_step_count | 0.003477 | 0.000543 |
+| RL | q_residual_g09 | beta | 21 | A*prior2hour_step_count | 0.000870 | 0.000311 |
+| RL | q_residual_g09 | beta | 22 | A*active_status_fraction_7days | 0.000975 | 0.002200 |
+| RL | q_residual_g09 | beta | 23 | A*recent_burden | -0.004584 | 0.000415 |
+| RL | q_residual_g09 | beta | 24 | A*walk_interaction_7d | -0.009756 | 0.003933 |
+| RL | q_residual_g09 | beta | 25 | A*weekday_vs_weekend | 0.041147 | 0.011890 |
+| RL | q_residual_g09 | beta | 26 | A*slot_pm | -0.010617 | 0.002479 |
+| RL | q_adv_m_g09 | beta | 0 | intercept | 0.161478 | 0.147886 |
+| RL | q_adv_m_g09 | beta | 1 | weekday_vs_weekend | -0.069805 | 0.254945 |
+| RL | q_adv_m_g09 | beta | 2 | slot_pm | -0.006616 | 0.007829 |
+| RL | q_adv_m_g09 | beta | 3 | E_w | 0.037028 | 0.071764 |
+| RL | q_adv_m_g09 | beta | 4 | b_hat | 1.560549 | 0.068137 |
 | RL | q_adv_m_g09 | beta | 5 | b_tilde | 0.000000 | 1.000000 |
-| RL | q_adv_m_g09 | beta | 6 | M_Y_anticipated_affect_ewma | 0.474969 | 0.017800 |
-| RL | q_adv_m_g09 | beta | 7 | M_Y_fourSC_ewma | -0.032645 | 0.012939 |
-| RL | q_adv_m_g09 | beta | 8 | M_E_pageview_ewma | 0.006149 | 0.000918 |
-| RL | q_adv_m_g09 | beta | 9 | M_E_fitbit_wear_ewma | -0.215130 | 0.009712 |
-| RL | q_adv_m_g09 | beta | 10 | M_E_survey_complete_ewma | -0.046662 | 0.007496 |
-| RL | q_adv_m_g09 | beta | 11 | yesterday_step_count | -0.000270 | 0.002599 |
-| RL | q_adv_m_g09 | beta | 12 | prior2hour_step_count | -0.015896 | 0.000727 |
-| RL | q_adv_m_g09 | beta | 13 | active_status_fraction_7days | 0.022077 | 0.049175 |
-| RL | q_adv_m_g09 | beta | 14 | recent_burden | -0.015672 | 0.005577 |
-| RL | q_adv_m_g09 | beta | 15 | walk_interaction_7d | -0.083290 | 0.045583 |
-| RL | q_adv_m_g09 | beta | 16 | A | 0.010379 | 0.004656 |
-| RL | q_adv_m_g09 | beta | 17 | A*E_w | 0.004200 | 0.004314 |
-| RL | q_adv_m_g09 | beta | 18 | A*b_hat | -0.010706 | 0.004358 |
+| RL | q_adv_m_g09 | beta | 6 | M_Y_anticipated_affect_ewma | 0.471878 | 0.020238 |
+| RL | q_adv_m_g09 | beta | 7 | M_Y_fourSC_ewma | -0.035731 | 0.013773 |
+| RL | q_adv_m_g09 | beta | 8 | M_E_pageview_ewma | 0.004950 | 0.000956 |
+| RL | q_adv_m_g09 | beta | 9 | M_E_fitbit_wear_ewma | -0.209975 | 0.010651 |
+| RL | q_adv_m_g09 | beta | 10 | M_E_survey_complete_ewma | -0.039774 | 0.008506 |
+| RL | q_adv_m_g09 | beta | 11 | yesterday_step_count | -0.000542 | 0.002837 |
+| RL | q_adv_m_g09 | beta | 12 | prior2hour_step_count | -0.015368 | 0.000734 |
+| RL | q_adv_m_g09 | beta | 13 | active_status_fraction_7days | 0.068560 | 0.049885 |
+| RL | q_adv_m_g09 | beta | 14 | recent_burden | -0.015774 | 0.005330 |
+| RL | q_adv_m_g09 | beta | 15 | walk_interaction_7d | -0.092735 | 0.059576 |
+| RL | q_adv_m_g09 | beta | 16 | A | 0.006199 | 0.004165 |
+| RL | q_adv_m_g09 | beta | 17 | A*E_w | 0.003991 | 0.004247 |
+| RL | q_adv_m_g09 | beta | 18 | A*b_hat | -0.007169 | 0.003778 |
 | RL | q_adv_m_g09 | beta | 19 | A*b_tilde | 0.000000 | 1.000000 |
-| RL | q_adv_m_g09 | beta | 20 | A*yesterday_step_count | -0.006467 | 0.004421 |
-| RL | q_adv_m_g09 | beta | 21 | A*prior2hour_step_count | 0.009972 | 0.001332 |
-| RL | q_adv_m_g09 | beta | 22 | A*active_status_fraction_7days | -0.022009 | 0.003635 |
-| RL | q_adv_m_g09 | beta | 23 | A*recent_burden | -0.004645 | 0.001697 |
-| RL | q_adv_m_g09 | beta | 24 | A*walk_interaction_7d | 0.021339 | 0.005266 |
-| RL | q_adv_m_g09 | beta | 25 | A*M_Y_anticipated_affect_ewma | 0.048905 | 0.004105 |
-| RL | q_adv_m_g09 | beta | 26 | A*M_Y_fourSC_ewma | 0.002289 | 0.003592 |
-| RL | q_adv_m_g09 | beta | 27 | A*M_E_pageview_ewma | -0.002330 | 0.001095 |
-| RL | q_adv_m_g09 | beta | 28 | A*M_E_fitbit_wear_ewma | -0.018684 | 0.002189 |
-| RL | q_adv_m_g09 | beta | 29 | A*M_E_survey_complete_ewma | -0.038874 | 0.004956 |
+| RL | q_adv_m_g09 | beta | 20 | A*yesterday_step_count | -0.005667 | 0.005836 |
+| RL | q_adv_m_g09 | beta | 21 | A*prior2hour_step_count | 0.009663 | 0.001038 |
+| RL | q_adv_m_g09 | beta | 22 | A*active_status_fraction_7days | -0.023573 | 0.004286 |
+| RL | q_adv_m_g09 | beta | 23 | A*recent_burden | -0.004755 | 0.001851 |
+| RL | q_adv_m_g09 | beta | 24 | A*walk_interaction_7d | 0.020064 | 0.006511 |
+| RL | q_adv_m_g09 | beta | 25 | A*weekday_vs_weekend | 0.054744 | 0.005309 |
+| RL | q_adv_m_g09 | beta | 26 | A*slot_pm | 0.013297 | 0.005865 |
+| RL | q_adv_m_g09 | beta | 27 | A*M_Y_anticipated_affect_ewma | 0.036784 | 0.005475 |
+| RL | q_adv_m_g09 | beta | 28 | A*M_Y_fourSC_ewma | 0.002040 | 0.003886 |
+| RL | q_adv_m_g09 | beta | 29 | A*M_E_pageview_ewma | -0.000762 | 0.001495 |
+| RL | q_adv_m_g09 | beta | 30 | A*M_E_fitbit_wear_ewma | -0.021481 | 0.002335 |
+| RL | q_adv_m_g09 | beta | 31 | A*M_E_survey_complete_ewma | -0.037157 | 0.004437 |
 
 ## Joint Modified-TD Priors
 
 | prior_family | model | block | index | feature | prior_mean | prior_variance |
 | --- | --- | --- | --- | --- | --- | --- |
-| Joint Modified TD | q_td_modify_joint | eta | 0 | eta_intercept | 0.578288 | 0.164050 |
-| Joint Modified TD | q_td_modify_joint | eta | 1 | eta_E_w | -0.005213 | 0.068416 |
-| Joint Modified TD | q_td_modify_joint | eta | 2 | eta_b_hat | -0.528452 | 0.074128 |
+| Joint Modified TD | q_td_modify_joint | eta | 0 | eta_intercept | 0.625875 | 0.172404 |
+| Joint Modified TD | q_td_modify_joint | eta | 1 | eta_E_w | -0.008020 | 0.076765 |
+| Joint Modified TD | q_td_modify_joint | eta | 2 | eta_b_hat | -0.502976 | 0.077097 |
 | Joint Modified TD | q_td_modify_joint | eta | 3 | eta_b_tilde | 0.000000 | 1.000001 |
-| Joint Modified TD | q_td_modify_joint | beta | 4 | beta_intercept | 0.557278 | 0.111962 |
-| Joint Modified TD | q_td_modify_joint | beta | 5 | beta_weekday_vs_weekend | -0.080675 | 0.208742 |
-| Joint Modified TD | q_td_modify_joint | beta | 6 | beta_slot_pm | -0.005826 | 0.003851 |
-| Joint Modified TD | q_td_modify_joint | beta | 7 | beta_E_w | 0.000951 | 0.052789 |
-| Joint Modified TD | q_td_modify_joint | beta | 8 | beta_b_hat | -0.069668 | 0.035087 |
+| Joint Modified TD | q_td_modify_joint | beta | 4 | beta_intercept | 0.572090 | 0.117165 |
+| Joint Modified TD | q_td_modify_joint | beta | 5 | beta_weekday_vs_weekend | -0.091517 | 0.211256 |
+| Joint Modified TD | q_td_modify_joint | beta | 6 | beta_slot_pm | 0.094518 | 0.004545 |
+| Joint Modified TD | q_td_modify_joint | beta | 7 | beta_E_w | -0.001418 | 0.058372 |
+| Joint Modified TD | q_td_modify_joint | beta | 8 | beta_b_hat | -0.040826 | 0.041384 |
 | Joint Modified TD | q_td_modify_joint | beta | 9 | beta_b_tilde | 0.000000 | 1.000001 |
-| Joint Modified TD | q_td_modify_joint | beta | 10 | beta_M_Y_anticipated_affect_ewma | 0.721069 | 0.020361 |
-| Joint Modified TD | q_td_modify_joint | beta | 11 | beta_M_Y_fourSC_ewma | -0.007655 | 0.009986 |
-| Joint Modified TD | q_td_modify_joint | beta | 12 | beta_M_E_pageview_ewma | 0.006913 | 0.001060 |
-| Joint Modified TD | q_td_modify_joint | beta | 13 | beta_M_E_fitbit_wear_ewma | -0.338350 | 0.005558 |
-| Joint Modified TD | q_td_modify_joint | beta | 14 | beta_M_E_survey_complete_ewma | -0.040540 | 0.008286 |
-| Joint Modified TD | q_td_modify_joint | beta | 15 | beta_yesterday_step_count | 0.001234 | 0.001461 |
-| Joint Modified TD | q_td_modify_joint | beta | 16 | beta_prior2hour_step_count | -0.006964 | 0.000830 |
-| Joint Modified TD | q_td_modify_joint | beta | 17 | beta_active_status_fraction_7days | -0.015056 | 0.028000 |
-| Joint Modified TD | q_td_modify_joint | beta | 18 | beta_recent_burden | -0.009281 | 0.001560 |
-| Joint Modified TD | q_td_modify_joint | beta | 19 | beta_walk_interaction_7d | 0.024365 | 0.012118 |
-| Joint Modified TD | q_td_modify_joint | beta | 20 | beta_A | 0.005332 | 0.003248 |
-| Joint Modified TD | q_td_modify_joint | beta | 21 | beta_A*E_w | -0.000515 | 0.002352 |
-| Joint Modified TD | q_td_modify_joint | beta | 22 | beta_A*b_hat | -0.068869 | 0.003193 |
+| Joint Modified TD | q_td_modify_joint | beta | 10 | beta_M_Y_anticipated_affect_ewma | 0.711917 | 0.023900 |
+| Joint Modified TD | q_td_modify_joint | beta | 11 | beta_M_Y_fourSC_ewma | -0.007089 | 0.010320 |
+| Joint Modified TD | q_td_modify_joint | beta | 12 | beta_M_E_pageview_ewma | 0.008955 | 0.000962 |
+| Joint Modified TD | q_td_modify_joint | beta | 13 | beta_M_E_fitbit_wear_ewma | -0.342879 | 0.006177 |
+| Joint Modified TD | q_td_modify_joint | beta | 14 | beta_M_E_survey_complete_ewma | -0.043786 | 0.007098 |
+| Joint Modified TD | q_td_modify_joint | beta | 15 | beta_yesterday_step_count | 0.005910 | 0.002107 |
+| Joint Modified TD | q_td_modify_joint | beta | 16 | beta_prior2hour_step_count | -0.007861 | 0.000795 |
+| Joint Modified TD | q_td_modify_joint | beta | 17 | beta_active_status_fraction_7days | -0.016537 | 0.029912 |
+| Joint Modified TD | q_td_modify_joint | beta | 18 | beta_recent_burden | -0.004574 | 0.001894 |
+| Joint Modified TD | q_td_modify_joint | beta | 19 | beta_walk_interaction_7d | 0.004353 | 0.010320 |
+| Joint Modified TD | q_td_modify_joint | beta | 20 | beta_A | 0.010737 | 0.002805 |
+| Joint Modified TD | q_td_modify_joint | beta | 21 | beta_A*E_w | -0.000827 | 0.002089 |
+| Joint Modified TD | q_td_modify_joint | beta | 22 | beta_A*b_hat | -0.070734 | 0.003057 |
 | Joint Modified TD | q_td_modify_joint | beta | 23 | beta_A*b_tilde | 0.000000 | 1.000001 |
-| Joint Modified TD | q_td_modify_joint | beta | 24 | beta_A*yesterday_step_count | -0.000448 | 0.003477 |
-| Joint Modified TD | q_td_modify_joint | beta | 25 | beta_A*prior2hour_step_count | -0.002119 | 0.001401 |
-| Joint Modified TD | q_td_modify_joint | beta | 26 | beta_A*active_status_fraction_7days | -0.003036 | 0.002329 |
-| Joint Modified TD | q_td_modify_joint | beta | 27 | beta_A*recent_burden | 0.000770 | 0.001896 |
-| Joint Modified TD | q_td_modify_joint | beta | 28 | beta_A*walk_interaction_7d | 0.003025 | 0.002371 |
+| Joint Modified TD | q_td_modify_joint | beta | 24 | beta_A*yesterday_step_count | -0.004032 | 0.004002 |
+| Joint Modified TD | q_td_modify_joint | beta | 25 | beta_A*prior2hour_step_count | 0.001257 | 0.001611 |
+| Joint Modified TD | q_td_modify_joint | beta | 26 | beta_A*active_status_fraction_7days | -0.001813 | 0.002714 |
+| Joint Modified TD | q_td_modify_joint | beta | 27 | beta_A*recent_burden | -0.002120 | 0.002203 |
+| Joint Modified TD | q_td_modify_joint | beta | 28 | beta_A*walk_interaction_7d | 0.012966 | 0.002735 |
+| Joint Modified TD | q_td_modify_joint | beta | 29 | beta_A*weekday_vs_weekend | -0.002051 | 0.006244 |
+| Joint Modified TD | q_td_modify_joint | beta | 30 | beta_A*slot_pm | -0.009897 | 0.003284 |
 
 ## Pooled PF Regression Coefficients
 
@@ -397,25 +443,26 @@ Coefficients are from the all-user stacked ridge fits used as PF prior means. `p
 
 | model | outcome | index | feature | coefficient | identified | feature_std | std_error | t_stat | p_value | significant_0.05 | significant_0.01 | n_obs | n_features | ridge_alpha | residual_sigma2 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| fourSC | 4hour_step_norm | 0 | intercept | -0.077843 | False | 0.000000 |  |  |  | False | False | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 1 | stepCountNext4HourLag1 | 0.486631 | True | 0.915568 | 0.017098 | 28.461457 | 3.585629e-157 | True | True | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 2 | yesterdayStepCount | -0.148510 | True | 0.930518 | 0.021699 | -6.843953 | 9.381263e-12 | True | True | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 3 | stepCountLast7DaysEma | 0.358334 | True | 0.954106 | 0.016239 | 22.066327 | 8.384093e-100 | True | True | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 4 | prior2HourStepCount | 0.097988 | True | 0.935469 | 0.020109 | 4.872959 | 1.159096e-06 | True | True | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 5 | activitySuggestionsSentLast7Days | -0.037568 | True | 0.968302 | 0.019069 | -1.970129 | 0.048920 | True | False | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 6 | activitySuggestionInteractLast7Days | 0.037534 | True | 0.353473 | 0.052810 | 0.710748 | 0.477298 | False | False | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 7 | activeDaysLast7Days | 0.157462 | True | 0.260938 | 0.054967 | 2.864649 | 0.004205 | True | True | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 8 | isWeekend | -0.034017 | True | 0.369659 | 0.034735 | -0.979346 | 0.327492 | False | False | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 9 | decisionTimeSlot | -0.034384 | True | 0.497078 | 0.027074 | -1.269994 | 0.204190 | False | False | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 10 | perceivedUtilityLastWeek | 0.020972 | True | 2.361545 | 0.008802 | 2.382592 | 0.017256 | True | False | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 11 | caeAverageLastWeek | -0.053702 | True | 0.947049 | 0.021088 | -2.546610 | 0.010929 | True | False | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 12 | Ah | -0.116266 | True | 0.499925 | 0.043379 | -2.680242 | 0.007399 | True | True | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 13 | Ah*yesterdayStepCount | 0.005743 | True | 0.661722 | 0.028870 | 0.198939 | 0.842324 | False | False | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 14 | Ah*prior2HourStepCount | 0.009660 | True | 0.655759 | 0.028224 | 0.342255 | 0.732184 | False | False | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 15 | Ah*activitySuggestionsSentLast7Days | 0.029985 | True | 0.684165 | 0.026838 | 1.117260 | 0.263976 | False | False | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 16 | Ah*activitySuggestionInteractLast7Days | 0.087900 | True | 0.343672 | 0.074760 | 1.175762 | 0.239787 | False | False | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 17 | Ah*perceivedUtilityLastWeek | 0.020755 | True | 1.784542 | 0.012031 | 1.725147 | 0.084609 | False | False | 2890 | 19 | 1.000000 | 0.475879 |
-| fourSC | 4hour_step_norm | 18 | Ah*caeAverageLastWeek | -0.014121 | True | 0.644148 | 0.029020 | -0.486577 | 0.626595 | False | False | 2890 | 19 | 1.000000 | 0.475879 |
+| fourSC | 4hour_step_norm | 0 | intercept | -0.064155 | False | 0.000000 |  |  |  | False | False | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 1 | stepCountNext4HourLag1 | 0.485640 | True | 0.915568 | 0.017115 | 28.375627 | 2.446067e-156 | True | True | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 2 | yesterdayStepCount | -0.148401 | True | 0.930518 | 0.021697 | -6.839575 | 9.668360e-12 | True | True | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 3 | stepCountLast7DaysEma | 0.358050 | True | 0.954106 | 0.016239 | 22.049005 | 1.169953e-99 | True | True | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 4 | prior2HourStepCount | 0.097754 | True | 0.935469 | 0.020107 | 4.861600 | 1.227090e-06 | True | True | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 5 | activitySuggestionsSentLast7Days | -0.037946 | True | 0.968302 | 0.019069 | -1.989881 | 0.046699 | True | False | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 6 | activitySuggestionInteractLast7Days | 0.037768 | True | 0.353473 | 0.052805 | 0.715233 | 0.474523 | False | False | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 7 | activeDaysLast7Days | 0.158754 | True | 0.260938 | 0.054972 | 2.887887 | 0.003907 | True | True | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 8 | isWeekend | -0.034373 | True | 0.369659 | 0.034733 | -0.989662 | 0.322423 | False | False | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 9 | decisionTimeSlot | -0.066423 | True | 0.497078 | 0.037195 | -1.785782 | 0.074240 | False | False | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 10 | perceivedUtilityLastWeek | 0.021186 | True | 2.361545 | 0.008803 | 2.406709 | 0.016160 | True | False | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 11 | caeAverageLastWeek | -0.053808 | True | 0.947049 | 0.021086 | -2.551842 | 0.010767 | True | False | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 12 | Ah | -0.142819 | True | 0.499925 | 0.048229 | -2.961273 | 0.003089 | True | True | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 13 | Ah*yesterdayStepCount | 0.005743 | True | 0.661722 | 0.028867 | 0.198928 | 0.842333 | False | False | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 14 | Ah*prior2HourStepCount | 0.010735 | True | 0.655759 | 0.028235 | 0.380205 | 0.703821 | False | False | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 15 | Ah*activitySuggestionsSentLast7Days | 0.030233 | True | 0.684165 | 0.026836 | 1.126565 | 0.260021 | False | False | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 16 | Ah*activitySuggestionInteractLast7Days | 0.083931 | True | 0.343672 | 0.074824 | 1.121716 | 0.262077 | False | False | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 17 | Ah*perceivedUtilityLastWeek | 0.020380 | True | 1.784542 | 0.012033 | 1.693638 | 0.090443 | False | False | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 18 | Ah*caeAverageLastWeek | -0.013623 | True | 0.644148 | 0.029020 | -0.469430 | 0.638798 | False | False | 2890 | 20 | 1.000000 | 0.475782 |
+| fourSC | 4hour_step_norm | 19 | Ah*decisionTimeSlot | 0.064549 | True | 0.413354 | 0.051488 | 1.253674 | 0.210063 | False | False | 2890 | 20 | 1.000000 | 0.475782 |
 | antic | anticipated_affect_norm | 0 | intercept | 0.340290 | False | 0.000000 |  |  |  | False | False | 817 | 15 | 1.000000 | 0.040464 |
 | antic | anticipated_affect_norm | 1 | anticipated_affect_yesterday | 0.216039 | True | 0.329197 | 0.024954 | 8.657563 | 2.621496e-17 | True | True | 817 | 15 | 1.000000 | 0.040464 |
 | antic | anticipated_affect_norm | 2 | active_status_fraction_7days | 0.087343 | True | 0.224466 | 0.032858 | 2.658208 | 0.008012 | True | True | 817 | 15 | 1.000000 | 0.040464 |
@@ -442,25 +489,26 @@ Population-averaged GEE fits on the same stacked PF designs, clustered by `Parti
 
 | coefficient | robust_se | z_stat | p_value | significant_0.05 | significant_0.01 | model | outcome | index | feature | identified | feature_std | n_obs | n_clusters | n_features | working_correlation |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| -0.091498 |  |  |  | False | False | fourSC | 4hour_step_norm | 0 | intercept | False | 0.000000 | 2890 | 28 | 19 | exchangeable |
-| -0.038643 | 0.040875 | -0.945394 | 0.344458 | False | False | fourSC | 4hour_step_norm | 1 | stepCountNext4HourLag1 | True | 0.915568 | 2890 | 28 | 19 | exchangeable |
-| -0.016604 | 0.029792 | -0.557322 | 0.577308 | False | False | fourSC | 4hour_step_norm | 2 | yesterdayStepCount | True | 0.930518 | 2890 | 28 | 19 | exchangeable |
-| 0.185840 | 0.034816 | 5.337807 | 9.407734e-08 | True | True | fourSC | 4hour_step_norm | 3 | stepCountLast7DaysEma | True | 0.954106 | 2890 | 28 | 19 | exchangeable |
-| 0.128739 | 0.031263 | 4.117944 | 3.822669e-05 | True | True | fourSC | 4hour_step_norm | 4 | prior2HourStepCount | True | 0.935469 | 2890 | 28 | 19 | exchangeable |
-| 0.005290 | 0.016240 | 0.325712 | 0.744642 | False | False | fourSC | 4hour_step_norm | 5 | activitySuggestionsSentLast7Days | True | 0.968302 | 2890 | 28 | 19 | exchangeable |
-| 0.046203 | 0.064877 | 0.712174 | 0.476357 | False | False | fourSC | 4hour_step_norm | 6 | activitySuggestionInteractLast7Days | True | 0.353473 | 2890 | 28 | 19 | exchangeable |
-| 0.030243 | 0.068187 | 0.443530 | 0.657383 | False | False | fourSC | 4hour_step_norm | 7 | activeDaysLast7Days | True | 0.260938 | 2890 | 28 | 19 | exchangeable |
-| -0.006580 | 0.042500 | -0.154827 | 0.876958 | False | False | fourSC | 4hour_step_norm | 8 | isWeekend | True | 0.369659 | 2890 | 28 | 19 | exchangeable |
-| -0.073814 | 0.059019 | -1.250686 | 0.211049 | False | False | fourSC | 4hour_step_norm | 9 | decisionTimeSlot | True | 0.497078 | 2890 | 28 | 19 | exchangeable |
-| 0.025606 | 0.018481 | 1.385495 | 0.165901 | False | False | fourSC | 4hour_step_norm | 10 | perceivedUtilityLastWeek | True | 2.361545 | 2890 | 28 | 19 | exchangeable |
-| 0.000210 | 0.031915 | 0.006580 | 0.994750 | False | False | fourSC | 4hour_step_norm | 11 | caeAverageLastWeek | True | 0.947049 | 2890 | 28 | 19 | exchangeable |
-| -0.051115 | 0.051440 | -0.993683 | 0.320377 | False | False | fourSC | 4hour_step_norm | 12 | Ah | True | 0.499925 | 2890 | 28 | 19 | exchangeable |
-| 0.014488 | 0.033086 | 0.437891 | 0.661466 | False | False | fourSC | 4hour_step_norm | 13 | Ah*yesterdayStepCount | True | 0.661722 | 2890 | 28 | 19 | exchangeable |
-| -0.018527 | 0.028262 | -0.655563 | 0.512105 | False | False | fourSC | 4hour_step_norm | 14 | Ah*prior2HourStepCount | True | 0.655759 | 2890 | 28 | 19 | exchangeable |
-| 0.007359 | 0.016613 | 0.442960 | 0.657795 | False | False | fourSC | 4hour_step_norm | 15 | Ah*activitySuggestionsSentLast7Days | True | 0.684165 | 2890 | 28 | 19 | exchangeable |
-| 0.048133 | 0.081452 | 0.590937 | 0.554562 | False | False | fourSC | 4hour_step_norm | 16 | Ah*activitySuggestionInteractLast7Days | True | 0.343672 | 2890 | 28 | 19 | exchangeable |
-| 0.005942 | 0.012354 | 0.480952 | 0.630551 | False | False | fourSC | 4hour_step_norm | 17 | Ah*perceivedUtilityLastWeek | True | 1.784542 | 2890 | 28 | 19 | exchangeable |
-| -0.014947 | 0.025355 | -0.589516 | 0.555515 | False | False | fourSC | 4hour_step_norm | 18 | Ah*caeAverageLastWeek | True | 0.644148 | 2890 | 28 | 19 | exchangeable |
+| -0.091531 |  |  |  | False | False | fourSC | 4hour_step_norm | 0 | intercept | False | 0.000000 | 2890 | 28 | 20 | exchangeable |
+| -0.038615 | 0.040912 | -0.943849 | 0.345247 | False | False | fourSC | 4hour_step_norm | 1 | stepCountNext4HourLag1 | True | 0.915568 | 2890 | 28 | 20 | exchangeable |
+| -0.016611 | 0.029781 | -0.557773 | 0.576999 | False | False | fourSC | 4hour_step_norm | 2 | yesterdayStepCount | True | 0.930518 | 2890 | 28 | 20 | exchangeable |
+| 0.185851 | 0.034825 | 5.336776 | 9.461398e-08 | True | True | fourSC | 4hour_step_norm | 3 | stepCountLast7DaysEma | True | 0.954106 | 2890 | 28 | 20 | exchangeable |
+| 0.128739 | 0.031225 | 4.122967 | 3.740232e-05 | True | True | fourSC | 4hour_step_norm | 4 | prior2HourStepCount | True | 0.935469 | 2890 | 28 | 20 | exchangeable |
+| 0.005287 | 0.016131 | 0.327785 | 0.743074 | False | False | fourSC | 4hour_step_norm | 5 | activitySuggestionsSentLast7Days | True | 0.968302 | 2890 | 28 | 20 | exchangeable |
+| 0.046202 | 0.064890 | 0.712002 | 0.476463 | False | False | fourSC | 4hour_step_norm | 6 | activitySuggestionInteractLast7Days | True | 0.353473 | 2890 | 28 | 20 | exchangeable |
+| 0.030258 | 0.068237 | 0.443420 | 0.657462 | False | False | fourSC | 4hour_step_norm | 7 | activeDaysLast7Days | True | 0.260938 | 2890 | 28 | 20 | exchangeable |
+| -0.006581 | 0.042534 | -0.154726 | 0.877037 | False | False | fourSC | 4hour_step_norm | 8 | isWeekend | True | 0.369659 | 2890 | 28 | 20 | exchangeable |
+| -0.073765 | 0.060467 | -1.219923 | 0.222494 | False | False | fourSC | 4hour_step_norm | 9 | decisionTimeSlot | True | 0.497078 | 2890 | 28 | 20 | exchangeable |
+| 0.025613 | 0.018503 | 1.384258 | 0.166279 | False | False | fourSC | 4hour_step_norm | 10 | perceivedUtilityLastWeek | True | 2.361545 | 2890 | 28 | 20 | exchangeable |
+| 0.000199 | 0.031994 | 0.006212 | 0.995043 | False | False | fourSC | 4hour_step_norm | 11 | caeAverageLastWeek | True | 0.947049 | 2890 | 28 | 20 | exchangeable |
+| -0.051081 | 0.054384 | -0.939266 | 0.347594 | False | False | fourSC | 4hour_step_norm | 12 | Ah | True | 0.499925 | 2890 | 28 | 20 | exchangeable |
+| 0.014488 | 0.033100 | 0.437714 | 0.661593 | False | False | fourSC | 4hour_step_norm | 13 | Ah*yesterdayStepCount | True | 0.661722 | 2890 | 28 | 20 | exchangeable |
+| -0.018528 | 0.028255 | -0.655738 | 0.511993 | False | False | fourSC | 4hour_step_norm | 14 | Ah*prior2HourStepCount | True | 0.655759 | 2890 | 28 | 20 | exchangeable |
+| 0.007360 | 0.016516 | 0.445647 | 0.655852 | False | False | fourSC | 4hour_step_norm | 15 | Ah*activitySuggestionsSentLast7Days | True | 0.684165 | 2890 | 28 | 20 | exchangeable |
+| 0.048140 | 0.081787 | 0.588601 | 0.556129 | False | False | fourSC | 4hour_step_norm | 16 | Ah*activitySuggestionInteractLast7Days | True | 0.343672 | 2890 | 28 | 20 | exchangeable |
+| 0.005944 | 0.012298 | 0.483287 | 0.628892 | False | False | fourSC | 4hour_step_norm | 17 | Ah*perceivedUtilityLastWeek | True | 1.784542 | 2890 | 28 | 20 | exchangeable |
+| -0.014947 | 0.025416 | -0.588117 | 0.556454 | False | False | fourSC | 4hour_step_norm | 18 | Ah*caeAverageLastWeek | True | 0.644148 | 2890 | 28 | 20 | exchangeable |
+| -9.247129e-05 | 0.046372 | -0.001994 | 0.998409 | False | False | fourSC | 4hour_step_norm | 19 | Ah*decisionTimeSlot | True | 0.413354 | 2890 | 28 | 20 | exchangeable |
 | 0.387381 |  |  |  | False | False | antic | anticipated_affect_norm | 0 | intercept | False | 0.000000 | 817 | 28 | 15 | exchangeable |
 | 0.077584 | 0.032578 | 2.381505 | 0.017242 | True | False | antic | anticipated_affect_norm | 1 | anticipated_affect_yesterday | True | 0.329197 | 817 | 28 | 15 | exchangeable |
 | 0.125006 | 0.038548 | 3.242842 | 0.001183 | True | True | antic | anticipated_affect_norm | 2 | active_status_fraction_7days | True | 0.224466 | 817 | 28 | 15 | exchangeable |
@@ -487,28 +535,30 @@ Gaussian GEE on the final fitted-Q regression from pooled FQI (``phi_obs`` vs bo
 
 | coefficient | robust_se | z_stat | p_value | significant_0.05 | significant_0.01 | model | outcome | index | feature | identified | feature_std | n_obs | n_clusters | n_features | working_correlation | fqi_iters | ridge_alpha | residual_sigma2 | block |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0.101639 |  |  |  | False | False | q_no_td_modify | fqi_target | 0 | intercept | False | 0.000000 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| -0.047786 | 0.032612 | -1.465309 | 0.142837 | False | False | q_no_td_modify | fqi_target | 1 | weekday_vs_weekend | True | 0.372678 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| -0.002810 | 0.013104 | -0.214470 | 0.830181 | False | False | q_no_td_modify | fqi_target | 2 | slot_pm | True | 0.500000 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| 0.023085 | 0.001263 | 18.278057 | 1.237578e-74 | True | True | q_no_td_modify | fqi_target | 3 | E_w | True | 2.350134 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| 1.159896 | 0.005881 | 197.239473 | 0.000000 | True | True | q_no_td_modify | fqi_target | 4 | b_hat | True | 0.921918 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| 2.790276e-17 |  |  |  | False | False | q_no_td_modify | fqi_target | 5 | b_tilde | False | 0.000000 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| 0.295910 | 0.015087 | 19.613402 | 1.188134e-85 | True | True | q_no_td_modify | fqi_target | 6 | M_Y_anticipated_affect_ewma | True | 0.311549 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| -0.022627 | 0.001946 | -11.626719 | 3.014634e-31 | True | True | q_no_td_modify | fqi_target | 7 | M_Y_fourSC_ewma | True | 0.948911 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| 0.000883 | 0.001933 | 0.456683 | 0.647899 | False | False | q_no_td_modify | fqi_target | 8 | M_E_pageview_ewma | True | 1.050150 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| -0.132573 | 0.006427 | -20.627111 | 1.567393e-94 | True | True | q_no_td_modify | fqi_target | 9 | M_E_fitbit_wear_ewma | True | 0.412251 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| -0.046121 | 0.005620 | -8.206283 | 2.281419e-16 | True | True | q_no_td_modify | fqi_target | 10 | M_E_survey_complete_ewma | True | 0.411996 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| -0.007099 | 0.004625 | -1.534940 | 0.124799 | False | False | q_no_td_modify | fqi_target | 11 | yesterday_step_count | True | 0.918323 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| -0.013743 | 0.004362 | -3.150521 | 0.001630 | True | True | q_no_td_modify | fqi_target | 12 | prior2hour_step_count | True | 0.923902 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| -0.039260 | 0.012360 | -3.176234 | 0.001492 | True | True | q_no_td_modify | fqi_target | 13 | active_status_fraction_7days | True | 0.266148 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| -0.013095 | 0.004157 | -3.150414 | 0.001630 | True | True | q_no_td_modify | fqi_target | 14 | recent_burden | True | 0.931218 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| -0.064043 | 0.009466 | -6.765549 | 1.328045e-11 | True | True | q_no_td_modify | fqi_target | 15 | walk_interaction_7d | True | 0.354304 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| 0.008988 | 0.016310 | 0.551056 | 0.581595 | False | False | q_no_td_modify | fqi_target | 16 | A | True | 0.499915 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| 0.000856 | 0.002032 | 0.421547 | 0.673356 | False | False | q_no_td_modify | fqi_target | 17 | A*E_w | True | 1.764758 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| 3.948423e-05 | 0.010581 | 0.003732 | 0.997023 | False | False | q_no_td_modify | fqi_target | 18 | A*b_hat | True | 0.635088 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| 7.424461e-17 |  |  |  | False | False | q_no_td_modify | fqi_target | 19 | A*b_tilde | False | 0.000000 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| -0.004196 | 0.007377 | -0.568827 | 0.569473 | False | False | q_no_td_modify | fqi_target | 20 | A*yesterday_step_count | True | 0.654833 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| 0.007060 | 0.004454 | 1.585254 | 0.112909 | False | False | q_no_td_modify | fqi_target | 21 | A*prior2hour_step_count | True | 0.644358 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| -0.005233 | 0.020854 | -0.250934 | 0.801865 | False | False | q_no_td_modify | fqi_target | 22 | A*active_status_fraction_7days | True | 0.375177 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| -0.001908 | 0.005186 | -0.367815 | 0.713011 | False | False | q_no_td_modify | fqi_target | 23 | A*recent_burden | True | 0.662545 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
-| -0.004410 | 0.017293 | -0.255033 | 0.798697 | False | False | q_no_td_modify | fqi_target | 24 | A*walk_interaction_7d | True | 0.334802 | 3360 | 28 | 25 | exchangeable | 25 | 1.000000 | 0.030243 | beta |
+| 0.119423 |  |  |  | False | False | q_no_td_modify | fqi_target | 0 | intercept | False | 0.000000 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -0.071457 | 0.036984 | -1.932121 | 0.053345 | False | False | q_no_td_modify | fqi_target | 1 | weekday_vs_weekend | True | 0.372678 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -0.009129 | 0.014166 | -0.644434 | 0.519294 | False | False | q_no_td_modify | fqi_target | 2 | slot_pm | True | 0.500000 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| 0.020973 | 0.001251 | 16.769529 | 4.077255e-63 | True | True | q_no_td_modify | fqi_target | 3 | E_w | True | 2.350134 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| 1.158349 | 0.005906 | 196.147265 | 0.000000 | True | True | q_no_td_modify | fqi_target | 4 | b_hat | True | 0.921918 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -2.839751e-16 |  |  |  | False | False | q_no_td_modify | fqi_target | 5 | b_tilde | False | 0.000000 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| 0.290343 | 0.015041 | 19.303118 | 5.056430e-83 | True | True | q_no_td_modify | fqi_target | 6 | M_Y_anticipated_affect_ewma | True | 0.311549 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -0.023274 | 0.001954 | -11.908768 | 1.065403e-32 | True | True | q_no_td_modify | fqi_target | 7 | M_Y_fourSC_ewma | True | 0.948911 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -0.000129 | 0.001993 | -0.064584 | 0.948505 | False | False | q_no_td_modify | fqi_target | 8 | M_E_pageview_ewma | True | 1.050150 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -0.131137 | 0.006629 | -19.781461 | 4.300507e-87 | True | True | q_no_td_modify | fqi_target | 9 | M_E_fitbit_wear_ewma | True | 0.412251 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -0.042466 | 0.005724 | -7.419342 | 1.177037e-13 | True | True | q_no_td_modify | fqi_target | 10 | M_E_survey_complete_ewma | True | 0.411996 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -0.007210 | 0.004864 | -1.482184 | 0.138291 | False | False | q_no_td_modify | fqi_target | 11 | yesterday_step_count | True | 0.918323 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -0.013071 | 0.004326 | -3.021692 | 0.002514 | True | True | q_no_td_modify | fqi_target | 12 | prior2hour_step_count | True | 0.923902 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -0.003204 | 0.011978 | -0.267506 | 0.789080 | False | False | q_no_td_modify | fqi_target | 13 | active_status_fraction_7days | True | 0.266148 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -0.011825 | 0.004167 | -2.837605 | 0.004545 | True | True | q_no_td_modify | fqi_target | 14 | recent_burden | True | 0.931218 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -0.068351 | 0.009877 | -6.920569 | 4.498330e-12 | True | True | q_no_td_modify | fqi_target | 15 | walk_interaction_7d | True | 0.354304 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -0.000958 | 0.020094 | -0.047690 | 0.961964 | False | False | q_no_td_modify | fqi_target | 16 | A | True | 0.499915 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| 0.000915 | 0.002065 | 0.443027 | 0.657746 | False | False | q_no_td_modify | fqi_target | 17 | A*E_w | True | 1.764758 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| 0.000379 | 0.010754 | 0.035234 | 0.971893 | False | False | q_no_td_modify | fqi_target | 18 | A*b_hat | True | 0.635088 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -1.822752e-16 |  |  |  | False | False | q_no_td_modify | fqi_target | 19 | A*b_tilde | False | 0.000000 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -0.004016 | 0.007597 | -0.528610 | 0.597076 | False | False | q_no_td_modify | fqi_target | 20 | A*yesterday_step_count | True | 0.654833 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| 0.006328 | 0.004401 | 1.437707 | 0.150517 | False | False | q_no_td_modify | fqi_target | 21 | A*prior2hour_step_count | True | 0.644358 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -0.006657 | 0.020732 | -0.321119 | 0.748120 | False | False | q_no_td_modify | fqi_target | 22 | A*active_status_fraction_7days | True | 0.375177 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -0.001899 | 0.005138 | -0.369686 | 0.711617 | False | False | q_no_td_modify | fqi_target | 23 | A*recent_burden | True | 0.662545 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| -0.004046 | 0.017607 | -0.229805 | 0.818243 | False | False | q_no_td_modify | fqi_target | 24 | A*walk_interaction_7d | True | 0.334802 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| 0.040297 | 0.031478 | 1.280154 | 0.200491 | False | False | q_no_td_modify | fqi_target | 25 | A*weekday_vs_weekend | True | 0.281695 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
+| 0.009116 | 0.011661 | 0.781803 | 0.434330 | False | False | q_no_td_modify | fqi_target | 26 | A*slot_pm | True | 0.432496 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.030153 | beta |
