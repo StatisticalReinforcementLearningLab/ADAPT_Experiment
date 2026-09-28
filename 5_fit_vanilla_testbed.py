@@ -24,6 +24,7 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import pymc as pm
+import pytensor.tensor as pt
 from patsy import dmatrix
 from pathlib import Path
 from sklearn.linear_model import (
@@ -194,15 +195,24 @@ class _BayesianRandomCoefResult:
         return "\n".join(lines)
 
 
+# One shared scale for every weak/noninformative Normal slope prior:
+# Normal(0, sqrt(10)), i.e. variance 10. On z-scored outcomes/predictors,
+# plausible slopes are within roughly +/-1, so this is operationally flat —
+# the point of a single constant is consistency, not information.
+WEAK_BETA_PRIOR_SD = float(np.sqrt(10.0))
+
+
 def fit_bayesian_random_coef_model(
     y,
     X,
     groups,
     predictor_names,
     beta_prior_mu=0.0,
-    beta_prior_sd=5.0,
+    beta_prior_sd=WEAK_BETA_PRIOR_SD,
+    beta_prior_sign=0.0,
     re_sd_prior_mode=0.15,
-    sigma_eps_prior_sd=1.0,
+    sigma_eps_prior_alpha=2.0,
+    sigma_eps_prior_beta=0.5,
     draws=2000,
     tune=3000,
     chains=4,
@@ -224,11 +234,31 @@ def fit_bayesian_random_coef_model(
       ``mu`` with strength ``1/sd**2``. Pass a small ``sd`` (and/or a
       substantively motivated ``mu`` != 0) for collinear/implausible slopes,
       and a wide ``sd`` for slopes you want the data to determine freely.
+    - ``beta_prior_sign`` (per-column, or scalar; entries in {-1, 0, +1})
+      switches a column's population-slope prior from Normal to a
+      sign-constrained HalfNormal: ``beta_j = sign_j * HalfNormal(sigma_j)``
+      with ``sigma_j = |beta_prior_mu_j| / sqrt(2/pi)`` so the *prior mean*
+      equals ``beta_prior_mu_j`` (a HalfNormal's mean is ``0.798 * sigma``).
+      For these columns ``beta_prior_sd`` is ignored — a HalfNormal's spread
+      is tied to its scale (prior SD ~= 0.60 * |mu|) — and the population
+      slope can never cross zero, though individual users' ``beta + b_i``
+      still can. Columns with sign 0 keep the Normal prior.
     - ``re_sd_prior_mode`` sets a ``Gamma(shape=2, mode=re_sd_prior_mode)``
       prior on each random-effect SD. Unlike a Half-Normal/Half-Cauchy (the
       usual textbook default), a shape-2 Gamma has *zero density at exactly
       0*, so the posterior is pushed off the degenerate "same slope for every
-      user" boundary without needing a hard-coded variance floor.
+      user" boundary without needing a hard-coded variance floor. (An
+      InverseGamma is deliberately *not* used here: for group-level variances
+      estimated from ~30 groups it is far from noninformative, see Gelman
+      2006.)
+    - the residual variance ``sigma_eps**2`` gets an
+      ``InverseGamma(sigma_eps_prior_alpha, sigma_eps_prior_beta)`` prior —
+      the conjugate family for a Gaussian likelihood, with zero density at 0
+      so the noise scale can't collapse. The default IG(2, 0.5) is weak
+      (prior mean variance 0.5 on z-scored outcomes, infinite prior
+      variance); with hundreds of observation-level rows the likelihood
+      dominates it. ``sigma_eps`` is exposed as a Deterministic so summaries
+      and convergence checks are unchanged.
 
     Both priors act inside the same likelihood that estimates ``b_i``, so
     there's no need for a separate post-hoc ridge step or "protected"
@@ -255,17 +285,54 @@ def fit_bayesian_random_coef_model(
 
     beta_prior_mu = np.broadcast_to(np.asarray(beta_prior_mu, dtype=float), (p,)).copy()
     beta_prior_sd = np.broadcast_to(np.asarray(beta_prior_sd, dtype=float), (p,)).copy()
+    beta_prior_sign = np.broadcast_to(
+        np.asarray(beta_prior_sign, dtype=float), (p,)
+    ).copy()
+    if not np.all(np.isin(beta_prior_sign, (-1.0, 0.0, 1.0))):
+        raise ValueError("beta_prior_sign entries must be -1, 0, or +1")
+    signed = beta_prior_sign != 0.0
+    if np.any(signed) and np.any(np.abs(beta_prior_mu[signed]) <= 0.0):
+        raise ValueError(
+            "sign-constrained columns need a nonzero beta_prior_mu "
+            "(it sets the HalfNormal's prior mean)"
+        )
     re_sd_prior_mode = np.broadcast_to(np.asarray(re_sd_prior_mode, dtype=float), (p,)).copy()
     re_rate = 1.0 / np.maximum(re_sd_prior_mode, 1e-6)
 
+    halfnormal_mean_factor = float(np.sqrt(2.0 / np.pi))  # E[HalfNormal(s)] = s * this
+
     with pm.Model():
-        beta = pm.Normal("beta", mu=beta_prior_mu, sigma=beta_prior_sd, shape=p)
+        if np.any(signed):
+            free_idx = np.flatnonzero(~signed)
+            sign_idx = np.flatnonzero(signed)
+            beta_free = pm.Normal(
+                "beta_free",
+                mu=beta_prior_mu[free_idx],
+                sigma=beta_prior_sd[free_idx],
+                shape=len(free_idx),
+            )
+            beta_mag = pm.HalfNormal(
+                "beta_mag",
+                sigma=np.abs(beta_prior_mu[sign_idx]) / halfnormal_mean_factor,
+                shape=len(sign_idx),
+            )
+            beta_full = pt.zeros(p)
+            beta_full = pt.set_subtensor(beta_full[free_idx], beta_free)
+            beta_full = pt.set_subtensor(
+                beta_full[sign_idx], beta_prior_sign[sign_idx] * beta_mag
+            )
+            beta = pm.Deterministic("beta", beta_full)
+        else:
+            beta = pm.Normal("beta", mu=beta_prior_mu, sigma=beta_prior_sd, shape=p)
         sigma_re = pm.Gamma("sigma_re", alpha=2.0, beta=re_rate, shape=p)
         b_raw = pm.Normal("b_raw", mu=0.0, sigma=1.0, shape=(n_groups, p))
         b = pm.Deterministic("b", b_raw * sigma_re[None, :])
         theta = beta[None, :] + b
         mu = pm.math.sum(X * theta[group_idx], axis=1)
-        sigma_eps = pm.HalfNormal("sigma_eps", sigma=sigma_eps_prior_sd)
+        sigma_eps_sq = pm.InverseGamma(
+            "sigma_eps_sq", alpha=sigma_eps_prior_alpha, beta=sigma_eps_prior_beta
+        )
+        sigma_eps = pm.Deterministic("sigma_eps", pm.math.sqrt(sigma_eps_sq))
         pm.Normal("y_obs", mu=mu, sigma=sigma_eps, observed=y)
 
         with warnings.catch_warnings():
@@ -749,8 +816,24 @@ if userid_all.size == 0:
 # informative, not just "weak regularization defaults":
 #   - CAE_avg_lastweek (a1): a week-to-week autoregression coefficient for a
 #     bounded, mean-reverting activity measure should plausibly sit well
-#     below 1 (a loop gain >= 1 makes the simulated trajectory unstable), so
-#     it's centered at 0.4 instead of 0.
+#     below 1 (a loop gain >= 1 makes the simulated trajectory unstable).
+#     Originally centered at 0.4; recentered at 0.2 after the
+#     residual-dependence diagnostics (residual_dependence.py, 2026-09-15).
+#     The fitted CAE residuals' lag-1 autocorrelation averaged -0.44 across
+#     users, versus a null of -0.18 +/- 0.06 for this exact hierarchical
+#     fitting pipeline on white-noise emissions (parametric bootstrap,
+#     z ~ -4). The excess is the classic lagged-observed-outcome +
+#     measurement-error signature: with survey noise nu_w in weekly CAE, the
+#     residual contains nu_w - a1*nu_{w-1}, an MA(1) with lag-1 ACF about
+#     -a1/(1+a1^2). At the refitted a1 ~ 0.27 that predicts -0.24, and
+#     -0.18 (null) - 0.24 ~ -0.42, matching the observed value almost
+#     exactly — i.e. the conditional-mean model is fine, but a large a1
+#     over-attributes persistence to the AR term. Recentering at 0.2 shrinks
+#     that over-attribution (fitted a1 drops from ~0.38, which merely echoed
+#     the old prior center, to ~0.27); the leftover negative residual
+#     dependence is deliberately NOT modeled here because vani_env's default
+#     noise="ar1" sampler replays it per user from the stored resid_CAE
+#     series at simulation time.
 #   - anticipated_affect_ewma: corr(anticipated_affect_ewma, CAE_avg_lastweek)
 #     = 0.90 in the training data, so an unregularized fit can't tell these
 #     two apart and dumps an implausible amount of signal (~1.5-1.6) onto
@@ -770,8 +853,23 @@ if userid_all.size == 0:
 #     their own data supports it — real heterogeneity, not reflection.
 # week and the intercept have no such prior belief, so they get
 # wide/uninformative priors and are essentially estimated by the data alone.
-CAE_BETA_PRIOR_MU = np.array([0.0, 0.4, 0.0, 0.15, 0.3])
-CAE_BETA_PRIOR_SD = np.array([5.0, 0.15, 1.0, 0.15, 0.15])
+#
+# 2026-09-15: the three informative slopes (CAE_avg_lastweek, fourSC_ewma,
+# anticipated_affect_ewma) now use sign-constrained HalfNormal priors
+# (beta_prior_sign = +1) instead of Normal. The HalfNormal scale is set so
+# its prior *mean* equals the mu listed below (sigma = mu / 0.798), i.e.
+# the same central belief with positivity enforced. A side-by-side refit on
+# the training panel gave near-identical posteriors (a1 0.266 vs 0.272,
+# antic 0.302 vs 0.324, identical residual lag-1 ACF, 0 divergences either
+# way). Note beta_prior_sd is ignored for these columns: a HalfNormal's
+# spread is tied to its mean (prior SD ~= 0.60 * mu).
+CAE_BETA_PRIOR_MU = np.array([0.0, 0.2, 0.0, 0.15, 0.3])
+# sd applies to the unsigned columns (intercept, week) only; entries for the
+# three signed columns are ignored (their spread comes from the HalfNormal).
+CAE_BETA_PRIOR_SD = np.array(
+    [WEAK_BETA_PRIOR_SD, 0.15, WEAK_BETA_PRIOR_SD, 0.15, 0.15]
+)
+CAE_BETA_PRIOR_SIGN = np.array([0.0, 1.0, 0.0, 1.0, 1.0])
 CAE_RE_SD_PRIOR_MODE = np.array([0.1, 0.15, 0.1, 0.15, 0.15])
 
 cae_ml_df = build_cae_mixedlm_data(df_fit, userid_all, K=14)
@@ -789,6 +887,7 @@ mixedlm_CAE = fit_bayesian_random_coef_model(
     predictor_names=list(THETA_CAE_NAMES),
     beta_prior_mu=CAE_BETA_PRIOR_MU,
     beta_prior_sd=CAE_BETA_PRIOR_SD,
+    beta_prior_sign=CAE_BETA_PRIOR_SIGN,
     re_sd_prior_mode=CAE_RE_SD_PRIOR_MODE,
 )
 
@@ -860,15 +959,24 @@ cae_short_random_effect_cols = list(range(len(THETA_CAE_SHORT_AVG_NAMES)))
 # beta_prior_sd (more confident about the population mean) plus tighter
 # re_sd_prior_mode (less between-user spread allowed) both push toward this
 # fix; individuals can still deviate, just less drastically.
+# 2026-09-15: informative columns switched from Normal(mu, sd) to
+# sign-constrained HalfNormal priors (beta_prior_sign = sign(mu)), with the
+# HalfNormal scale set so its prior mean equals the mu below (sigma =
+# |mu| / 0.798). beta_prior_sd is ignored for signed columns; the effective
+# prior SD becomes ~0.60 * |mu| (~0.03 for the -0.05 burden terms — close
+# to the old 0.03-0.04 — but ~0.018 for the +0.03 "should help" terms,
+# tighter than the old 0.08, so those population means are now confined to
+# roughly (0, 0.09)).
 ANTIC_RE_SD_PRIOR_MODE = np.full(len(THETA_ANTIC_NAMES), 0.15)
-ANTIC_BETA_PRIOR_SD = np.full(len(THETA_ANTIC_NAMES), 3.0)
+ANTIC_BETA_PRIOR_SD = np.full(len(THETA_ANTIC_NAMES), WEAK_BETA_PRIOR_SD)
 ANTIC_BETA_PRIOR_MU = np.zeros(len(THETA_ANTIC_NAMES))
+ANTIC_BETA_PRIOR_SIGN = np.zeros(len(THETA_ANTIC_NAMES))
 for _name in ("A0_morning_by_recent_burden", "A1_afternoon_by_recent_burden"):
     ANTIC_BETA_PRIOR_MU[THETA_ANTIC_NAMES.index(_name)] = -0.05
-    ANTIC_BETA_PRIOR_SD[THETA_ANTIC_NAMES.index(_name)] = 0.04
+    ANTIC_BETA_PRIOR_SIGN[THETA_ANTIC_NAMES.index(_name)] = -1.0
     ANTIC_RE_SD_PRIOR_MODE[THETA_ANTIC_NAMES.index(_name)] = 0.05
 ANTIC_BETA_PRIOR_MU[THETA_ANTIC_NAMES.index("recent_burden")] = -0.05
-ANTIC_BETA_PRIOR_SD[THETA_ANTIC_NAMES.index("recent_burden")] = 0.03
+ANTIC_BETA_PRIOR_SIGN[THETA_ANTIC_NAMES.index("recent_burden")] = -1.0
 ANTIC_RE_SD_PRIOR_MODE[THETA_ANTIC_NAMES.index("recent_burden")] = 0.05
 for _name in (
     "perceived_utility_lastweek",
@@ -883,7 +991,7 @@ for _name in (
     "A1_afternoon_by_active_status_fraction_7days",
 ):
     ANTIC_BETA_PRIOR_MU[THETA_ANTIC_NAMES.index(_name)] = 0.03
-    ANTIC_BETA_PRIOR_SD[THETA_ANTIC_NAMES.index(_name)] = 0.08
+    ANTIC_BETA_PRIOR_SIGN[THETA_ANTIC_NAMES.index(_name)] = 1.0
 
 antic_bayes_df = build_antic_bayes_data(df_fit, userid_all)
 X_antic_obs = antic_bayes_df[THETA_ANTIC_NAMES].to_numpy(dtype=float)
@@ -897,6 +1005,7 @@ mixedlm_antic = fit_bayesian_random_coef_model(
     predictor_names=list(THETA_ANTIC_NAMES),
     beta_prior_mu=ANTIC_BETA_PRIOR_MU,
     beta_prior_sd=ANTIC_BETA_PRIOR_SD,
+    beta_prior_sign=ANTIC_BETA_PRIOR_SIGN,
     re_sd_prior_mode=ANTIC_RE_SD_PRIOR_MODE,
     draws=1000,
     tune=1500,
@@ -906,11 +1015,14 @@ mixedlm_antic = fit_bayesian_random_coef_model(
 print(mixedlm_antic.summary())
 print(f"Anticipated-affect Bayesian fit converged: {mixedlm_antic.converged}")
 
+# Same 2026-09-15 HalfNormal switch as theta_antic above: informative
+# columns use beta_prior_sign = sign(mu) with prior mean matched to mu.
 FOURSC_RE_SD_PRIOR_MODE = np.full(len(THETA_FOURSC_NAMES), 0.15)
-FOURSC_BETA_PRIOR_SD = np.full(len(THETA_FOURSC_NAMES), 3.0)
+FOURSC_BETA_PRIOR_SD = np.full(len(THETA_FOURSC_NAMES), WEAK_BETA_PRIOR_SD)
 FOURSC_BETA_PRIOR_MU = np.zeros(len(THETA_FOURSC_NAMES))
+FOURSC_BETA_PRIOR_SIGN = np.zeros(len(THETA_FOURSC_NAMES))
 FOURSC_BETA_PRIOR_MU[THETA_FOURSC_NAMES.index("recent_burden")] = -0.05
-FOURSC_BETA_PRIOR_SD[THETA_FOURSC_NAMES.index("recent_burden")] = 0.03
+FOURSC_BETA_PRIOR_SIGN[THETA_FOURSC_NAMES.index("recent_burden")] = -1.0
 FOURSC_RE_SD_PRIOR_MODE[THETA_FOURSC_NAMES.index("recent_burden")] = 0.05
 # This interaction is the one that most directly let a constant-suggestion
 # policy compound unchecked for a couple of outlier users: one came back at
@@ -920,7 +1032,7 @@ FOURSC_RE_SD_PRIOR_MODE[THETA_FOURSC_NAMES.index("recent_burden")] = 0.05
 # re_sd_prior_mode here don't rule that out, but make it harder for a
 # handful of noisy per-user rows to produce it.
 FOURSC_BETA_PRIOR_MU[THETA_FOURSC_NAMES.index("WalkingSuggestion_by_recent_burden")] = -0.05
-FOURSC_BETA_PRIOR_SD[THETA_FOURSC_NAMES.index("WalkingSuggestion_by_recent_burden")] = 0.04
+FOURSC_BETA_PRIOR_SIGN[THETA_FOURSC_NAMES.index("WalkingSuggestion_by_recent_burden")] = -1.0
 FOURSC_RE_SD_PRIOR_MODE[THETA_FOURSC_NAMES.index("WalkingSuggestion_by_recent_burden")] = 0.05
 # Same "assert the population mean, leave individuals free" treatment as
 # theta_antic above, for the E_w/Y_w/A -> M^Y terms that used to be
@@ -933,7 +1045,7 @@ for _name in (
     "WalkingSuggestion_by_CAE_avg_lastweek",
 ):
     FOURSC_BETA_PRIOR_MU[THETA_FOURSC_NAMES.index(_name)] = 0.03
-    FOURSC_BETA_PRIOR_SD[THETA_FOURSC_NAMES.index(_name)] = 0.08
+    FOURSC_BETA_PRIOR_SIGN[THETA_FOURSC_NAMES.index(_name)] = 1.0
 
 fourSC_bayes_df = build_fourSC_bayes_data(df_fit, userid_all)
 X_fourSC_obs = fourSC_bayes_df[THETA_FOURSC_NAMES].to_numpy(dtype=float)
@@ -949,6 +1061,7 @@ mixedlm_fourSC = fit_bayesian_random_coef_model(
     predictor_names=list(THETA_FOURSC_NAMES),
     beta_prior_mu=FOURSC_BETA_PRIOR_MU,
     beta_prior_sd=FOURSC_BETA_PRIOR_SD,
+    beta_prior_sign=FOURSC_BETA_PRIOR_SIGN,
     re_sd_prior_mode=FOURSC_RE_SD_PRIOR_MODE,
     draws=2000,
     tune=3000,

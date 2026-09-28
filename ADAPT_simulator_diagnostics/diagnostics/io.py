@@ -180,8 +180,9 @@ def inverse_affine(z: np.ndarray, std: dict[str, Any], prefix: str) -> np.ndarra
 
 
 def inverse_log_count(z: np.ndarray, std: dict[str, Any], prefix: str) -> np.ndarray:
+    """Undo z-score of ``log(x+1)`` (Script 3 step-count transform)."""
     value = inverse_affine(z, std, prefix)
-    return np.expm1(np.clip(value, 0.0, 20.0))
+    return np.clip(np.expm1(np.asarray(value, float)), 0.0, None)
 
 
 def _import_source_modules(source_root: Path):
