@@ -118,7 +118,11 @@ def denormalize_CAE(cae_norm, params_dir=PARAMS_DIR):
 
 
 def invert_log_zscore(norm, shift, scale):
-    """Undo ``(log(x+1) - shift) / scale`` and return raw count ``x >= 0``."""
+    """Undo ``(log(x+1) - shift) / scale`` and return raw count ``x >= 0``.
+
+    Script 3 stores step counts as ``log(x+1)`` then z-scores. Gaussian draws
+    that reconstruct a negative ``log(x+1)`` are mapped to 0.
+    """
     s = float(scale)
     if s == 0.0 or not math.isfinite(s):
         s = 1.0
@@ -128,8 +132,13 @@ def invert_log_zscore(norm, shift, scale):
         return 0.0
     if not math.isfinite(z):
         return 0.0
-    log_val = float(np.clip(float(shift) + s * z, 0.0, 20.0))
-    return float(np.expm1(log_val))
+    log_val = float(shift) + s * z
+    if not math.isfinite(log_val):
+        return 0.0
+    count = math.expm1(log_val)
+    if not math.isfinite(count) or count <= 0.0:
+        return 0.0
+    return float(count)
 
 
 def zscore_value(raw, shift, scale):

@@ -167,7 +167,7 @@ def _participant_intervals(source, participant, source_id, d, paths):
     rows.extend(_interval_rows(participant, "short_CAE", obs_short, sim_short, np.arange(2, 13), "study_week"))
 
     # Decision-time next-four-hour step count on the original count scale.
-    obs_four = np.expm1(d["4hour_step"].to_numpy(float))
+    obs_four = np.expm1(np.clip(d["4hour_step"].to_numpy(float), 0.0, None))
     sim_four = inverse_log_count(paths["foursc_std"], std, "4hour_step_count")
     rows.extend(
         _interval_rows(

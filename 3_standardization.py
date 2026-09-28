@@ -1,9 +1,10 @@
 # Standardize the merged panel
 #
-# Reads `df_merged.csv`, log-transforms most counts in place, z-scores
-# continuous features, maps Likert items to [-1, 1], and writes `df_fit.csv`
-# plus `std_params.json` (shifts, scales, clip limits) under
-# `env_para_vanilla/`. ``HourlyPageviewCount`` (and its lag) stay raw.
+# Reads `df_merged.csv`, log-transforms step counts and pageview summaries
+# in place as ``log(x+1)``, z-scores continuous features,
+# maps Likert items to [-1, 1], and writes `df_fit.csv` plus
+# `std_params.json` (shifts, scales, clip limits) under `env_para_vanilla/`.
+# ``HourlyPageviewCount`` (and its lag) stay raw.
 # ``HourlyPageviewCount_norm`` is ``log(x)`` then z-scored among positives
 # (no ``+1``); count 0 sits at ``log(0.5)`` so PV_sum / lag1 stay below 1.
 # Next: ``4_perceived_utility.py``.
@@ -233,12 +234,12 @@ df_fit["day_norm"] = (df_fit["day"] - (1 + DAY_RANGE) / 2) / ((DAY_RANGE - 1) / 
 df_fit["week_norm"] = (df_fit["week"] - (1 + WEEK_RANGE) / 2) / ((WEEK_RANGE - 1) / 2)
 df_fit["dow_norm"] = (df_fit["dow"] - (1 + 7) / 2) / ((7 - 1) / 2)
 
-# 3. Log transforms (counts / pageviews)
+# 3. Count transforms (step counts / pageviews)
 #
-# Most count columns are overwritten with ``log(x+1)``. Hourly pageview
-# stays raw. Its ``*_norm`` is ``log(x)`` for positive counts (hurdle
-# intensity does not need ``+1``); zeros sit at ``log(0.5)`` so the weekly
-# PV summary still has a point below count 1.
+# Step counts and pageview summaries are overwritten with ``log(x+1)``.
+# Hourly pageview stays raw. Its ``*_norm`` is ``log(x)`` for positive
+# counts (hurdle intensity does not need ``+1``); zeros sit at ``log(0.5)``
+# so the weekly PV summary still has a point below count 1.
 
 for col in LOG_COLUMNS:
     if col in df_fit.columns:
