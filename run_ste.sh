@@ -4,13 +4,13 @@
 #SBATCH -c 4
 #SBATCH -t 2-00:00:00
 #SBATCH --mem=32GB
-#SBATCH --array=0-30
+#SBATCH --array=0-27
 #SBATCH -o logs/ste_%A_%a.out
 #SBATCH -e logs/ste_%A_%a.err
 
 # Average user STE for the vanilla testbed (ste_vanilla.py).
 #
-# Single submission (train + eval for all 31 participants, then average user STE):
+# Single submission (train + eval for all 28 participants, then average user STE):
 #   mkdir -p logs
 #   sbatch run_ste.sh
 #

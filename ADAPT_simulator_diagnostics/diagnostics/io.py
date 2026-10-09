@@ -189,19 +189,6 @@ def _import_source_modules(source_root: Path):
     """Import the simulator modules from exactly ``source_root``."""
     source_root = source_root.resolve()
 
-    # The manuscript diagnostics use the source generator with its default
-    # calibration mechanisms enabled.  Refuse an explicitly disabled local
-    # override rather than silently diagnosing a different generator.
-    for name in (
-        "ADAPR_FOURSC_CLOSED_LOOP_PROXY",
-        "ADAPR_GENERATOR_CALIBRATION",
-        "ADAPR_ACTIVITY_CARRYOVER_CALIBRATION",
-        "ADAPR_INTERACTION_PAGEVIEW_CALIBRATION",
-    ):
-        if os.environ.get(name, "1").strip().lower() in {"0", "false", "no", "off"}:
-            raise RuntimeError(
-                f"Source generator override {name} disables a calibration used by the diagnostics"
-            )
     if str(source_root) not in sys.path:
         sys.path.insert(0, str(source_root))
 

@@ -25,10 +25,10 @@ Writes, under ``env_para_vanilla/``:
     df_fit.csv columns        perceived_utility, perceived_utility_lastweek
 
 PV is a two-part hurdle: Bernoulli occurrence ``P(raw count > 0)`` and,
-given a positive count, a Gaussian on ``log(x)`` then z-scored among
-positives (``HourlyPageviewCount_norm``). Count 0 is placed at
-``log(0.5)`` on that same axis so the 14-slot PV summary still sits
-below count 1. Both parts share the same covariate
+given a positive count, a Gaussian on ``log(x+1)`` z-scored with the
+positive-count mean / SD (``HourlyPageviewCount_norm``). Count 0 sits at
+``log(1) = 0`` before z-scoring, below count 1, as for every other count
+variable. Both parts share the same covariate
 design (``E_w``, weekend, slot, burden, lag1, ``A``, ``A×E_w``, ``J_w``
 query). FW / PJ stay Bernoulli on wear / daily check-in.
 
@@ -797,11 +797,11 @@ def build_user_blocks(
         empty.
 
       - Weekly intensity summaries for the transition use fixed denominators
-        (``nansum(pv)/14``, ``nansum(FW|PJ)/7``): each slot contributes 0 if
-        NaN, not a mean over observed-only slots. With a complete 14-slot /
-        7-day panel this matches zero-imputed averages. For FW this codes
-        sensor missingness as not wearing; that is intentional so the
-        simulator and Ê_w use the same summary.
+        (``/14``, ``/7``): a missing or absent PV slot counts as a zero page
+        view (the standardized zero-count value ``z0``, i.e. imputed on the
+        raw scale before standardization), and a missing FW / PJ day counts
+        as 0 (not worn / not completed). Missing PV lags are also ``z0``;
+        missing recent burden is the participant mean.
 
       - The state transition uses separate weekly summaries:
             PV_sum_trans, FW_sum_trans, PJ_sum_trans
@@ -830,6 +830,21 @@ def build_user_blocks(
             raise KeyError(f"{_col!r} not in dataframe (expected for {_label})")
 
     observed_by_week = {int(w): g.copy() for w, g in dat.groupby(week_col, sort=True)}
+
+    # Missing-covariate rules (Section "Missing data in model fitting"):
+    #   * page views: a missing slot is a zero count, imputed on the raw scale
+    #     before standardization, i.e. at the standardized zero-count value z0;
+    #   * FW / PJ: missing = 0 (not worn / not completed);
+    #   * recent burden: participant mean (as in the CAE-related models).
+    _zero_rows = pd.to_numeric(dat[PV_log_col], errors="coerce") == 0
+    _z0_vals = pd.to_numeric(dat.loc[_zero_rows, PV_col], errors="coerce").dropna()
+    if len(_z0_vals):
+        pv_z0 = float(_z0_vals.iloc[0])
+    else:
+        _pv_all = pd.to_numeric(dat[PV_col], errors="coerce").dropna()
+        pv_z0 = float(_pv_all.min()) if len(_pv_all) else 0.0
+    _burden_all = pd.to_numeric(dat[burden_col], errors="coerce")
+    burden_mean = float(_burden_all.mean()) if _burden_all.notna().any() else 0.0
 
     if full_weeks is None:
         wmin = int(dat[week_col].min())
@@ -885,10 +900,10 @@ def build_user_blocks(
                     pv_y_list.append(1.0 if lv > 0.0 else 0.0)
                 pv_a_list.append(float(aa[k]) if not np.isnan(aa[k]) else np.nan)
                 pv_lag1_list.append(
-                    float(lag1v[k]) if not np.isnan(lag1v[k]) else np.nan
+                    float(lag1v[k]) if not np.isnan(lag1v[k]) else pv_z0
                 )
                 weekend_k = float(weekendv[k]) if not np.isnan(weekendv[k]) else np.nan
-                rb_k = float(burden[k]) if not np.isnan(burden[k]) else np.nan
+                rb_k = float(burden[k]) if not np.isnan(burden[k]) else burden_mean
                 dt_k = float(dtv[k]) if (hourly_pv and not np.isnan(dtv[k])) else 0.0
                 pv_ctx_rows.append([weekend_k, dt_k, rb_k])
 
@@ -909,7 +924,7 @@ def build_user_blocks(
                 float(row_afternoon[weekend_col]) if not pd.isna(row_afternoon[weekend_col]) else np.nan
             )
             day_burden_list.append(
-                float(row_afternoon[burden_col]) if not pd.isna(row_afternoon[burden_col]) else np.nan
+                float(row_afternoon[burden_col]) if not pd.isna(row_afternoon[burden_col]) else burden_mean
             )
 
             if FW_lag_col is not None:
@@ -939,9 +954,14 @@ def build_user_blocks(
         day_FW_lag = np.asarray(day_fw_lag_list, dtype=float)
         day_PJ_lag = np.asarray(day_pj_lag_list, dtype=float)
 
-        # Fixed 14/7 denominators: NaN slot → 0. FW missingness is treated as
-        # not wearing (same convention as vani_env / script 6 / ew_hat).
-        PV_sum = float(np.nansum(pv_z) / 14.0) if np.any(~np.isnan(pv_z)) else np.nan
+        # Fixed 14/7 denominators. A missing or absent PV slot is a zero count
+        # (z0 on the standardized scale); a missing FW / PJ day is 0 (not
+        # worn / not completed), the same convention as vani_env / ew_hat.
+        if np.any(~np.isnan(pv_z)):
+            n_pv_obs = int(np.sum(~np.isnan(pv_z)))
+            PV_sum = float((np.nansum(pv_z) + max(14 - n_pv_obs, 0) * pv_z0) / 14.0)
+        else:
+            PV_sum = np.nan
         FW_sum = float(np.nansum(FW_daily) / 7.0) if np.any(~np.isnan(FW_daily)) else np.nan
         PJ_sum = float(np.nansum(PJ_daily) / 7.0) if np.any(~np.isnan(PJ_daily)) else np.nan
         return {
@@ -2202,8 +2222,8 @@ def quadrature_loglik(
 # largest-magnitude value 0.25 at pi=0.5. PV is a hurdle on the z-scale:
 # dE[z]/dE = p(1-p) α_E (z̄₊ - z_0) + p γ_E. The proxy uses 0.25 and p ≤ 1,
 # and multiplies the occurrence term by (z̄₊ - z_0) from std_params (z̄₊ = 0
-# among positives; z_0 is log(0.5) on that axis). That gap is ~2.85 in the
-# current folder; omitting it understates the occurrence path. The penalty
+# among positives; z_0 is log1p(0) = 0 on that axis, legacy log(0.5)). The
+# gap was ~2.85 under the legacy convention; omitting it understates the occurrence path. The penalty
 # errs toward extra stability rather than needing a nested per-user
 # prevalence estimate solved inside the optimizer. Both a
 # "never suggest" (A=0) and "always suggest" (A=1) week are penalized, since g

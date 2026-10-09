@@ -23,7 +23,6 @@ import pandas as pd
 import seaborn as sns
 from matplotlib.ticker import MaxNLocator
 
-from ewm_utils import ewma_gamma, mean_prior_delivered_fraction
 
 plt.ion()
 
@@ -1166,64 +1165,10 @@ def audit_analysis_sample_exclusions(
 audit_wearable_step_quality = audit_analysis_sample_exclusions
 
 
-def _mean_prior_rows(series, window=7, min_periods=1):
-    """Mean over prior `window` calendar rows; excludes the current row."""
-    return series.shift(1).rolling(window=window, min_periods=min_periods).mean()
 
 
-def _ewm_prior_rows(series, gamma=None, window=7, min_periods=1):
-    """
-    Exponentially weighted average over at most the prior `window` rows only.
-    Excludes the current row.
-
-    Computes:
-        sum_{j=1}^n gamma^{j-1} x_{t-j} I_j
-        -----------------------------------
-        sum_{j=1}^n gamma^{j-1} I_j
-
-    where j=1 is the most recent prior row and ``I_j`` is 0 if that row is
-    NaN. Same implementation as ``ewm_utils.ewma_gamma``. NaN rows stay in
-    the window so the decay follows calendar spacing (pandas
-    ``ewm(..., ignore_na=False)`` on the same window, for a fixed gamma).
-
-    ``gamma=None`` (default) derives the decay from ``n``, the calendar
-    length of this rolling window (:func:`ewm_utils.gamma_from_n`), not the
-    finite count. A full 7-row window gets ``gamma=6/7`` even if some days
-    are missing; a partial window near the start (e.g. ``n=3``) gets
-    ``gamma=2/3``. Pass a numeric ``gamma`` to force a fixed decay.
-    """
-
-    def _ewm_last(window_values):
-        return ewma_gamma(window_values, gamma, empty=np.nan)
-
-    return (
-        series.shift(1)
-        .rolling(window=window, min_periods=min_periods)
-        .apply(_ewm_last, raw=True)
-    )
-
-
-# Fraction wasActive among prior ≤7 days with ActivityCheck answered (excludes today)
-def _active_frac_last7_answered(g):
-    g = g.sort_values("date")
-    hist = []
-    out = np.full(len(g), np.nan)
-    for i, status in enumerate(g["active_status"]):
-        if hist:
-            out[i] = np.mean(hist[-7:])
-        if pd.notna(status):
-            hist.append(float(status))
-    return pd.Series(out, index=g.index)
-
-
-df_daily_filled = df_daily_filled.sort_values(
-    ["ParticipantIdentifier", "date"], kind="mergesort"
-)
-df_daily_filled["active_status_fraction_7days"] = (
-    df_daily_filled.groupby("ParticipantIdentifier", sort=False)
-    .apply(_active_frac_last7_answered)
-    .reset_index(level=0, drop=True)
-)
+# History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
+# derived_covariates.py and added in 2_combine_data_frame.py.
 
 
 # add day numbers as well:
@@ -1803,14 +1748,8 @@ df_daily_pageview['YesterdayPageviewCount'] = (
     .astype(int)
 )
 
-# EWM (gamma derived from k, the number of prior days available; 6/7 for a
-# full 7-day window) over prior ≤7 calendar days of pageviews (excludes today)
-df_daily_pageview['Past7DaysPageviewEMA'] = (
-    df_daily_pageview
-    .sort_values(['ParticipantIdentifier', 'Date'], kind='mergesort')
-    .groupby('ParticipantIdentifier', sort=False)['DailyPageviewCount']
-    .transform(lambda s: _ewm_prior_rows(s))
-)
+# History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
+# derived_covariates.py and added in 2_combine_data_frame.py.
 
 # get tomorrow's pageview count
 # df_daily_pageview['TomorrowPageviewCount'] = (
@@ -1891,20 +1830,8 @@ df_hourly_pageview = df_hourly_pageview.sort_values(
     ['ParticipantIdentifier', 'Date', 'DecisionTime'],
     kind='mergesort',
 )
-df_hourly_pageview['HourlyPageviewCount_lag1'] = (
-    df_hourly_pageview
-    .groupby('ParticipantIdentifier', sort=False)['HourlyPageviewCount']
-    .shift(1)
-)
-
-# EWM (gamma derived from k, the number of prior same-slot rows available)
-# over prior ≤7 same-slot pageviews (excludes current slot)
-df_hourly_pageview['Past7DaysHourlyPageviewEMA'] = (
-    df_hourly_pageview
-    .sort_values(['ParticipantIdentifier', 'Date', 'DecisionTime'], kind='mergesort')
-    .groupby(['ParticipantIdentifier', 'DecisionTime'], sort=False)['HourlyPageviewCount']
-    .transform(lambda s: _ewm_prior_rows(s))
-)
+# History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
+# derived_covariates.py and added in 2_combine_data_frame.py.
 
 # save the dataframe
 df_hourly_pageview.to_csv(folder / 'hourly_pageview.csv', index=False)
@@ -2181,38 +2108,9 @@ for n in range(len(complete_participant_ids)):
 
 df_gif_all = pd.DataFrame(df_gif_all)
 
-# Delivered-only interaction fraction over prior 14 slots (~7 days × 2);
-# excludes current slot. Non-deliveries are not coded 0 in the denominator.
-# Windows with no deliveries stay NaN (imputed later when a complete vector
-# is required).
+# History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
+# derived_covariates.py and added in 2_combine_data_frame.py.
 df_gif_all = df_gif_all.sort_values(['ParticipantIdentifier', 'Date', 'DecisionTime'], kind='mergesort')
-_gif_parts = []
-for _, _g in df_gif_all.groupby('ParticipantIdentifier', sort=False):
-    _g = _g.copy()
-    _g['Interacted_7d'] = mean_prior_delivered_fraction(
-        _g['Interacted'], _g['WalkingSuggestion'], window=14, min_periods=7,
-    )
-    _gif_parts.append(_g)
-df_gif_all = pd.concat(_gif_parts, ignore_index=True)
-
-# recent_burden: X_d = daily walking-suggestion count (sum over AM/PM slots), then
-#   _ewm_prior_rows on the daily series (window=7, gamma from the calendar
-#   window length; r = 6/7 once a full 7-day window exists). Missing days
-#   keep their slot in the decay and are omitted from the average.
-_daily_panel = (
-    df_gif_all.groupby(['ParticipantIdentifier', 'Date'], sort=False)['WalkingSuggestion']
-    .sum()
-    .reset_index(name='_daily_suggestions')
-)
-_daily_panel['recent_burden'] = (
-    _daily_panel.groupby('ParticipantIdentifier', sort=False)['_daily_suggestions']
-    .transform(lambda s: _ewm_prior_rows(s, window=7, min_periods=1))
-)
-df_gif_all = df_gif_all.merge(
-    _daily_panel[['ParticipantIdentifier', 'Date', 'recent_burden']],
-    on=['ParticipantIdentifier', 'Date'],
-    how='left',
-)
 
 print(df_gif_all)
 print(df_gif_all.Interacted.value_counts())
@@ -2446,13 +2344,8 @@ for participant_id in complete_participant_ids:
         })
 df_missing_days = pd.DataFrame(missing_days_list)
 
-# Proportion of prior ≤7 calendar days with sufficient wear (excludes today)
-df_missing_days['past7days_daywearing'] = (
-    df_missing_days
-    .sort_values(['ParticipantIdentifier', 'Date'], kind='mergesort')
-    .groupby('ParticipantIdentifier', sort=False)['DayWearing']
-    .transform(lambda s: _mean_prior_rows(s, window=7, min_periods=1))
-)
+# History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
+# derived_covariates.py and added in 2_combine_data_frame.py.
 
 # add a column of next day wearing
 # df_missing_days['nextday_wearing'] = df_missing_days['DayWearing'].shift(-1)
@@ -2828,13 +2721,8 @@ wear_day = wear_day.merge(
     validate='one_to_one',
 )
 
-# Proportion of prior ≤7 calendar mornings with wear (excludes today)
-wear_day['past7days_morning_wearing'] = (
-    wear_day
-    .sort_values(['ParticipantIdentifier', 'Date'], kind='mergesort')
-    .groupby('ParticipantIdentifier', sort=False)['morning_wearing']
-    .transform(lambda s: _mean_prior_rows(s, window=7, min_periods=1))
-)
+# History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
+# derived_covariates.py and added in 2_combine_data_frame.py.
 
 # save the next morning wearing data
 wear_day.to_csv(folder/ 'wear_day.csv', index=False)
@@ -2937,17 +2825,12 @@ for participant_id in complete_participant_ids:
 
 df_hourly_step_counts = pd.DataFrame(hourly_step_counts)
 
-# EWM (gamma derived from k, the number of prior same-slot rows available)
-# over prior ≤7 same-slot step counts (excludes current slot)
+# History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
+# derived_covariates.py and added in 2_combine_data_frame.py.
 df_hourly_step_counts = df_hourly_step_counts.sort_values(
     ["ParticipantIdentifier", "DecisionTime", "Date"],
     kind="mergesort",
 ).reset_index(drop=True)
-df_hourly_step_counts["EMA_StepCount"] = (
-    df_hourly_step_counts.groupby(["ParticipantIdentifier", "DecisionTime"], sort=False)[
-        "StepCount"
-    ].transform(lambda s: _ewm_prior_rows(s))
-)
 
 
 # print the proportion of wearing == 0 but valid_sc !=0
@@ -3022,15 +2905,8 @@ for participant_id in complete_participant_ids:
 
 df_today_step_counts = pd.DataFrame(today_step_counts)
 
-# Yesterday at D = TodayStepCount of the previous calendar row (steps on D-1).
-# Date is the measurement day — do not store under D+1; that plus shift(1)
-# would make YesterdayStepCount a two-day lag.
-df_today_step_counts['YesterdayStepCount'] = (
-    df_today_step_counts
-    .sort_values(['ParticipantIdentifier', 'Date'], kind='mergesort')
-    .groupby('ParticipantIdentifier', sort=False)['TodayStepCount']
-    .shift(1)
-)
+# History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
+# derived_covariates.py and added in 2_combine_data_frame.py.
 
 #print ratio of wearing == 1 but valid_sc !=0
 print(len(df_today_step_counts[df_today_step_counts['TodayStepCount'] > 0]) / len(df_today_step_counts))
@@ -3089,17 +2965,12 @@ for participant_id in complete_participant_ids:
 
 df_prior_2hours_step_counts = pd.DataFrame(prior_2hours_step_counts)
 
-# EWM (gamma derived from k, the number of prior same-slot rows available)
-# over prior ≤7 same-slot prior-2h step counts (excludes current slot)
+# History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
+# derived_covariates.py and added in 2_combine_data_frame.py.
 df_prior_2hours_step_counts = df_prior_2hours_step_counts.sort_values(
     ["ParticipantIdentifier", "DecisionTime", "Date"],
     kind="mergesort",
 ).reset_index(drop=True)
-df_prior_2hours_step_counts["EMA_Prior2HourStepCount"] = (
-    df_prior_2hours_step_counts.groupby(["ParticipantIdentifier", "DecisionTime"], sort=False)[
-        "StepCount"
-    ].transform(lambda s: _ewm_prior_rows(s))
-)
 
 print((df_prior_2hours_step_counts[df_prior_2hours_step_counts['ParticipantIdentifier'] == 31]))
 

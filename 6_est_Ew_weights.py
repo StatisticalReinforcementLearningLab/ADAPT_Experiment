@@ -8,10 +8,11 @@ update of the target E). ``E_lag`` is the previous week's *predicted* Ê
 (week 1 uses the E_1 pin 2.0), not last Sunday's survey and not script 4's
 latent filter.
 
-PV/FW/PJ averages use the same fixed denominators as script 4 (14 slots /
-7 days) with missing values as 0. FW therefore treats a missing wear flag
-as not wearing, matching the simulator — not a wear-among-observed-days
-mean.
+PV/FW/PJ averages are Monday--Saturday means (12 decision slots / 6 days),
+exactly as the online approximation computes them in the trial, with a
+missing value treated as no engagement (zero page-view count, not worn, not
+completed). The target E is still the 7-day perceived-utility model's
+posterior mean.
 
 Fits nonnegative within-user ridge (demean each person, shared slopes, then
 one intercept on the raw scale), iterating ``E_lag`` until the recursive
@@ -112,8 +113,8 @@ def weekly_predictor_table(
 ) -> pd.DataFrame:
     """One row per (ParticipantIdentifier, week) with predictors from ``df_fit``.
 
-    ``PV_sum`` / ``FW_sum`` / ``PJ_sum`` are ``nansum / 14`` and ``nansum / 7``
-    (missing → 0), matching ``4_perceived_utility.build_user_blocks``. A
+    ``PV_sum`` / ``FW_sum`` / ``PJ_sum`` are Monday--Saturday means (/12, /6),
+    as computed online in the trial; missing values count as no engagement. A
     missing Fitbit wear flag is coded as not wearing, not dropped from the
     denominator. ``J_close`` / ``half_J_close`` are this Sunday's
     ``J_{w+1}`` and ``J_{w+1}(U_1+U_2)/14`` (emissions of ``E_{w+1}``).
@@ -124,12 +125,21 @@ def weekly_predictor_table(
     u1_mean = float(response_imputation_means["U1"])
     u2_mean = float(response_imputation_means["U2"])
 
+    # Standardized zero-count page-view value: a missing or absent slot is a
+    # zero count, imputed on the raw scale before standardization.
+    _zero = pd.to_numeric(df["HourlyPageviewCount"], errors="coerce") == 0
+    _z0 = pd.to_numeric(df.loc[_zero, "HourlyPageviewCount_norm"], errors="coerce").dropna()
+    pv_z0 = float(_z0.iloc[0]) if len(_z0) else 0.0
+
+    # Monday--Saturday only (the trial's decision days; dow: Monday = 1).
+    n_days, n_slots = 6, 12
     rows = []
-    for (uid, wk), g in df.groupby(["ParticipantIdentifier", "week"], sort=True):
-        g = g.sort_values([date_col, decision_col], na_position="last")
-        j_w = _first_nonmissing(g["week_present"])
-        u1 = _first_nonmissing(g["Exp-tool-1"])
-        u2 = _first_nonmissing(g["Exp-tool-2"])
+    for (uid, wk), g_all in df.groupby(["ParticipantIdentifier", "week"], sort=True):
+        g_all = g_all.sort_values([date_col, decision_col], na_position="last")
+        g = g_all[g_all["dow"] <= n_days]
+        j_w = _first_nonmissing(g_all["week_present"])
+        u1 = _first_nonmissing(g_all["Exp-tool-1"])
+        u2 = _first_nonmissing(g_all["Exp-tool-2"])
         if np.isnan(u1):
             u1 = u1_mean
         if np.isnan(u2):
@@ -139,8 +149,8 @@ def weekly_predictor_table(
         j_w = float(j_w)
         half_j_close = j_w * (u1 + u2) / 14.0
         pv_arr = g["HourlyPageviewCount_norm"].to_numpy(dtype=float)
-        pv_arr = np.where(np.isfinite(pv_arr), pv_arr, 0.0)
-        pv_sum = float(np.sum(pv_arr) / 14.0) if pv_arr.size else 0.0
+        pv_arr = np.where(np.isfinite(pv_arr), pv_arr, pv_z0)
+        pv_sum = float((np.sum(pv_arr) + max(n_slots - pv_arr.size, 0) * pv_z0) / n_slots)
 
         fw_daily, pj_daily = [], []
         for _, g_day in g.groupby(date_col, sort=True):
@@ -150,11 +160,9 @@ def weekly_predictor_table(
             vpj = row0["daily_present"]
             fw_daily.append(float(vfw) if pd.notna(vfw) else 0.0)
             pj_daily.append(float(vpj) if pd.notna(vpj) else 0.0)
-        # Missing wear → 0 / 7, not mean over observed days (script 4 / vani_env).
-        fw_arr = np.asarray(fw_daily, dtype=float)
-        pj_arr = np.asarray(pj_daily, dtype=float)
-        fw_sum = float(np.sum(fw_arr) / 7.0) if fw_arr.size else 0.0
-        pj_sum = float(np.sum(pj_arr) / 7.0) if pj_arr.size else 0.0
+        # Missing wear / check-in -> 0 (no engagement); fixed denominator.
+        fw_sum = float(np.sum(np.asarray(fw_daily, dtype=float)) / n_days)
+        pj_sum = float(np.sum(np.asarray(pj_daily, dtype=float)) / n_days)
 
         rows.append(
             {

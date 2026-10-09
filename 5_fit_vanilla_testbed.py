@@ -6,11 +6,14 @@ or as a hierarchical Bayesian model:
     4-hour step counts, anticipated affect, weekly CAE / short CAE,
     prior-2h steps, active status, walking-suggestion interaction.
 
+The fitting panel (MRT weeks 2-12, renumbered 1-11) is built in script 3.
+
 The analysis sample is already restricted in script 1 (wear/FourSC, survey
 response, ≥1 CAE week, and the high-CAE ceiling: min weekly CAE_avg ≥ 6 or
 week-1 CAE_avg = 7). This script fits whoever remains in ``df_fit.csv``.
 Writes ``params_env_<uid>.json`` (mediator/outcome blocks and residuals),
-``pred_<uid>.json``, ``user_ids.txt``, and ``population_residuals.json``.
+``pred_<uid>.json`` and ``user_ids.txt``. All models are hierarchical
+Bayesian (one NUTS schedule, NUTS_TUNE / NUTS_DRAWS / NUTS_TARGET_ACCEPT).
 Does not overwrite the E_w / PV / FW / PJ blocks from script 4 (including
 the ``J_w`` ``query_Jw_*`` suffix on PV/FW/PJ).
 Next: ``6_est_Ew_weights.py``.
@@ -27,12 +30,6 @@ import pymc as pm
 import pytensor.tensor as pt
 from patsy import dmatrix
 from pathlib import Path
-from sklearn.linear_model import (
-    LogisticRegression,
-    LogisticRegressionCV,
-    Ridge,
-    RidgeCV,
-)
 
 from vani_env import assert_complete_week_slots, cae_mediator_ewma_rows
 
@@ -69,25 +66,9 @@ file_params_env_prefix = str(work_folder / 'params_env_')
 file_pred_prefix = str(work_folder / 'pred_')
 file_user_ids = str(work_folder / 'user_ids.txt')
 
-# Combiner already drops weeks 0 and 13. Vanilla fit keeps study weeks 2–12
-# and renumbers them to 1–11.
-df_fit = df_fit[df_fit["week"] > 1]
-df_fit["week"] = df_fit["week"] - 1
-
-# Re-index calendar covariates on the retained rows (after week drop/relabel).
-VANILLA_DAY_RANGE = 84
-VANILLA_WEEK_RANGE = 11
+# The fitting panel (MRT weeks 2-12 renumbered 1-11; week 1 only supplies
+# lags) is built in 3_standardization.py and shared with 4b.
 df_fit["Date"] = pd.to_datetime(df_fit["Date"], errors="coerce")
-df_fit["day"] = (
-    df_fit.groupby("ParticipantIdentifier", sort=False)["Date"]
-    .transform(lambda d: (d - d.min()).dt.days)
-)
-df_fit["day_norm"] = (
-    df_fit["day"] - (1 + VANILLA_DAY_RANGE) / 2
-) / ((VANILLA_DAY_RANGE - 1) / 2)
-df_fit["week_norm"] = (
-    df_fit["week"] - (1 + VANILLA_WEEK_RANGE) / 2
-) / ((VANILLA_WEEK_RANGE - 1) / 2)
 assert_complete_week_slots(df_fit)
 
 
@@ -165,8 +146,11 @@ class _BayesianRandomCoefResult:
         )
         sigma_re = post["sigma_re"].mean(("chain", "draw")).values
         self.cov_re = np.diag(sigma_re ** 2)
-        sigma_eps = float(post["sigma_eps"].mean(("chain", "draw")))
-        self.scale = sigma_eps ** 2
+        if "sigma_eps" in post:
+            sigma_eps = float(post["sigma_eps"].mean(("chain", "draw")))
+            self.scale = sigma_eps ** 2
+        else:  # Bernoulli likelihood
+            self.scale = float("nan")
 
         b_mean = post["b"].mean(("chain", "draw")).values  # (n_groups, p)
         self.random_effects = _store_group_effects_as_series(
@@ -174,7 +158,7 @@ class _BayesianRandomCoefResult:
         )
 
         n_div = int(idata.sample_stats["diverging"].sum())
-        rhat = az.rhat(idata, var_names=["beta", "sigma_re", "sigma_eps"])
+        rhat = az.rhat(idata, var_names=[v for v in ("beta", "sigma_re", "sigma_eps") if v in post])
         max_rhat = max(float(rhat[v].max()) for v in rhat.data_vars)
         self.n_divergences = n_div
         self.max_rhat = max_rhat
@@ -201,6 +185,33 @@ class _BayesianRandomCoefResult:
 # the point of a single constant is consistency, not information.
 WEAK_BETA_PRIOR_SD = float(np.sqrt(10.0))
 
+# One NUTS schedule for every hierarchical model in the testbed (CAE-related,
+# additional variables, and 4b's perceived-utility model).
+NUTS_TUNE = 2000
+NUTS_DRAWS = 3000
+NUTS_TARGET_ACCEPT = 0.95
+
+# Random-effect SD prior mode, Gamma(2, mode): one value per outcome scale.
+# Standardized continuous outcomes use 0.15; logit-scale (Bernoulli) models
+# use 0.5, the value used by the perceived-utility model.
+RE_SD_MODE_CONTINUOUS = 0.15
+RE_SD_MODE_LOGIT = 0.5
+
+# Sign-constrained population slopes (beta_prior_sign != 0).
+#   "direction" (default): beta_j = sign_j * |N(0, 1)|. Only the direction comes
+#       from the working causal model; the magnitude is left to the data
+#       (outcomes are z-scored, so SD 1 is weakly informative). Same rule as
+#       the perceived-utility model (4b_perceived_utility_bayes.py).
+#   "magnitude" (legacy, up to 2026-10): HalfNormal scaled so its prior mean
+#       equals beta_prior_mu_j (prior SD ~= 0.60 |mu_j|), i.e. the magnitude
+#       is constrained as well.
+# Select with ADAPR_SIGN_PRIOR=direction|magnitude.
+SIGN_PRIOR_MODE = os.environ.get("ADAPR_SIGN_PRIOR", "direction").strip().lower()
+if SIGN_PRIOR_MODE not in ("direction", "magnitude"):
+    raise SystemExit(f"ADAPR_SIGN_PRIOR must be 'direction' or 'magnitude', got {SIGN_PRIOR_MODE!r}")
+DIRECTION_ONLY_SCALE = 1.0
+print(f"Sign-constrained slope priors: {SIGN_PRIOR_MODE}")
+
 
 def fit_bayesian_random_coef_model(
     y,
@@ -210,13 +221,15 @@ def fit_bayesian_random_coef_model(
     beta_prior_mu=0.0,
     beta_prior_sd=WEAK_BETA_PRIOR_SD,
     beta_prior_sign=0.0,
-    re_sd_prior_mode=0.15,
+    re_sd_prior_mode=RE_SD_MODE_CONTINUOUS,
+    signed_prior_scale=None,
     sigma_eps_prior_alpha=2.0,
-    sigma_eps_prior_beta=0.5,
-    draws=2000,
-    tune=3000,
+    sigma_eps_prior_beta=None,
+    likelihood="gaussian",
+    draws=NUTS_DRAWS,
+    tune=NUTS_TUNE,
     chains=4,
-    target_accept=0.99,
+    target_accept=NUTS_TARGET_ACCEPT,
     max_treedepth=12,
     seed=2026,
 ):
@@ -243,6 +256,10 @@ def fit_bayesian_random_coef_model(
       is tied to its scale (prior SD ~= 0.60 * |mu|) — and the population
       slope can never cross zero, though individual users' ``beta + b_i``
       still can. Columns with sign 0 keep the Normal prior.
+      ``signed_prior_scale`` overrides that scale with one constant for all
+      signed columns (direction-only prior). ``None`` follows
+      ``SIGN_PRIOR_MODE``: ``DIRECTION_ONLY_SCALE`` in "direction" mode, the
+      mean-matched scale in "magnitude" mode.
     - ``re_sd_prior_mode`` sets a ``Gamma(shape=2, mode=re_sd_prior_mode)``
       prior on each random-effect SD. Unlike a Half-Normal/Half-Cauchy (the
       usual textbook default), a shape-2 Gamma has *zero density at exactly
@@ -254,10 +271,11 @@ def fit_bayesian_random_coef_model(
     - the residual variance ``sigma_eps**2`` gets an
       ``InverseGamma(sigma_eps_prior_alpha, sigma_eps_prior_beta)`` prior —
       the conjugate family for a Gaussian likelihood, with zero density at 0
-      so the noise scale can't collapse. The default IG(2, 0.5) is weak
-      (prior mean variance 0.5 on z-scored outcomes, infinite prior
-      variance); with hundreds of observation-level rows the likelihood
-      dominates it. ``sigma_eps`` is exposed as a Deterministic so summaries
+      so the noise scale can't collapse. The default scale is
+      ``0.5 * var(y)`` (one rule for every Gaussian model in the testbed):
+      the prior mean of the residual variance is half the outcome's sample
+      variance, i.e. IG(2, 0.5) for a z-scored outcome; the prior variance
+      is infinite, so the likelihood dominates. ``sigma_eps`` is exposed as a Deterministic so summaries
       and convergence checks are unchanged.
 
     Both priors act inside the same likelihood that estimates ``b_i``, so
@@ -279,6 +297,8 @@ def fit_bayesian_random_coef_model(
 
     keep = np.isfinite(y) & np.all(np.isfinite(X), axis=1)
     y, X, groups = y[keep], X[keep], groups[keep]
+    if sigma_eps_prior_beta is None:
+        sigma_eps_prior_beta = 0.5 * float(np.var(y, ddof=1))
 
     group_keys, group_idx = np.unique(groups, return_inverse=True)
     n_groups = len(group_keys)
@@ -291,7 +311,9 @@ def fit_bayesian_random_coef_model(
     if not np.all(np.isin(beta_prior_sign, (-1.0, 0.0, 1.0))):
         raise ValueError("beta_prior_sign entries must be -1, 0, or +1")
     signed = beta_prior_sign != 0.0
-    if np.any(signed) and np.any(np.abs(beta_prior_mu[signed]) <= 0.0):
+    if signed_prior_scale is None and SIGN_PRIOR_MODE == "direction":
+        signed_prior_scale = DIRECTION_ONLY_SCALE
+    if signed_prior_scale is None and np.any(signed) and np.any(np.abs(beta_prior_mu[signed]) <= 0.0):
         raise ValueError(
             "sign-constrained columns need a nonzero beta_prior_mu "
             "(it sets the HalfNormal's prior mean)"
@@ -311,9 +333,13 @@ def fit_bayesian_random_coef_model(
                 sigma=beta_prior_sd[free_idx],
                 shape=len(free_idx),
             )
+            if signed_prior_scale is None:
+                mag_scale = np.abs(beta_prior_mu[sign_idx]) / halfnormal_mean_factor
+            else:
+                mag_scale = np.full(len(sign_idx), float(signed_prior_scale))
             beta_mag = pm.HalfNormal(
                 "beta_mag",
-                sigma=np.abs(beta_prior_mu[sign_idx]) / halfnormal_mean_factor,
+                sigma=mag_scale,
                 shape=len(sign_idx),
             )
             beta_full = pt.zeros(p)
@@ -329,11 +355,16 @@ def fit_bayesian_random_coef_model(
         b = pm.Deterministic("b", b_raw * sigma_re[None, :])
         theta = beta[None, :] + b
         mu = pm.math.sum(X * theta[group_idx], axis=1)
-        sigma_eps_sq = pm.InverseGamma(
-            "sigma_eps_sq", alpha=sigma_eps_prior_alpha, beta=sigma_eps_prior_beta
-        )
-        sigma_eps = pm.Deterministic("sigma_eps", pm.math.sqrt(sigma_eps_sq))
-        pm.Normal("y_obs", mu=mu, sigma=sigma_eps, observed=y)
+        if likelihood == "bernoulli":
+            pm.Bernoulli("y_obs", logit_p=mu, observed=y)
+        elif likelihood == "gaussian":
+            sigma_eps_sq = pm.InverseGamma(
+                "sigma_eps_sq", alpha=sigma_eps_prior_alpha, beta=sigma_eps_prior_beta
+            )
+            sigma_eps = pm.Deterministic("sigma_eps", pm.math.sqrt(sigma_eps_sq))
+            pm.Normal("y_obs", mu=mu, sigma=sigma_eps, observed=y)
+        else:
+            raise ValueError(f"unknown likelihood {likelihood!r}")
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -548,7 +579,6 @@ def build_fourSC_bayes_data(df, userid_all):
         fourSC = dat_user["4hour_step_norm"].to_numpy()
         fourSC_lag1 = fill_nan_with_mean(dat_user["FourSC_lag1"].to_numpy())
         yesterday_step_count = fill_nan_with_mean(dat_user["YesterdayStepCount_norm"].to_numpy())
-        seven_day_step_count_avg = fill_nan_with_mean(dat_user["EMA_StepCount_norm"].to_numpy())
         prior2hour_step_count_filled = fill_nan_with_mean(dat_user["prior2hour_step_norm"].to_numpy())
         recent_burden = fill_nan_with_mean(dat_user["recent_burden_norm"].to_numpy())
         seven_day_pageview_count = fill_nan_with_mean(dat_user["Past7DaysPageviewEMA_norm"].to_numpy())
@@ -577,7 +607,6 @@ def build_fourSC_bayes_data(df, userid_all):
                 Intercept,
                 fourSC_lag1,
                 yesterday_step_count,
-                seven_day_step_count_avg,
                 prior2hour_step_count_filled,
                 recent_burden,
                 seven_day_pageview_count,
@@ -698,6 +727,10 @@ THETA_PRIOR2HOUR_STEP_COUNT_NAMES = [
     "EMA_Prior2HourStepCount",
     "is_weekend",
     "decision_time",
+    # next-4h steps of the previous decision slot, separate AM / PM slopes
+    # (PM: same-day morning, whose window overlaps the PM prior-2h window)
+    "fourSC_lag1_morning",
+    "fourSC_lag1_afternoon",
 ]
 
 THETA_ACTIVE_STATUS_NAMES = [
@@ -718,7 +751,6 @@ THETA_FOURSC_NAMES = [
     "intercept",
     "fourSC_lag1",
     "yesterday_step_count",
-    "seven_day_step_count_avg",
     "prior2hour_step_count",
     "recent_burden",
     "seven_day_pageview_count",
@@ -776,7 +808,56 @@ THETA_CAE_SHORT_AVG_NAMES = [
     "CAE_avg",
 ]
 
-alpha_l2_list = [1, 2, 5]  # floor at 1; drop weak penalties that inflate sparse cells
+def other_variable_designs(dat_user):
+    """Designs, outcomes and observed-row masks for the additional variables.
+
+    Missing predictors are replaced by the participant mean (same rule as the
+    CAE-related models). Returns ``{name: (X, y, observed_mask)}``.
+    """
+    dt = dat_user["DecisionTime"].to_numpy(dtype=float)
+    we = dat_user["is_weekend"].to_numpy(dtype=float)
+    one = np.ones(len(dt))
+    lag = fill_nan_with_mean(dat_user["FourSC_lag1"].to_numpy(dtype=float))
+    ema_p2h = fill_nan_with_mean(dat_user["EMA_Prior2HourStepCount_norm"].to_numpy(dtype=float))
+    y_p2h = dat_user["prior2hour_step_norm"].to_numpy(dtype=float)
+    X_p2h = np.column_stack([one, ema_p2h, we, dt, (1.0 - dt) * lag, dt * lag])
+
+    frac_active = fill_nan_with_mean(dat_user["active_status_fraction_7days"].to_numpy(dtype=float))
+    y_ad = dat_user["active_status"].to_numpy(dtype=float)
+    X_ad = np.column_stack([one, frac_active, we])
+
+    frac_inter = fill_nan_with_mean(dat_user["Interacted_7d_walk"].to_numpy(dtype=float))
+    y_as = dat_user["Interacted_walk"].to_numpy(dtype=float)
+    sent = dat_user["WalkingSuggestion"].to_numpy(dtype=float)
+    X_as = np.column_stack([one, frac_inter, we, dt])
+    return {
+        "prior2hour": (X_p2h, y_p2h, np.isfinite(y_p2h)),
+        # active status is the end-of-day answer; one row per day (morning row)
+        "active_status": (X_ad, y_ad, (dt == 0) & np.isfinite(y_ad)),
+        # interaction is defined only when a suggestion was delivered
+        "ws_interaction": (X_as, y_as, np.isfinite(y_as) & (sent == 1.0)),
+    }
+
+
+def pooled_other_variable_data(df_fit, userids):
+    """Stack :func:`other_variable_designs` over participants (observed rows only)."""
+    out = {k: ([], [], []) for k in ("prior2hour", "active_status", "ws_interaction")}
+    for uid in userids:
+        dat_user = df_fit[df_fit["ParticipantIdentifier"] == uid].sort_values(
+            ["Date", "DecisionTime"], na_position="last").reset_index(drop=True)
+        for k, (X, y, m) in other_variable_designs(dat_user).items():
+            out[k][0].append(X[m]); out[k][1].append(y[m]); out[k][2].append(np.full(int(m.sum()), uid))
+    return {k: (np.vstack(Xs), np.concatenate(ys), np.concatenate(gs)) for k, (Xs, ys, gs) in out.items()}
+
+
+def participant_theta(result, userid):
+    """Posterior-mean participant coefficients beta + b_i."""
+    beta = result.fe_params.to_numpy(dtype=float)
+    return beta + get_user_random_effect(result, userid, beta.size)
+
+
+def _sigmoid_np(x):
+    return 1.0 / (1.0 + np.exp(-x))
 ncv = 5
 seed = 2026
 
@@ -870,7 +951,7 @@ CAE_BETA_PRIOR_SD = np.array(
     [WEAK_BETA_PRIOR_SD, 0.15, WEAK_BETA_PRIOR_SD, 0.15, 0.15]
 )
 CAE_BETA_PRIOR_SIGN = np.array([0.0, 1.0, 0.0, 1.0, 1.0])
-CAE_RE_SD_PRIOR_MODE = np.array([0.1, 0.15, 0.1, 0.15, 0.15])
+CAE_RE_SD_PRIOR_MODE = np.full(len(THETA_CAE_NAMES), RE_SD_MODE_CONTINUOUS)
 
 cae_ml_df = build_cae_mixedlm_data(df_fit, userid_all, K=14)
 
@@ -967,17 +1048,15 @@ cae_short_random_effect_cols = list(range(len(THETA_CAE_SHORT_AVG_NAMES)))
 # to the old 0.03-0.04 — but ~0.018 for the +0.03 "should help" terms,
 # tighter than the old 0.08, so those population means are now confined to
 # roughly (0, 0.09)).
-ANTIC_RE_SD_PRIOR_MODE = np.full(len(THETA_ANTIC_NAMES), 0.15)
+ANTIC_RE_SD_PRIOR_MODE = np.full(len(THETA_ANTIC_NAMES), RE_SD_MODE_CONTINUOUS)
 ANTIC_BETA_PRIOR_SD = np.full(len(THETA_ANTIC_NAMES), WEAK_BETA_PRIOR_SD)
 ANTIC_BETA_PRIOR_MU = np.zeros(len(THETA_ANTIC_NAMES))
 ANTIC_BETA_PRIOR_SIGN = np.zeros(len(THETA_ANTIC_NAMES))
 for _name in ("A0_morning_by_recent_burden", "A1_afternoon_by_recent_burden"):
     ANTIC_BETA_PRIOR_MU[THETA_ANTIC_NAMES.index(_name)] = -0.05
     ANTIC_BETA_PRIOR_SIGN[THETA_ANTIC_NAMES.index(_name)] = -1.0
-    ANTIC_RE_SD_PRIOR_MODE[THETA_ANTIC_NAMES.index(_name)] = 0.05
 ANTIC_BETA_PRIOR_MU[THETA_ANTIC_NAMES.index("recent_burden")] = -0.05
 ANTIC_BETA_PRIOR_SIGN[THETA_ANTIC_NAMES.index("recent_burden")] = -1.0
-ANTIC_RE_SD_PRIOR_MODE[THETA_ANTIC_NAMES.index("recent_burden")] = 0.05
 for _name in (
     "perceived_utility_lastweek",
     "CAE_avg_lastweek",
@@ -1007,9 +1086,6 @@ mixedlm_antic = fit_bayesian_random_coef_model(
     beta_prior_sd=ANTIC_BETA_PRIOR_SD,
     beta_prior_sign=ANTIC_BETA_PRIOR_SIGN,
     re_sd_prior_mode=ANTIC_RE_SD_PRIOR_MODE,
-    draws=1000,
-    tune=1500,
-    target_accept=0.95,
 )
 
 print(mixedlm_antic.summary())
@@ -1017,13 +1093,12 @@ print(f"Anticipated-affect Bayesian fit converged: {mixedlm_antic.converged}")
 
 # Same 2026-09-15 HalfNormal switch as theta_antic above: informative
 # columns use beta_prior_sign = sign(mu) with prior mean matched to mu.
-FOURSC_RE_SD_PRIOR_MODE = np.full(len(THETA_FOURSC_NAMES), 0.15)
+FOURSC_RE_SD_PRIOR_MODE = np.full(len(THETA_FOURSC_NAMES), RE_SD_MODE_CONTINUOUS)
 FOURSC_BETA_PRIOR_SD = np.full(len(THETA_FOURSC_NAMES), WEAK_BETA_PRIOR_SD)
 FOURSC_BETA_PRIOR_MU = np.zeros(len(THETA_FOURSC_NAMES))
 FOURSC_BETA_PRIOR_SIGN = np.zeros(len(THETA_FOURSC_NAMES))
 FOURSC_BETA_PRIOR_MU[THETA_FOURSC_NAMES.index("recent_burden")] = -0.05
 FOURSC_BETA_PRIOR_SIGN[THETA_FOURSC_NAMES.index("recent_burden")] = -1.0
-FOURSC_RE_SD_PRIOR_MODE[THETA_FOURSC_NAMES.index("recent_burden")] = 0.05
 # This interaction is the one that most directly let a constant-suggestion
 # policy compound unchecked for a couple of outlier users: one came back at
 # +0.057 against this -0.05 population mean under the old wide re_sd prior
@@ -1033,7 +1108,6 @@ FOURSC_RE_SD_PRIOR_MODE[THETA_FOURSC_NAMES.index("recent_burden")] = 0.05
 # handful of noisy per-user rows to produce it.
 FOURSC_BETA_PRIOR_MU[THETA_FOURSC_NAMES.index("WalkingSuggestion_by_recent_burden")] = -0.05
 FOURSC_BETA_PRIOR_SIGN[THETA_FOURSC_NAMES.index("WalkingSuggestion_by_recent_burden")] = -1.0
-FOURSC_RE_SD_PRIOR_MODE[THETA_FOURSC_NAMES.index("WalkingSuggestion_by_recent_burden")] = 0.05
 # Same "assert the population mean, leave individuals free" treatment as
 # theta_antic above, for the E_w/Y_w/A -> M^Y terms that used to be
 # sign-flipped post-hoc.
@@ -1063,32 +1137,37 @@ mixedlm_fourSC = fit_bayesian_random_coef_model(
     beta_prior_sd=FOURSC_BETA_PRIOR_SD,
     beta_prior_sign=FOURSC_BETA_PRIOR_SIGN,
     re_sd_prior_mode=FOURSC_RE_SD_PRIOR_MODE,
-    draws=2000,
-    tune=3000,
-    target_accept=0.99,
 )
 
 print(mixedlm_fourSC.summary())
 print(f"FourSC Bayesian fit converged: {mixedlm_fourSC.converged}")
 
+# ============================================================
+# Additional time-varying variables: joint hierarchical fits (same model
+# class as above; Bernoulli likelihood for the binary outcomes).
+# ============================================================
+_other = pooled_other_variable_data(df_fit, userid_all)
+mixedlm_prior2hour = fit_bayesian_random_coef_model(
+    y=_other["prior2hour"][1], X=_other["prior2hour"][0], groups=_other["prior2hour"][2],
+    predictor_names=list(THETA_PRIOR2HOUR_STEP_COUNT_NAMES),
+)
+print(mixedlm_prior2hour.summary())
+mixedlm_active_status = fit_bayesian_random_coef_model(
+    y=_other["active_status"][1], X=_other["active_status"][0], groups=_other["active_status"][2],
+    predictor_names=list(THETA_ACTIVE_STATUS_NAMES),
+    likelihood="bernoulli", re_sd_prior_mode=RE_SD_MODE_LOGIT,
+)
+print(mixedlm_active_status.summary())
+mixedlm_ws_interaction = fit_bayesian_random_coef_model(
+    y=_other["ws_interaction"][1], X=_other["ws_interaction"][0], groups=_other["ws_interaction"][2],
+    predictor_names=list(THETA_WS_INTERACTION_NAMES),
+    likelihood="bernoulli", re_sd_prior_mode=RE_SD_MODE_LOGIT,
+)
+print(mixedlm_ws_interaction.summary())
+
 theta_pageview_list = []
 theta_fitbitwearing_list = []
 theta_eodcomplete_list = []
-
-# Population-level residual pools (observed values only, across all users) for
-# the streams that feed the STE outcome most directly: CAE, CAE_short, antic,
-# fourSC. Users with very few of their own observations (e.g. n_obs_CAE == 1)
-# have a degenerate own residual pool — there's nothing to resample from, so
-# every noise mode (sequential/random/ar1) collapses to "replay that one
-# value" for them. ``vani_env.Env`` blends in these population pools (see
-# ``POPULATION_FALLBACK_MIN_OBS``) so sparse-data users still get plausible
-# simulated variability instead of an artificially smooth trajectory.
-population_resid_pools = {
-    "resid_CAE_population": [],
-    "resid_CAE_short_population": [],
-    "resid_antic_population": [],
-    "resid_fourSC_population": [],
-}
 
 for i, userid in enumerate(userid_all):
     dat_user = df_fit[df_fit['ParticipantIdentifier'] == userid].copy()
@@ -1131,7 +1210,6 @@ for i, userid in enumerate(userid_all):
     Intercept = np.ones(len(fourSC))
 
     yesterday_step_count = dat_user['YesterdayStepCount_norm'].to_numpy()
-    seven_day_step_count_avg = dat_user['EMA_StepCount_norm'].to_numpy()
 
     prior2hour_step_count = dat_user['prior2hour_step_norm'].to_numpy()
     ema_prior2hour_step_count = dat_user['EMA_Prior2HourStepCount_norm'].to_numpy()
@@ -1164,7 +1242,6 @@ for i, userid in enumerate(userid_all):
     # fill in missing values (NAN) with mean for predictors except for FourSC and Intercept
     fourSC_lag1 = fill_nan_with_mean(fourSC_lag1)
     yesterday_step_count = fill_nan_with_mean(yesterday_step_count)
-    seven_day_step_count_avg = fill_nan_with_mean(seven_day_step_count_avg)
     prior2hour_step_count_filled = fill_nan_with_mean(prior2hour_step_count)
     ema_prior2hour_step_count = fill_nan_with_mean(ema_prior2hour_step_count)
     active_status_fraction_7days = fill_nan_with_mean(active_status_fraction_7days)
@@ -1192,236 +1269,42 @@ for i, userid in enumerate(userid_all):
 
     ###### fit the models ######
 
-    #### Model 1: Prior 2-hour step count model #### 
+    #### Models 1-3: prior-2h steps, active status, suggestion interaction ####
+    # Participant coefficients = posterior mean of beta + b_i from the joint
+    # hierarchical fits above (a participant without observations of an
+    # outcome gets the population coefficients).
+    designs = other_variable_designs(dat_user)
 
-    prior2hour_step_count_cond = np.stack([
-        Intercept,
-        ema_prior2hour_step_count,
-        is_weekend, decision_time
-    ], axis=1)
-    #filter out rows where prior2hour_step_count is NaN
-    idx_obs_prior2hour_step_count = ~np.isnan(prior2hour_step_count)
-    prior2hour_step_count_cond_obs = prior2hour_step_count_cond[idx_obs_prior2hour_step_count, :]
-    prior2hour_step_count_obs = prior2hour_step_count[idx_obs_prior2hour_step_count]
-    n_obs_prior2hour_step_count = int(idx_obs_prior2hour_step_count.sum())
-
-    if n_obs_prior2hour_step_count >= 2:
-        cv_prior2hour_step_count = min(5, n_obs_prior2hour_step_count)
-        model_prior2hour_step_count = RidgeCV(
-            alphas=alpha_l2_list,
-            fit_intercept=False,
-            cv=cv_prior2hour_step_count,
-            scoring="neg_mean_squared_error",
-        )
-        model_prior2hour_step_count.fit(
-            prior2hour_step_count_cond_obs,
-            prior2hour_step_count_obs,
-        )
-        alpha_prior2hour_step_count_l2 = model_prior2hour_step_count.alpha_
-        theta_prior2hour_step_count_mean = model_prior2hour_step_count.coef_
-        pred_prior2hour_step_count = model_prior2hour_step_count.predict(
-            prior2hour_step_count_cond
-        )
-    elif n_obs_prior2hour_step_count == 1:
-        print(f"fallback to fixed alpha for prior2hour_step_count model for user {userid}")
-        alpha_prior2hour_step_count_l2 = 1.0
-        model_prior2hour_step_count = Ridge(
-            alpha=alpha_prior2hour_step_count_l2,
-            fit_intercept=False,
-        )
-        model_prior2hour_step_count.fit(
-            prior2hour_step_count_cond_obs,
-            prior2hour_step_count_obs,
-        )
-        theta_prior2hour_step_count_mean = model_prior2hour_step_count.coef_
-        pred_prior2hour_step_count = model_prior2hour_step_count.predict(
-            prior2hour_step_count_cond
-        )
-    else:
-        print(f"no observed prior2hour_step_count values for user {userid}; using zero fallback")
-        alpha_prior2hour_step_count_l2 = float(alpha_l2_list[0])
-        theta_prior2hour_step_count_mean = np.zeros(
-            prior2hour_step_count_cond.shape[1],
-            dtype=float,
-        )
-        pred_prior2hour_step_count = np.zeros(len(prior2hour_step_count), dtype=float)
-
-    resid_obs_prior2hour_step_count = (
-        prior2hour_step_count_obs
+    X_p2h, prior2hour_step_count, idx_obs_prior2hour_step_count = designs["prior2hour"]
+    theta_prior2hour_step_count_mean = participant_theta(mixedlm_prior2hour, userid)
+    pred_prior2hour_step_count = X_p2h @ theta_prior2hour_step_count_mean
+    resid_prior2hour_step_count = np.full(len(prior2hour_step_count), np.nan)
+    resid_prior2hour_step_count[idx_obs_prior2hour_step_count] = (
+        prior2hour_step_count[idx_obs_prior2hour_step_count]
         - pred_prior2hour_step_count[idx_obs_prior2hour_step_count]
     )
-    
-    resid_prior2hour_step_count = np.full_like(prior2hour_step_count, np.nan, dtype=float)
-    resid_prior2hour_step_count[idx_obs_prior2hour_step_count] = resid_obs_prior2hour_step_count
-    sigma2_prior2hour_step_count_mean = (
-        np.var(resid_obs_prior2hour_step_count)
-        if resid_obs_prior2hour_step_count.size > 0
-        else 0.0
+
+    X_ad, active_status, idx_obs_active_status = designs["active_status"]
+    theta_active_status_mean = participant_theta(mixedlm_active_status, userid)
+    pred_active_status = _sigmoid_np(X_ad @ theta_active_status_mean)
+    resid_active_status = np.full(len(active_status), np.nan)
+    resid_active_status[idx_obs_active_status] = (
+        active_status[idx_obs_active_status] - pred_active_status[idx_obs_active_status]
     )
 
-    # print that this fit is good
-    print(f"The fit of prior2hour_step_count is good for user {userid}")
-
-    #### Model 2: Active status model ####
-    # P(active_status = 1 | prior 7-day active fraction, is_weekend); morning rows with answered survey
-    active_status_cond = np.stack([
-        Intercept,
-        active_status_fraction_7days,
-        is_weekend,
-    ], axis=1)
-    Cs_active_status = np.sort(1.0 / np.asarray(alpha_l2_list, dtype=float))
-
-    idx_obs_active_status = (decision_time == 0) & ~np.isnan(active_status)
-    cv_active_status = min(5, int(idx_obs_active_status.sum()))
-    active_status_cond_obs = active_status_cond[idx_obs_active_status, :]
-    active_status_obs = active_status[idx_obs_active_status]
-
-    has_active_status_obs = active_status_obs.size > 0
-    if has_active_status_obs and np.var(active_status_obs.astype(float)) > 0:
-        n0, n1 = int(np.sum(active_status_obs == 0)), int(np.sum(active_status_obs == 1))
-        min_class = min(n0, n1)
-        cv_as = min(cv_active_status, min_class)
-        if cv_as >= 2:
-            model_active_status = LogisticRegressionCV(
-                Cs=Cs_active_status,
-                cv=cv_as,
-                penalty="l2",
-                solver="lbfgs",
-                fit_intercept=False,
-                scoring="neg_log_loss",
-                max_iter=5000,
-                random_state=seed,
-            )
-            model_active_status.fit(active_status_cond_obs, active_status_obs)
-            C_sel = float(model_active_status.C_[0])
-        else:
-            C_sel = float(Cs_active_status[len(Cs_active_status) // 2])
-            model_active_status = LogisticRegression(
-                penalty="l2",
-                C=C_sel,
-                solver="lbfgs",
-                fit_intercept=False,
-                max_iter=5000,
-                random_state=seed,
-            )
-            model_active_status.fit(active_status_cond_obs, active_status_obs)
-        alpha_active_status_l2 = 1.0 / C_sel
-        theta_active_status_mean = model_active_status.coef_.ravel()
-        pred_active_status = model_active_status.predict_proba(active_status_cond)[:, 1]
-        resid_obs_active_status = (
-            active_status_obs.astype(float)
-            - pred_active_status[idx_obs_active_status]
-        )
-        resid_active_status = np.full_like(active_status, np.nan, dtype=float)
-        resid_active_status[idx_obs_active_status] = resid_obs_active_status
-        sigma2_active_status_mean = np.var(resid_obs_active_status)
-    else:
-        print(f"the variance of active_status is 0 for user {userid}")
-        const = float(safe_nanmean(active_status_obs.astype(float), default=np.nan))
-        alpha_active_status_l2 = float(alpha_l2_list[0])
-        theta_active_status_mean = np.zeros(active_status_cond.shape[1])
-        if not np.isfinite(const):
-            # No observed active_status rows for this user: fall back to a
-            # neutral intercept logit(0.5) = 0 (P(active) = 0.5) instead of NaN.
-            const = 0.5
-            theta_active_status_mean[0] = 0.0
-        elif const <= 0.0:
-            theta_active_status_mean[0] = -8.0
-        elif const >= 1.0:
-            theta_active_status_mean[0] = 8.0
-        else:
-            theta_active_status_mean[0] = float(np.log(const / (1.0 - const)))
-        pred_active_status = np.full(len(active_status), const, dtype=float)
-        resid_active_status = np.full_like(active_status, np.nan, dtype=float)
-        resid_active_status[idx_obs_active_status] = 0.0
-        sigma2_active_status_mean = 0.0
-
-    print(f"The fit of active_status is good for user {userid}")
-
-    #### Model 3: Walking suggestion interaction model ####
-
-    # P(Interacted_walk = 1 | A = 1, context): L2 logistic CV.
-    # A = 0 rows are structural zeros (no suggestion delivered), so they are
-    # not used in the likelihood. The simulator draws from this model only
-    # after a suggestion has been sent.
-    ws_interaction_cond = np.stack([
-        Intercept,
-        Interacted_7d_walk,
-        is_weekend, decision_time
-    ], axis=1)
-    Cs_ws_interaction = np.sort(1.0 / np.asarray(alpha_l2_list, dtype=float))
-    idx_obs_ws_interaction = (
-        ~np.isnan(ws_interaction)
-        & (np.asarray(WalkingSuggestion, dtype=float) == 1.0)
+    X_as, ws_interaction, idx_obs_ws_interaction = designs["ws_interaction"]
+    theta_ws_interaction_mean = participant_theta(mixedlm_ws_interaction, userid)
+    pred_ws_interaction = _sigmoid_np(X_as @ theta_ws_interaction_mean)
+    resid_ws_interaction = np.full(len(ws_interaction), np.nan)
+    resid_ws_interaction[idx_obs_ws_interaction] = (
+        ws_interaction[idx_obs_ws_interaction] - pred_ws_interaction[idx_obs_ws_interaction]
     )
-    cv_ws_interaction = min(5, int(idx_obs_ws_interaction.sum()))
-    ws_interaction_cond_obs = ws_interaction_cond[idx_obs_ws_interaction, :]
-    ws_interaction_obs =  ws_interaction[idx_obs_ws_interaction]
-
-
-    has_ws_interaction_obs = ws_interaction_obs.size > 0
-    if has_ws_interaction_obs and np.var(ws_interaction_obs.astype(float)) > 0:
-        n0, n1 = int(np.sum(ws_interaction_obs == 0)), int(np.sum(ws_interaction_obs == 1))
-        min_class = min(n0, n1)
-        cv_ws = min(cv_ws_interaction, min_class)
-        if cv_ws >= 2:
-            model_ws_interaction = LogisticRegressionCV(
-                Cs=Cs_ws_interaction,
-                cv=cv_ws,
-                penalty="l2",
-                solver="lbfgs",
-                fit_intercept=False,
-                scoring="neg_log_loss",
-                max_iter=5000,
-                random_state=seed,
-            )
-            model_ws_interaction.fit(ws_interaction_cond_obs, ws_interaction_obs)
-            C_sel = float(model_ws_interaction.C_[0])
-        else:
-            C_sel = float(Cs_ws_interaction[len(Cs_ws_interaction) // 2])
-            model_ws_interaction = LogisticRegression(
-                penalty="l2",
-                C=C_sel,
-                solver="lbfgs",
-                fit_intercept=False,
-                max_iter=5000,
-                random_state=seed,
-            )
-            model_ws_interaction.fit(ws_interaction_cond_obs, ws_interaction_obs)
-        alpha_ws_interaction_l2 = 1.0 / C_sel
-        theta_ws_interaction_mean = model_ws_interaction.coef_.ravel()
-        pred_ws_interaction = model_ws_interaction.predict_proba(ws_interaction_cond)[:, 1]
-        resid_obs_ws_interaction = ws_interaction_obs.astype(float) - pred_ws_interaction[idx_obs_ws_interaction]
-        resid_ws_interaction = np.full_like(ws_interaction, np.nan, dtype=float)
-        resid_ws_interaction[idx_obs_ws_interaction] = resid_obs_ws_interaction
-        sigma2_ws_interaction_mean = np.var(resid_obs_ws_interaction)
-    else:
-        print(f"the variance of Interacted_walk is 0 for user {userid}")
-        const = float(safe_nanmean(ws_interaction_obs.astype(float), default=np.nan))
-        alpha_ws_interaction_l2 = float(alpha_l2_list[0])
-        theta_ws_interaction_mean = np.zeros(ws_interaction_cond.shape[1])
-        if not np.isfinite(const):
-            const = 0.5
-            theta_ws_interaction_mean[0] = 0.0
-        elif const <= 0.0:
-            theta_ws_interaction_mean[0] = -8.0
-        elif const >= 1.0:
-            theta_ws_interaction_mean[0] = 8.0
-        else:
-            theta_ws_interaction_mean[0] = float(np.log(const / (1.0 - const)))
-        pred_ws_interaction = np.full(len(ws_interaction), const, dtype=float)
-        resid_ws_interaction = np.full_like(ws_interaction, np.nan, dtype=float)
-        resid_ws_interaction[idx_obs_ws_interaction] = 0.0
-        sigma2_ws_interaction_mean = 0.0
-
-    print(f"The fit of ws_interaction is good for user {userid}")
-
 
     #### Model 4: FourSC model ####
     fourSC_cond = np.stack([
         Intercept,
         fourSC_lag1,
-        yesterday_step_count, seven_day_step_count_avg, 
+        yesterday_step_count,
         prior2hour_step_count_filled,
         recent_burden, seven_day_pageview_count, past7days_morning_wearing, 
         Interacted_7d_walk,
@@ -1470,7 +1353,6 @@ for i, userid in enumerate(userid_all):
     resid_fourSC = np.full_like(fourSC, np.nan, dtype=float)
     resid_fourSC[idx_obs_fourSC] = resid_obs_fourSC
     sigma2_fourSC_mean = np.var(resid_obs_fourSC) if resid_obs_fourSC.size > 0 else 0.0
-    population_resid_pools["resid_fourSC_population"].extend(resid_obs_fourSC.tolist())
 
     print(f"The fit of fourSC is good for user {userid}")
 
@@ -1527,7 +1409,6 @@ for i, userid in enumerate(userid_all):
     )
 
     _obs_antic = resid_anticipated_affect[~np.isnan(resid_anticipated_affect)]
-    population_resid_pools["resid_antic_population"].extend(_obs_antic.tolist())
 
     print(f"The fit of anticipated_affect is good for user {userid}")
 
@@ -1587,9 +1468,6 @@ for i, userid in enumerate(userid_all):
     # priors used for the joint fit (see CAE_BETA_PRIOR_SD above).
     alpha_CAE_l2 = None
 
-    population_resid_pools["resid_CAE_population"].extend(
-        resid_CAE[~np.isnan(resid_CAE)].tolist()
-    )
 
     print(f"The full random-coefficient Bayesian CAE fit is ready for user {userid}")
 
@@ -1634,9 +1512,6 @@ for i, userid in enumerate(userid_all):
 
     alpha_CAE_short_avg_l2 = None
 
-    population_resid_pools["resid_CAE_short_population"].extend(
-        resid_CAE_short_avg[~np.isnan(resid_CAE_short_avg)].tolist()
-    )
 
     print(f"The full random-coefficient Bayesian CAE_short_avg fit is ready for user {userid}")
 
@@ -1660,6 +1535,7 @@ for i, userid in enumerate(userid_all):
         "theta_antic": json_float_list(theta_anticipated_affect_mean, digits),
         "theta_antic_names": THETA_ANTIC_NAMES,
 
+        "cae_sign_prior_mode": SIGN_PRIOR_MODE,
         "theta_CAE": json_float_list(theta_CAE_mean, digits),
         "theta_CAE_names": THETA_CAE_NAMES,
 
@@ -1674,9 +1550,6 @@ for i, userid in enumerate(userid_all):
         "resid_CAE": json_float_list(resid_CAE, digits),
         "resid_CAE_short_avg": json_float_list(resid_CAE_short_avg, digits),
 
-        "alpha_prior2hour_step_count_l2": json_float(alpha_prior2hour_step_count_l2, digits),
-        "alpha_active_status_l2": json_float(alpha_active_status_l2, digits),
-        "alpha_ws_interaction_l2": json_float(alpha_ws_interaction_l2, digits),
         "alpha_fourSC_l2": json_float(alpha_fourSC_l2, digits),
         "alpha_anticipated_affect_l2": json_float(alpha_anticipated_affect_l2, digits),
         "alpha_CAE_l2": json_float(alpha_CAE_l2, digits),
@@ -1726,15 +1599,6 @@ df_fit.loc[df_fit["ParticipantIdentifier"].isin(userid_all)].to_csv(
     index=False,
 )
 
-# Population-level residual pools, shared across users (see comment above the
-# accumulator init). ``vani_env.EnvConfig`` loads this once per user to give
-# sparse-data users a non-degenerate fallback noise distribution.
-digits = 3
-population_residuals_out = {
-    key: json_float_list(np.asarray(vals, dtype=float), digits)
-    for key, vals in population_resid_pools.items()
-}
-with open(work_folder / "population_residuals.json", "w", encoding="utf-8") as f:
-    json.dump(population_residuals_out, f, allow_nan=False)
-for key, vals in population_resid_pools.items():
-    print(f"{key}: n={len(vals)}")
+# Residual pools for the simulator's partial pooling are built by vani_env
+# from all participants' params_env files (no separate population file).
+

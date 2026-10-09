@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from ewm_utils import mean_prior_delivered_fraction
+from derived_covariates import add_derived_covariates
 
 _combined = os.environ.get("ADAPR_COMBINED_DIR", "").strip()
 if not _combined:
@@ -35,7 +35,6 @@ DAILY_SURVEY_COLS = [
     "affective_reflection",
     "anticipated_affect",
     "active_status",
-    "active_status_fraction_7days",
 ]
 
 # These questionnaire responses use a 1--7 scale. A small number of extracted
@@ -121,15 +120,6 @@ df_gif["Date"] = pd.to_datetime(df_gif["Date"])
 df_gif = df_gif.sort_values(
     ["ParticipantIdentifier", "Date", "DecisionTime"], kind="mergesort"
 )
-_interact_col = "Interacted" if "Interacted" in df_gif.columns else "Interacted_walk"
-_gif_parts = []
-for _, _g in df_gif.groupby("ParticipantIdentifier", sort=False):
-    _g = _g.copy()
-    _g["Interacted_7d"] = mean_prior_delivered_fraction(
-        _g[_interact_col], _g["WalkingSuggestion"], window=14, min_periods=7,
-    )
-    _gif_parts.append(_g)
-df_gif = pd.concat(_gif_parts, ignore_index=True)
 
 df_planning["Date"] = pd.to_datetime(df_planning["date"])
 
@@ -265,7 +255,7 @@ df_planning_yesterday.columns = ["ParticipantIdentifier", "Date"] + [
 ]
 df_merged = df_merged.merge(df_planning_yesterday, on=["ParticipantIdentifier", "Date"], how="left")
 
-# Walking suggestions (includes recent_burden from extraction)
+# Walking suggestions
 df_merged = df_merged.merge(
     df_gif,
     on=["ParticipantIdentifier", "Date", "DecisionTime"],
@@ -281,9 +271,7 @@ df_merged = df_merged.drop(columns=drop_cols)
 
 rename_map = {
     "Interacted": "Interacted_walk",
-    "Interacted_7d": "Interacted_7d_walk",
     "Interacted_x": "Interacted_walk",
-    "Interacted_7d_x": "Interacted_7d_walk",
     "StepCount_x": "4hour_step",
     "StepCount_y": "prior2hour_step",
     "CheckStatus_x": "CheckStatus_4hour",
@@ -295,6 +283,15 @@ df_merged = df_merged.rename(columns={k: v for k, v in rename_map.items() if k i
 _leftover = [c for c in df_merged.columns if c.endswith("_x") or c.endswith("_y")]
 if _leftover:
     print("WARNING: unresolved merge-suffix columns:", _leftover)
+
+# 7b. Derived history covariates (7-day EWMAs, lags, yesterday proxies).
+# Computed on the full extraction grid, before burn-in days are dropped, so
+# the first analysis day has a full 7-day history. Definitions:
+# derived_covariates.py (shared with the simulator).
+df_merged = df_merged.sort_values(
+    ["ParticipantIdentifier", "Date", "DecisionTime"], kind="mergesort"
+).reset_index(drop=True)
+df_merged = add_derived_covariates(df_merged)
 
 # 8. Burn-in filter + calendar indices
 

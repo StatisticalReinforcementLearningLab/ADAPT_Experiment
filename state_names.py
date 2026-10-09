@@ -16,7 +16,6 @@ STATE_PAGE_VIEW_FOUR_HOUR_LAG1 = "pageViewNext4HourLag1"
 
 STATE_YESTERDAY_STEP_COUNT = "yesterdayStepCount"
 STATE_TODAY_STEP_COUNT = "todayStepCount"
-STATE_STEP_COUNT_LAST7_DAYS_EMA = "stepCountLast7DaysEma"
 STATE_PAGE_VIEW_LAST7_DAYS_EMA = "pageViewLast7DaysEma"
 
 STATE_ACTIVE_DAYS_LAST7_DAYS = "activeDaysLast7Days"
@@ -70,7 +69,6 @@ TRAJ_ACTIVITY_SUGGESTIONS_SENT_LAST7_DAYS = "activitySuggestionsSentLast7DaysAll
 # Per-day covariate logs (PF / RL; not in ``s`` at use time)
 LOG_DAY_OF_WEEK_NORM = "logDayOfWeekNorm"
 LOG_YESTERDAY_STEP_COUNT = "logYesterdayStepCount"
-LOG_STEP_COUNT_LAST7_DAYS_EMA = "logStepCountLast7DaysEma"
 LOG_PAGE_VIEW_LAST7_DAYS_EMA = "logPageViewLast7DaysEma"
 LOG_MORNING_FITBIT_WEAR_LAST7_DAYS = "logMorningFitbitWearLast7Days"
 LOG_DAILY_ANTICIPATED_AFFECT_YESTERDAY = "logDailyAnticipatedAffectYesterday"
@@ -92,7 +90,6 @@ LEGACY_TO_CANONICAL = [
     ("today_pageview_afternoon", STATE_PAGE_VIEW_AFTERNOON_TODAY),
     ("today_pageview_morning", STATE_PAGE_VIEW_MORNING_TODAY),
     ("perceived_utility_lastweek", STATE_PERCEIVED_UTILITY_LAST_WEEK),
-    ("seven_day_step_count_avg", STATE_STEP_COUNT_LAST7_DAYS_EMA),
     ("past7days_morning_wearing", STATE_MORNING_FITBIT_WEAR_LAST7_DAYS),
     ("past7days_daywearing", STATE_MORNING_FITBIT_WEAR_LAST7_DAYS_ALT),
     ("active_status_fraction_7days", STATE_ACTIVE_DAYS_LAST7_DAYS),
@@ -116,7 +113,6 @@ LEGACY_TO_CANONICAL = [
     ("log_antic_yesterday_latent", LOG_DAILY_ANTICIPATED_AFFECT_YESTERDAY),
     ("log_seven_day_pageview", LOG_PAGE_VIEW_LAST7_DAYS_EMA),
     ("log_yesterday_step", LOG_YESTERDAY_STEP_COUNT),
-    ("log_seven_day_step", LOG_STEP_COUNT_LAST7_DAYS_EMA),
     ("log_past7_wear", LOG_MORNING_FITBIT_WEAR_LAST7_DAYS),
     ("log_today_step", LOG_TODAY_STEP_COUNT),
     ("log_dow", LOG_DAY_OF_WEEK_NORM),
@@ -142,7 +138,6 @@ LEGACY_TO_CANONICAL = [
 # Feature-builder keyword aliases (algorithm.py)
 KW_FOURSC_LAG1 = "stepCountNext4HourLag1"
 KW_YESTERDAY_STEP = "yesterdayStepCount"
-KW_STEP_COUNT_LAST7 = "stepCountLast7DaysEma"
 KW_PRIOR2HOUR = "prior2HourStepCount"
 KW_PRIOR2HOUR_AGENT = KW_PRIOR2HOUR
 KW_ACTIVITY_SUGGESTIONS_SENT_LAST7 = "activitySuggestionsSentLast7Days"

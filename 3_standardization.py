@@ -5,8 +5,12 @@
 # maps Likert items to [-1, 1], and writes `df_fit.csv` plus
 # `std_params.json` (shifts, scales, clip limits) under `env_para_vanilla/`.
 # ``HourlyPageviewCount`` (and its lag) stay raw.
-# ``HourlyPageviewCount_norm`` is ``log(x)`` then z-scored among positives
-# (no ``+1``); count 0 sits at ``log(0.5)`` so PV_sum / lag1 stay below 1.
+# ``HourlyPageviewCount_norm`` is ``log(x+1)`` (all counts, like every other
+# count variable), z-scored with the mean / SD of the positive counts (the
+# hurdle-intensity population); count 0 therefore sits at ``(0-shift)/scale``.
+# ``std_params['HourlyPageviewCount_transform'] = 'log1p'`` marks this
+# convention; consumers treat a missing ``HourlyPageviewCount_zero_count``
+# key as log1p.
 # Next: ``4_perceived_utility.py``.
 
 # 0. Setup
@@ -34,8 +38,12 @@ folder = COMBINED_DIR
 work_folder = WORK_DIR
 DIGITS = 3
 
-DAY_RANGE = 84
-WEEK_RANGE = 12
+# Fitting panel: MRT study weeks 2-12, renumbered 1-11 (77 days). Week 1 is
+# used only for lags and history summaries, which script 2 has already
+# computed on the full grid. Shared by scripts 4b and 5.
+FIRST_FIT_WEEK = 2
+DAY_RANGE = 77
+WEEK_RANGE = 11
 
 # Ordinal survey items use a 1..7 scale. Script 2 corrects invalid zeros to one
 # before this standardization step.
@@ -60,7 +68,6 @@ FIT_COLUMNS = [
     "recent_burden",
     # step counts
     "4hour_step",
-    "EMA_StepCount",
     "TodayStepCount",
     "YesterdayStepCount",
     "prior2hour_step",
@@ -73,7 +80,9 @@ FIT_COLUMNS = [
     "DailyPageviewCount",
     "Past7DaysPageviewEMA",
     "HourlyPageviewCount",
-    "HourlyPageviewCount_lag1",
+    "HourlyPageviewCount_lag1_log",
+    "FourSC_lag1_log",
+    "prior2hour_step_lag1_log",
     "Past7DaysHourlyPageviewEMA",
     # surveys
     "week_present",
@@ -87,7 +96,6 @@ FIT_COLUMNS = [
     "active_status",
     "active_status_yesterday",
     "active_status_fraction_7days",
-    "active_status_fraction_7days_yesterday",
     # weekly CAE / tools
     "CAE_avg",
     "CAE_avg_lastweek",
@@ -96,22 +104,20 @@ FIT_COLUMNS = [
     "Exp-tool-2",
 ]
 
-# In-place ``log(x+1)`` overwrite. Hourly pageview is excluded: the raw
-# integer count is kept, and log-then-z is written only to ``*_norm``.
+# In-place ``log(x+1)`` overwrite of raw counts. Hourly pageview is excluded:
+# the raw integer count is kept, and log-then-z is written only to ``*_norm``.
+# The derived history covariates (derived_covariates.py: EMA_*, Past7Days*,
+# YesterdayStepCount, *_lag1_log) are already on the log(x+1) scale.
 LOG_COLUMNS = [
     "4hour_step",
     "TodayStepCount",
-    "YesterdayStepCount",
     "prior2hour_step",
     "DailyPageviewCount",
-    "Past7DaysPageviewEMA",
-    "Past7DaysHourlyPageviewEMA",
 ]
 
-# Source columns whose z-score is of ``log(x)`` for x>0, without mutating ``x``.
-# Count 0 is mapped to ``PV_ZERO_ON_LOG_AXIS`` (not ``log(x+1)`` on positives).
+# Source columns kept raw; their ``*_norm`` is ``log(x+1)`` z-scored with the
+# positive-count mean / SD (hurdle intensity scale).
 KEEP_RAW_LOG_THEN_Z = frozenset({"HourlyPageviewCount"})
-PV_ZERO_ON_LOG_AXIS = 0.5
 
 ZSCORE_SPECS = [
     # (source_col, norm_col, json_shift_key, json_scale_key, json_limit_key)
@@ -119,7 +125,6 @@ ZSCORE_SPECS = [
     ("TodayStepCount", "TodayStepCount_norm", "today_step_count_shift", "today_step_count_scale", "TodayStepCount_limit"),
     ("YesterdayStepCount", "YesterdayStepCount_norm", "yesterday_step_count_shift", "yesterday_step_count_scale", "YesterdayStepCount_limit"),
     ("prior2hour_step", "prior2hour_step_norm", "prior2hour_step_count_shift", "prior2hour_step_count_scale", "prior2hour_step_count_limit"),
-    ("EMA_StepCount", "EMA_StepCount_norm", "EMA_step_count_shift", "EMA_step_count_scale", "EMA_StepCount_limit"),
     ("EMA_Prior2HourStepCount", "EMA_Prior2HourStepCount_norm", "EMA_prior2hour_step_count_shift", "EMA_prior2hour_step_count_scale", "EMA_Prior2HourStepCount_limit"),
     ("DailyPageviewCount", "DailyPageviewCount_norm", "DailyPageviewCount_shift", "DailyPageviewCount_scale", "DailyPageviewCount_limit"),
     ("Past7DaysPageviewEMA", "Past7DaysPageviewEMA_norm", "Past7DaysPageviewEMA_shift", "Past7DaysPageviewEMA_scale", "Past7DaysPageviewEMA_limit"),
@@ -136,9 +141,8 @@ ZSCORE_SPECS = [
 RAW_UNIT_INTERVAL_COLS = [
     # ActivityCheck rolling fractions
     ("active_status_fraction_7days", "active_status_fraction_7days_limit"),
-    ("active_status_fraction_7days_yesterday", "active_status_fraction_7days_yesterday_limit"),
-    # Rolling interaction / wear fractions. Interacted_7d_walk is the
-    # delivered-only fraction over the prior 14 slots (NaN if none sent).
+    # 7-day EWMAs of binary series (derived_covariates.py). Interacted_7d_walk
+    # uses delivered slots only (NaN if none sent in the prior 14 slots).
     ("Interacted_7d_walk", "Interacted_7d_walk_limit"),
     ("past7days_morning_wearing", "past7days_morning_wearing_limit"),
 ]
@@ -201,15 +205,14 @@ def _likert_norm(
     return norm, limit
 
 
-def _hourly_pv_log_axis(raw, zero_count=PV_ZERO_ON_LOG_AXIS):
-    """Log axis for hourly pageview: ``log(x)`` if ``x>0``, else ``log(zero_count)``."""
+def _hourly_pv_log_axis(raw):
+    """Log axis for hourly pageview: ``log(x+1)`` for every finite count >= 0."""
     vals = pd.to_numeric(raw, errors="coerce")
     out = np.full(len(vals), np.nan, dtype=float)
     v = vals.to_numpy(dtype=float, copy=False)
-    pos = np.isfinite(v) & (v > 0.0)
-    zero = np.isfinite(v) & (v <= 0.0)
-    out[pos] = np.log(v[pos])
-    out[zero] = np.log(float(zero_count))
+    fin = np.isfinite(v)
+    pos = fin & (v > 0.0)
+    out[fin] = np.log1p(np.maximum(v[fin], 0.0))
     return out, v, pos
 
 
@@ -228,7 +231,15 @@ use_cols = [c for c in FIT_COLUMNS if c in df_merged.columns]
 df_fit = df_merged[use_cols].copy()
 print(df_fit.shape)
 
-# 2. Calendar normalization
+# 2. Fitting panel + calendar normalization
+
+df_fit = df_fit[df_fit["week"] >= FIRST_FIT_WEEK].copy()
+df_fit["week"] = df_fit["week"] - (FIRST_FIT_WEEK - 1)
+df_fit["Date"] = pd.to_datetime(df_fit["Date"], errors="coerce")
+df_fit["day"] = (
+    df_fit.groupby("ParticipantIdentifier", sort=False)["Date"]
+    .transform(lambda d: d.rank(method="dense").astype(int))
+)
 
 df_fit["day_norm"] = (df_fit["day"] - (1 + DAY_RANGE) / 2) / ((DAY_RANGE - 1) / 2)
 df_fit["week_norm"] = (df_fit["week"] - (1 + WEEK_RANGE) / 2) / ((WEEK_RANGE - 1) / 2)
@@ -237,9 +248,8 @@ df_fit["dow_norm"] = (df_fit["dow"] - (1 + 7) / 2) / ((7 - 1) / 2)
 # 3. Count transforms (step counts / pageviews)
 #
 # Step counts and pageview summaries are overwritten with ``log(x+1)``.
-# Hourly pageview stays raw. Its ``*_norm`` is ``log(x)`` for positive
-# counts (hurdle intensity does not need ``+1``); zeros sit at ``log(0.5)``
-# so the weekly PV summary still has a point below count 1.
+# Hourly pageview stays raw; its ``*_norm`` is also ``log(x+1)`` (zeros at
+# log 1 = 0), z-scored with the positive-count mean / SD.
 
 for col in LOG_COLUMNS:
     if col in df_fit.columns:
@@ -269,20 +279,22 @@ for src, norm, shift_key, scale_key, limit_key in ZSCORE_SPECS:
         std_params[shift_key] = shift
         std_params[scale_key] = scale
         std_params[limit_key] = limit
-        std_params["HourlyPageviewCount_zero_count"] = PV_ZERO_ON_LOG_AXIS
+        std_params["HourlyPageviewCount_transform"] = "log1p"
         continue
     df_fit[norm], shift, scale, limit = _zscore(df_fit[src])
     std_params[shift_key] = shift
     std_params[scale_key] = scale
     std_params[limit_key] = limit
 
-# Keep ``HourlyPageviewCount_lag1`` as a raw count and put it on the same
-# log-then-z axis as the outcome (``log(x)`` if x>0, else ``log(0.5)``).
-if "HourlyPageviewCount_lag1" in df_fit.columns:
-    lag_log, _, _ = _hourly_pv_log_axis(df_fit["HourlyPageviewCount_lag1"])
-    df_fit["hourly_pageview_count_lag1"] = (
-        lag_log - std_params["HourlyPageviewCount_shift"]
-    ) / std_params["HourlyPageviewCount_scale"]
+# Previous-slot lags (log scale, derived_covariates.py) go on the same z axis
+# as the variable they lag.
+for lag_col, out_col, shift_key, scale_key in (
+    ("HourlyPageviewCount_lag1_log", "hourly_pageview_count_lag1", "HourlyPageviewCount_shift", "HourlyPageviewCount_scale"),
+    ("FourSC_lag1_log", "FourSC_lag1", "4hour_step_count_shift", "4hour_step_count_scale"),
+    ("prior2hour_step_lag1_log", "prior2hour_step_count_lag1", "prior2hour_step_count_shift", "prior2hour_step_count_scale"),
+):
+    if lag_col in df_fit.columns:
+        df_fit[out_col] = (df_fit[lag_col] - std_params[shift_key]) / std_params[scale_key]
 
 for src, norm, limit_key in LIKERT_SPECS:
     if src not in df_fit.columns:
@@ -311,14 +323,8 @@ df_fit = df_fit.sort_values(
     kind="mergesort",
 ).reset_index(drop=True)
 
-# shift(1) = previous decision slot; shift(2) ≈ prior calendar day for day-level vars
-lag_specs = [
-    ("4hour_step_norm", "FourSC_lag1", 1),
-    ("prior2hour_step_norm", "prior2hour_step_count_lag1", 1),
-]
-for src, out, n in lag_specs:
-    if src in df_fit.columns:
-        df_fit[out] = df_fit.groupby("ParticipantIdentifier", sort=False)[src].shift(n)
+# Previous-slot lags were computed on the full grid in script 2
+# (derived_covariates.py) and standardized above.
 
 df_fit_path = folder / "df_fit.csv"
 df_fit.to_csv(df_fit_path, index=False)

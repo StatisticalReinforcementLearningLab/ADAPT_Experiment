@@ -31,6 +31,19 @@
 #   sbatch --export=ALL,TUNE_PHASE=scan run_tune_ste.sh      # STE vs knob value
 #   TUNE_PHASE=validate bash run_tune_ste.sh                 # login node: re-submit the
 #                                                            # confirmation runs by hand
+#   TUNE_PHASE=ratio bash run_tune_ste.sh                    # after confirmation: store
+#                                                            # confirmed/proxy STE per folder
+#
+# Two-step calibration (the proxy uses the vanilla CQL transferred into the
+# candidate folder; confirmation retrains CQL in the folder and usually
+# scores higher):
+#   1. calibrate (or protocol)  -> folder hits the target on the proxy scale
+#   2. validate                 -> in-folder DiscreteCQL train + eval
+#   3. ratio                    -> ratio = confirmed / proxy in ste_tuning.json
+#   4. for each folder off target:
+#      sbatch --export=ALL,TUNE_KNOB=<knob>,TUNE_TARGETS=<t>,\
+#TUNE_PROXY_TO_TRUE=from:env_para_ste<t>,TUNE_OVERWRITE=1 run_tune_ste.sh
+#   5. validate again (and ratio, to record the final confirmed STE)
 #
 # Three-folder protocol from vanilla (no κ=2 fatigue folder):
 #   STE 0.2 = burden_path (A→ME+ME→E+E→MY), else benefit_foursc;
@@ -39,7 +52,7 @@
 #   sbatch --export=ALL,TUNE_PHASE=protocol,TUNE_OVERWRITE=1 run_tune_ste.sh
 #
 # Overrides (sbatch --export=ALL,VAR=value,...):
-#   TUNE_PHASE        diagnose|eval|scan|apply|calibrate|protocol|validate  default calibrate
+#   TUNE_PHASE        diagnose|eval|scan|apply|calibrate|protocol|validate|ratio  default calibrate
 #   TUNE_PARAMS_DIR   source fit to rescale                    default env_para_vanilla
 #   TUNE_KNOB         burden_path|benefit_foursc|fatigue|... (burden_shift = fatigue)
 #   TUNE_STE02_TARGET     protocol low-STE target              default 0.2
@@ -68,8 +81,8 @@
 #   TUNE_VALIDATE     1 to submit confirmation DiscreteCQL jobs after calibrate (default 1)
 #   TUNE_REQUIRE_STABLE  1 to refuse unstable folders (default 1)
 #   TUNE_TOL  TUNE_MAX_ITER  TUNE_SEED  TUNE_JOBS
-#   TUNE_PROXY_TO_TRUE  multiply proxy STE after max/truncation (default 1.0;
-#                     not a DiscreteCQL calibration factor unless you set one)
+#   TUNE_PROXY_TO_TRUE  multiply proxy STE (default 1.0), or from:<folder> to
+#                     use the confirmed/proxy ratio stored by TUNE_PHASE=ratio
 #   TUNE_SCRATCH      working dir for candidate params     default
 #                     .ste_tune_scratch_<knob>_<jobid>
 #
@@ -483,8 +496,26 @@ case "${TUNE_PHASE}" in
       submit_validation_jobs
     fi
     ;;
+  ratio)
+    # Two-step calibration, step 2: after the confirmation jobs of
+    # TUNE_PHASE=validate have finished, store confirmed/proxy STE in each
+    # folder's ste_tuning.json. Folders that miss their target are then
+    # recalibrated with TUNE_PROXY_TO_TRUE=from:<folder> TUNE_OVERWRITE=1
+    # (one target per run) and confirmed once more.
+    RATIO_DIRS=()
+    if [[ -n "${TUNE_VALIDATE_DIR:-}" ]]; then
+      RATIO_DIRS=("${TUNE_VALIDATE_DIR}")
+    else
+      for target in ${TUNE_TARGETS}; do
+        RATIO_DIRS+=("${TUNE_OUT_PREFIX}${target}${TUNE_OUT_SUFFIX}")
+      done
+    fi
+    for dir in "${RATIO_DIRS[@]}"; do
+      "${PY}" tune_ste.py ratio --out-dir "${dir}" --tol "${TUNE_TOL}" || true
+    done
+    ;;
   *)
-    echo "ERROR: unknown TUNE_PHASE=${TUNE_PHASE} (use diagnose, eval, scan, apply, calibrate, or validate)" >&2
+    echo "ERROR: unknown TUNE_PHASE=${TUNE_PHASE} (use diagnose, eval, scan, apply, calibrate, validate, or ratio)" >&2
     exit 1
     ;;
 esac

@@ -25,11 +25,22 @@ searches start from vanilla, not from a stacked fatigue folder):
 
 Shift vs scale — the rule used throughout
 -----------------------------------------
+Every change of a non-action coefficient (E→MY, fourSC→Y, antic→Y, ME→E;
+shift or scale) is *centered* at the participant's never-send mean of the
+covariate (``CENTERED_COEFS``): the block intercept absorbs −Δ·x̄_i, so the
+knob changes the slope, and with it the transmitted effect, but not the
+participant's average outcome level. Uncentered, a +0.3 shift on E→MY raised
+never-send weekly CAE by 0.2-0.5 and pushed CAE toward its clip bounds.
+``ADAPR_STE_CENTER=0`` restores the old behaviour.
+
 *Shift* (θ ← θ − κ) when the goal is a **sign-definite effect** and the fitted
 coefficients are near zero with mixed signs — a scale cannot move a ≈0
-coefficient and amplifies wrong signs. In the current vanilla fit: A→ME mains
-are mixed-sign (PV action effect positive for 23/31 users), E→fourSC is
-positive for only 10/31, fourSC→Y ≈ 0.08 with 2/31 negative. *Scale*
+coefficient and amplifies wrong signs. In the 2026-10-07 vanilla refit
+(28 participants, direction-only priors): the A→ME mains are already negative
+for every participant on PV occurrence (mean −1.06) and FW (mean −0.30), and
+for 23/28 on the morning PJ main; E→fourSC is positive for only 10/28 (mean −0.08, min −0.91);
+E→antic is positive for 27/28 but small (mean 0.025); fourSC→Y has mean 0.10
+with 1/28 negative. *Scale*
 (θ ← κθ) when the goal is to **amplify structure you want to keep** —
 A→MY's state-dependent CATEs. Never shift interaction terms; shifts belong on
 main effects only.
@@ -46,6 +57,12 @@ so the clipped proxy is a lower bound on the clipped oracle.
 and a same-sample max (no longer a bound). Confirmation is
 ``ste_vanilla.aggregate_ste`` (in-folder CQL, same per-user clip).
 
+Because the confirmation retrains CQL in the written folder, it usually
+exceeds the proxy, so calibration is done in two steps: calibrate on the
+proxy, confirm, store ``ratio = confirmed / proxy`` with ``ratio``, and
+recalibrate with ``--proxy-to-true from:<folder>`` (solver then targets
+``target / ratio`` on the proxy scale); confirm again.
+
 Commands
 --------
     protocol    STE 0.2 via burden_path (then benefit_foursc fallback),
@@ -55,6 +72,7 @@ Commands
     scan        proxy STE vs a grid of ``kappa``
     apply       write a folder at a fixed ``kappa`` (no STE search)
     calibrate   root-find ``kappa`` per target and write the folder(s)
+    ratio       after confirmation: store confirmed/proxy STE of a folder
 
 Cluster::
 
@@ -98,9 +116,13 @@ cannot reach 0.5/0.8 (job 41048118).
 
 Guarantees and guards
 ---------------------
-* Stability: a folder is written only if every participant keeps
-  |loop gain| < 1 for E_w and CAE under never- and always-suggest
-  (``--require-stable``, default on); the search never leaves that region.
+* Stability: a folder is written only if every participant keeps the
+  analytic loop gains |g^E| < 1 and |g^Y| < 1 of ``stability.py`` under
+  never- and always-suggest (``--require-stable``, default on), and the
+  written folder is then checked numerically by the growth factor of the
+  noise-free simulator (``stability.growth_factor``). The analytic gains do
+  not depend on the A→ME mains, so for the burden knobs the numerical check
+  is the binding one.
 * Sign report: after writing, each variant's intended sign story is checked
   per participant (fatigue: A→ME ≤ 0; transmission: ME→E, E→MY ≥ 0;
   benefit: fourSC→Y, antic→Y ≥ 0) and violations are printed — fitted
@@ -135,19 +157,21 @@ import numpy as np
 
 from ste_vanilla import (
     ADVANTAGE_MARGIN,
+    DQN_WEEKLY_GAMMA,
+    params_fingerprint,
     STE_ALGO,
     STE_OBS_DIM,
     STE_OBSERVATION_SCALER,
     _model_metadata_path,
     rollout_total_cae,
 )
+from algorithm_helpers import N_RL_DAYS, N_RL_SLOTS
 from vani_env import (
     PARAMS_DIR,
     THETA_ANTIC_NAMES,
     THETA_CAE_NAMES,
     THETA_FOURSC_NAMES,
     EnvConfig,
-    pv_hurdle_occurrence_z_gap,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -159,9 +183,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 # not 0.2.
 BURDEN_SHIFT_LARGE_KAPPA = 0.4
 
-# Fixed E_w→MY transmission addend for the fatigue knob. Fitted E→fourSC /
-# E→antic are ≈0.003 (compound E→Y ≈0.001), so the conduit to Y is created
-# here, once. Do not tie this to the A→ME search variable: that would make
+# Fixed E_w→MY transmission addend for the fatigue knob. Fitted E→fourSC is
+# mixed-sign (mean −0.08) and E→antic small (mean 0.025) in the 2026-10-07
+# refit, so the conduit to Y is created here, once. Do not tie this to the A→ME search variable: that would make
 # never-send σ_i and Y's E-driven serial correlation grow with κ, and part
 # of the STE drop would come through the denominator. Override with
 # ADAPR_FATIGUE_E_SHIFT (a float, or "kappa" to restore the old coupling).
@@ -173,10 +197,11 @@ FATIGUE_E_SHIFT_DEFAULT = 0.3
 # Override with ADAPR_FATIGUE_ME_TO_E_MIN.
 FATIGUE_ME_TO_E_MIN = 0.05
 
-# Hard search cap for the fatigue κ. A→ME mains do not enter the E_w /
-# CAE loop-gain formulas, so ``largest_stable_kappa`` returns 256 and is
-# not a real bound. 2 is large vs typical |A→ME| (mean 0.29, max 1.48)
-# without inventing an order-of-magnitude engagement cost. Override with
+# Hard search cap for the fatigue κ. A→ME mains do not enter the analytic
+# loop gains, so ``largest_stable_kappa`` returns 256 and is not a real
+# bound. 2 is large vs the fitted A→ME mains (PV occurrence mean −1.06 on
+# the logit scale, FW −0.30, PJ −0.15) without inventing an
+# order-of-magnitude engagement cost. Override with
 # ADAPR_FATIGUE_KAPPA_MAX.
 FATIGUE_KAPPA_MAX = 2.0
 
@@ -189,9 +214,7 @@ SUPPORTING_FILES = (
     "user_ids.txt",
     "df_fit_11week.csv",
     "Ew_pooled_linear_coefs.json",
-    "population_residuals.json",
     "rl_priors.json",
-    "generator_calibration.json",
 )
 
 # ---------------------------------------------------------------------------
@@ -725,13 +748,151 @@ def _pathway_apply(apply: str | dict[str, str], pathway: str) -> str:
     return mode
 
 
+# ---------------------------------------------------------------------------
+# Centering of non-action coefficient changes
+# ---------------------------------------------------------------------------
+# Changing a coefficient θ on a covariate x by Δ adds Δ·x to the outcome. Its
+# average for participant i is Δ·x̄_i, so unless x̄_i = 0 the change also moves
+# the participant's average level (E_w has mean 0.3-2.0, fourSC_ewma -4 to
+# 0.6). A knob is meant to change the slope only, so every such change is
+# centered: the block intercept absorbs -Δ·x̄_i and the added term becomes
+# Δ·(x - x̄_i). The transmitted treatment effect depends on the slope alone
+# and is unchanged. Action coefficients (A, A×covariate) are not centered:
+# changing them is the intended change of the treatment effect.
+# x̄_i is the mean of the covariate in the source folder under never-send
+# (simulated, so it uses exactly the simulator's covariate definitions).
+CENTERED_COEFS: dict[tuple[str, str], tuple[str, str]] = {
+    # (block, coefficient): (intercept name in the block, covariate key)
+    ("theta_fourSC", "perceived_utility_lastweek"): ("intercept", "E"),
+    ("theta_antic", "perceived_utility_lastweek"): ("intercept", "E"),
+    ("theta_CAE", "fourSC_ewma"): ("intercept", "fourSC_ewma"),
+    ("theta_CAE", "anticipated_affect_ewma"): ("intercept", "antic_ewma"),
+    ("theta_penalized_Ew", "a2_PV_lag_week"): ("a0", "PV_week"),
+    ("theta_penalized_Ew", "a3_FW_lag_week"): ("a0", "FW_week"),
+    ("theta_penalized_Ew", "a4_PJ_lag_week"): ("a0", "PJ_week"),
+}
+CENTER_EPISODES = 20
+CENTER_SEED0 = 7_000_000
+_CENTER_CACHE: dict[str, dict[int, dict[str, float]]] = {}
+
+
+def _centering_enabled() -> bool:
+    """``ADAPR_STE_CENTER=0`` restores the old uncentered shifts."""
+    return os.getenv("ADAPR_STE_CENTER", "1").strip() not in {"0", "false", "no"}
+
+
+def _never_send_centers_user(task: tuple) -> tuple[int, dict[str, float]]:
+    """Worker: mean of each centered covariate under never-send (one participant)."""
+    uid, params_dir, episodes, seed0, noise = task
+    import numpy.random as rd
+
+    from experiment import OnlineEnv
+    from vani_env import Env, build_CAE_features
+
+    rec: dict[str, list[float]] = {k: [] for k in
+                                   ("E", "fourSC_ewma", "antic_ewma", "PV_week", "FW_week", "PJ_week")}
+    i_four = THETA_CAE_NAMES.index("fourSC_ewma")
+    i_antic = THETA_CAE_NAMES.index("anticipated_affect_ewma")
+    for n in range(int(episodes)):
+        seed = int(seed0) + n
+        rd.seed(seed)
+        cfg = EnvConfig(uid, params_dir=Path(params_dir))
+        env = Env(cfg, noise=noise)
+        f_four, f_cae, f_e = env.gen_fourSC_mean, env.gen_CAE_mean, env.gen_perceivedUtility_mean
+
+        def four(s_, Ah, _f=f_four):
+            rec["E"].append(float(s_["perceivedUtilityLastWeek"]))
+            return _f(s_, Ah)
+
+        def cae(c_last, week_norm, foursc_wk, antic_wk, _f=f_cae):
+            X = build_CAE_features(c_last, week_norm, foursc_wk, antic_wk)
+            rec["fourSC_ewma"].append(float(X[i_four]))
+            rec["antic_ewma"].append(float(X[i_antic]))
+            return _f(c_last, week_norm, foursc_wk, antic_wk)
+
+        def e_mean(carry, week_norm, pw, dw, dp, _f=f_e, _env=env):
+            pv_m, fw_m, pj_m = _env._week_means_from_arrays(pw, dw, dp)
+            rec["PV_week"].append(pv_m)
+            rec["FW_week"].append(fw_m)
+            rec["PJ_week"].append(pj_m)
+            return _f(carry, week_norm, pw, dw, dp)
+
+        env.gen_fourSC_mean, env.gen_CAE_mean, env.gen_perceivedUtility_mean = four, cae, e_mean
+        oenv = OnlineEnv(env, nweek=int(cfg.nweek), seed=seed)
+        oenv._reset_episode_state()
+        for k in range(oenv.nweek):
+            oenv.get_week_packet(k)
+            oenv.wp_all[k] = 1.0  # as in the STE rollouts (ste_vanilla.rollout_total_cae)
+            oenv.start_week(k, 1)
+            for d in range(N_RL_DAYS):
+                for t in range(N_RL_SLOTS):
+                    d_global = oenv._day_idx(k, d)
+                    step_idx = oenv._step_idx(k, d, t)
+                    oenv._ensure_day_started(k, d, d_global)
+                    oenv._generate_prior2hour_for_slot(k, d, t, d_global, step_idx)
+                    oenv.step_action(k, d, t, 0.0, 1)
+            oenv._finalize_week(k)
+    return int(uid), {k: float(np.mean(v)) if v else 0.0 for k, v in rec.items()}
+
+
+def covariate_centers(
+    src_dir: Path, user_ids: Sequence[int], *, episodes: int = CENTER_EPISODES,
+    noise: str = "ar1", n_jobs: int | None = None,
+) -> dict[int, dict[str, float]]:
+    """x̄_i of every centered covariate under never-send in ``src_dir`` (cached)."""
+    key = f"{Path(src_dir).resolve()}|{episodes}|{noise}"
+    cached = _CENTER_CACHE.get(key, {})
+    todo = [int(u) for u in user_ids if int(u) not in cached]
+    if todo:
+        tasks = [(u, str(src_dir), episodes, CENTER_SEED0, noise) for u in todo]
+        try:
+            with ProcessPoolExecutor(max_workers=n_jobs) as pool:
+                rows = list(pool.map(_never_send_centers_user, tasks))
+        except (OSError, PermissionError, NotImplementedError, ImportError):
+            rows = [_never_send_centers_user(t) for t in tasks]
+        cached = {**cached, **dict(rows)}
+        _CENTER_CACHE[key] = cached
+    return {int(u): cached[int(u)] for u in user_ids}
+
+
+def _center_changes(params: dict, audit: list[dict], centers: dict[str, float]) -> None:
+    """Move -Δ·x̄ into the block intercept for every centered coefficient change."""
+    shift: dict[tuple[str, str], float] = {}
+    for row in audit:
+        target = CENTERED_COEFS.get((row["block"], row["coef"]))
+        if target is None:
+            continue
+        delta = float(row["new"]) - float(row["old"])
+        if delta == 0.0:
+            continue
+        intercept, cov = target
+        shift[(row["block"], intercept)] = (
+            shift.get((row["block"], intercept), 0.0) - delta * float(centers[cov])
+        )
+        row["centered_at"] = float(centers[cov])
+    for (block, intercept), adj in shift.items():
+        values = np.asarray(params[block], dtype=float).ravel().copy()
+        idx = _names_for(block, params).index(intercept)
+        old = float(values[idx])
+        values[idx] = old + adj
+        params[block] = values.tolist()
+        audit.append({"pathway": "centering", "block": block, "coef": intercept,
+                      "apply": "add", "factor": adj, "old": old, "new": float(values[idx])})
+
+
 def scale_params(
     params: dict,
     multipliers: dict[str, float],
     *,
     apply: str | dict[str, str] = "multiply",
+    centers: dict[str, float] | None = None,
 ) -> tuple[dict, list[dict]]:
     """Return a copy of ``params`` with the requested pathways rescaled.
+
+    With ``centers`` (this participant's never-send covariate means), every
+    change of a coefficient in ``CENTERED_COEFS`` is centered: the block
+    intercept absorbs ``-Δ·x̄``, so the change alters the slope but not the
+    participant's average level.
 
     ``multipliers`` maps pathway name -> scale factor; missing pathways are left
     unchanged. ``apply="multiply"`` does ``θ ← κθ`` (skip κ=1).
@@ -783,6 +944,8 @@ def scale_params(
                     }
                 )
             out[key] = values.tolist()
+    if centers is not None:
+        _center_changes(out, audit, centers)
     return out, audit
 
 
@@ -836,6 +999,11 @@ def write_scaled_params(
     if multipliers is None and multipliers_for is None:
         raise ValueError("write_scaled_params needs multipliers or multipliers_for")
     dst_dir.mkdir(parents=True, exist_ok=True)
+    centers = covariate_centers(src_dir, user_ids) if _centering_enabled() else None
+    if centers is not None:
+        _write_json_atomic(dst_dir / "ste_centers.json",
+                           {"source": str(src_dir), "episodes": CENTER_EPISODES,
+                            "centers": {str(u): c for u, c in centers.items()}})
     for fname in SUPPORTING_FILES:
         src = src_dir / fname
         if src.is_file():
@@ -844,11 +1012,17 @@ def write_scaled_params(
 
     audit: list[dict] = []
     for uid in user_ids:
+        pred = src_dir / f"pred_{uid}.json"
+        if pred.is_file():  # mean fitted probabilities, used by the stability gains
+            shutil.copy2(pred, dst_dir / pred.name)
         src = src_dir / f"params_env_{uid}.json"
         with open(src, encoding="utf-8") as f:
             params = json.load(f)
         mult = multipliers_for(params) if multipliers_for is not None else multipliers
-        scaled, rows = scale_params(params, mult, apply=apply)
+        scaled, rows = scale_params(
+            params, mult, apply=apply,
+            centers=None if centers is None else centers[int(uid)],
+        )
         for r in rows:
             r["userid"] = int(uid)
         audit.extend(rows)
@@ -1117,114 +1291,39 @@ def zero_cache_from(result: dict) -> dict[int, list[float]]:
 # ---------------------------------------------------------------------------
 # Diagnostics
 # ---------------------------------------------------------------------------
-def loop_gain_Ew(
-    params: dict,
-    *,
-    std: dict | None = None,
-    params_dir: Path | None = None,
-) -> dict[str, float]:
-    """Compound ``E_w`` loop gain under never-suggest and always-suggest.
+def _load_pred(params_dir: Path, uid: int, fallback_dir: Path | None = None) -> dict:
+    """``pred_<uid>.json`` (mean fitted probabilities) from the folder or a fallback."""
+    for d in (params_dir, fallback_dir, PARAMS_DIR):
+        if d is None:
+            continue
+        path = Path(d) / f"pred_{uid}.json"
+        if path.is_file():
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+    raise FileNotFoundError(f"pred_{uid}.json not found in {params_dir} or {fallback_dir}")
 
-    ``E_w`` is linear in the weekly mediator summaries, and those summaries are
-    fixed-denominator *averages* (``nansum(pv)/14``, ``nansum(FW|PJ)/7``) in both
-    the estimator and ``vani_env._week_means_from_arrays``. A unit shift in
-    ``E_{w-1}`` shifts every slot of the week, so the average shifts by the
-    per-slot slope -- no 14x / 7x factor. FW and PJ are logistic (worst-case
-    slope ``pi(1-pi) = 0.25``). PV is a hurdle: ``0.25 α_E (z̄₊ - z_0) + γ_E``,
-    with ``(z̄₊ - z_0)`` from ``std_params.json`` (positives mean 0; zeros at
-    ``log(0.5)`` on that axis) and ``p ≤ 1`` on the intensity path.
+
+def loop_gains_row(params: dict, pred: dict, std: dict) -> dict[str, float]:
+    """Analytic weekly loop gains of one participant model (``stability.py``).
+
+    ``g_zero`` / ``g_always`` are the perceived-utility gain g^E without and
+    with suggestions at every Monday--Saturday decision; ``cae_g_zero`` /
+    ``cae_g_always`` are the CAE gain g^Y. Both use the long-run mediator
+    responses D_k = s_k / (1 - r_k), including each mediator's own history
+    feedback, the J_w terms (worst case over J_w in {0, 1}), the cross path
+    through yesterday's anticipated affect, and logistic slopes at the
+    participant's mean fitted probabilities. This is the stability criterion
+    of the manuscript (Section "Stability Diagnostics").
     """
-    def pick(key: str, coef: str) -> float:
-        vals = np.asarray(params[key], dtype=float).ravel()
-        return float(vals[_names_for(key, params).index(coef)])
+    from stability import analytic_gains_from
 
-    def pick_opt(key: str, coef: str) -> float:
-        names = _names_for(key, params)
-        if coef not in names:
-            return 0.0
-        return float(np.asarray(params[key], dtype=float).ravel()[names.index(coef)])
-
-    a1 = pick("theta_penalized_Ew", "a1")
-    a2 = pick("theta_penalized_Ew", "a2_PV_lag_week")
-    a3 = pick("theta_penalized_Ew", "a3_FW_lag_week")
-    a4 = pick("theta_penalized_Ew", "a4_PJ_lag_week")
-
-    alpha1 = pick("theta_penalized_PV", "alpha1_Ew")
-    alpha4 = pick("theta_penalized_PV", "alpha4_action_by_Ew")
-    gamma1 = pick_opt("theta_penalized_PV", "gamma1_Ew")
-    gamma4 = pick_opt("theta_penalized_PV", "gamma4_action_by_Ew")
-    beta1 = pick("theta_penalized_FW", "beta1_Ew")
-    beta4 = pick("theta_penalized_FW", "beta4_A0_morning_by_Ew")
-    beta6 = pick("theta_penalized_FW", "beta6_A1_afternoon_by_Ew")
-    theta1 = pick("theta_penalized_PJ", "theta1_Ew")
-    theta4 = pick("theta_penalized_PJ", "theta4_A0_morning_by_Ew")
-    theta6 = pick("theta_penalized_PJ", "theta6_A1_afternoon_by_Ew")
-    # J_w query block adds qE·J to each mediator's E-slope in J=1 weeks.
-    alpha_qE = pick_opt("theta_penalized_PV", "query_Jw_Ew")
-    gamma_qE = pick_opt("theta_penalized_PV", "intensity_query_Jw_Ew")
-    beta_qE = pick_opt("theta_penalized_FW", "query_Jw_Ew")
-    theta_qE = pick_opt("theta_penalized_PJ", "query_Jw_Ew")
-
-    slope = 0.25
-    if std is None:
-        std_path = Path(params_dir) if params_dir is not None else PARAMS_DIR
-        with open(std_path / "std_params.json", encoding="utf-8") as f:
-            std = json.load(f)
-    occ_gap = float(pv_hurdle_occurrence_z_gap(std))
-
-    def g(action: float, j: float) -> float:
-        return (
-            a1
-            + a2 * (
-                slope * occ_gap * (alpha1 + action * alpha4 + j * alpha_qE)
-                + (gamma1 + action * gamma4 + j * gamma_qE)
-            )
-            + a3 * slope * (beta1 + action * (beta4 + beta6) + j * beta_qE)
-            + a4 * slope * (theta1 + action * (theta4 + theta6) + j * theta_qE)
-        )
-
-    def worst_over_j(action: float) -> float:
-        g0, g1 = g(action, 0.0), g(action, 1.0)
-        return g0 if abs(g0) >= abs(g1) else g1
-
+    g = analytic_gains_from(params, pred, std)
     return {
-        "g_zero": float(worst_over_j(0.0)),
-        "g_always": float(worst_over_j(1.0)),
+        "g_zero": float(g["gE"]["never"]),
+        "g_always": float(g["gE"]["always"]),
+        "cae_g_zero": float(g["gY"]["never"]),
+        "cae_g_always": float(g["gY"]["always"]),
     }
-
-
-def loop_gain_CAE(params: dict) -> dict[str, float]:
-    """First-order weekly CAE loop gain under zero and always suggestion.
-
-    Last week's CAE enters this week's CAE directly and indirectly through the
-    fourSC and anticipated-affect EWMAs.  Because an EWMA's weights sum to one,
-    a week-constant shift has the same slope as each mediator observation.
-    The always-suggest gain includes the fitted action-by-lagged-CAE terms.
-    """
-
-    def pick(key: str, coef: str) -> float:
-        vals = np.asarray(params[key], dtype=float).ravel()
-        return float(vals[_names_for(key, params).index(coef)])
-
-    direct = pick("theta_CAE", "CAE_avg_lastweek")
-    load_four = pick("theta_CAE", "fourSC_ewma")
-    load_antic = pick("theta_CAE", "anticipated_affect_ewma")
-
-    four_zero = pick("theta_fourSC", "CAE_avg_lastweek")
-    four_always = four_zero + pick(
-        "theta_fourSC", "WalkingSuggestion_by_CAE_avg_lastweek"
-    )
-
-    antic_zero = pick("theta_antic", "CAE_avg_lastweek")
-    antic_always = (
-        antic_zero
-        + pick("theta_antic", "A0_morning_by_CAE_avg_lastweek")
-        + pick("theta_antic", "A1_afternoon_by_CAE_avg_lastweek")
-    )
-
-    g_zero = direct + load_four * four_zero + load_antic * antic_zero
-    g_always = direct + load_four * four_always + load_antic * antic_always
-    return {"cae_g_zero": float(g_zero), "cae_g_always": float(g_always)}
 
 
 def diagnose(params_dir: Path, user_ids: Sequence[int]) -> list[dict]:
@@ -1234,14 +1333,32 @@ def diagnose(params_dir: Path, user_ids: Sequence[int]) -> list[dict]:
     for uid in user_ids:
         with open(params_dir / f"params_env_{uid}.json", encoding="utf-8") as f:
             params = json.load(f)
-        rows.append(
-            {
-                "userid": int(uid),
-                **loop_gain_Ew(params, std=std),
-                **loop_gain_CAE(params),
-            }
-        )
+        rows.append({"userid": int(uid), **loop_gains_row(params, _load_pred(params_dir, uid), std)})
     return rows
+
+
+def skeleton_check(params_dir: Path, user_ids: Sequence[int], *, weeks: int = 40,
+                   burn: int = 5) -> list[dict]:
+    """Numerical check of a written folder: growth factor of the noise-free
+    simulator under never- and always-suggest (``stability.growth_factor``)."""
+    from stability import growth_factor
+
+    rows = []
+    for uid in user_ids:
+        g0 = growth_factor(uid, params_dir, 0, weeks=weeks, burn=burn)
+        g1 = growth_factor(uid, params_dir, 1, weeks=weeks, burn=burn)
+        rows.append({"userid": int(uid), "growth_zero": g0["growth"], "growth_always": g1["growth"],
+                     "E_hits_limit": bool(g0["E_hits_limit"] or g1["E_hits_limit"])})
+    return rows
+
+
+def _report_skeleton(rows: list[dict], *, log=print) -> float:
+    vals = [v for r in rows for v in (r["growth_zero"], r["growth_always"]) if np.isfinite(v)]
+    worst = max(vals) if vals else float("nan")
+    hits = [r["userid"] for r in rows if r["E_hits_limit"]]
+    log(f"  noise-free simulation: max growth factor {worst:.3f}"
+        + (f"; E reaches its limits for {hits}" if hits else ""))
+    return float(worst)
 
 
 GAIN_LIMIT = 1.0  # |g| must be strictly below this
@@ -1366,13 +1483,7 @@ def loop_gains_for(
         scaled, _ = (
             scale_params(params, mult, apply=apply) if mult else (params, [])
         )
-        rows.append(
-            {
-                "userid": int(uid),
-                **loop_gain_Ew(scaled, std=std),
-                **loop_gain_CAE(scaled),
-            }
-        )
+        rows.append({"userid": int(uid), **loop_gains_row(scaled, _load_pred(src_dir, uid), std)})
     return rows
 
 
@@ -1566,8 +1677,18 @@ def require_fitted_blocks(params_dir: Path, user_ids: Sequence[int]) -> None:
         )
 
 
-def require_dqn_checkpoints(spec: ProxySpec, user_ids: Sequence[int]) -> None:
-    """Fail before any rollouts if the DiscreteCQL arm cannot be served."""
+def require_dqn_checkpoints(
+    spec: ProxySpec, user_ids: Sequence[int], source_dir: Path | None = None
+) -> None:
+    """Fail before any rollouts if the DiscreteCQL arm cannot be served.
+
+    The transferred policy must have been trained on the current fit of
+    ``source_dir`` (the folder the variants are built from, default vanilla):
+    each checkpoint's ``params_sha256`` must match that folder's
+    ``params_env_<uid>.json``, and its weekly discount must match
+    ``ste_vanilla.DQN_WEEKLY_GAMMA``. A checkpoint from an earlier fit of the
+    same folder would otherwise be used silently.
+    """
     if not spec.dqn_model_dir:
         return
     try:
@@ -1588,6 +1709,9 @@ def require_dqn_checkpoints(spec: ProxySpec, user_ids: Sequence[int]) -> None:
         )
     wrong_algo = []
     wrong_dim = []
+    wrong_gamma = []
+    stale = []
+    src = Path(source_dir) if source_dir is not None else Path(PARAMS_DIR)
     for uid in user_ids:
         meta_path = _model_metadata_path(model_dir / f"user{uid}_model.d3")
         if not meta_path.is_file():
@@ -1598,6 +1722,10 @@ def require_dqn_checkpoints(spec: ProxySpec, user_ids: Sequence[int]) -> None:
             wrong_algo.append((int(uid), meta.get("algo")))
         if meta.get("state_dim") != STE_OBS_DIM:
             wrong_dim.append((int(uid), meta.get("state_dim")))
+        if meta.get("gamma_weekly") != DQN_WEEKLY_GAMMA:
+            wrong_gamma.append((int(uid), meta.get("gamma_weekly")))
+        if meta.get("params_sha256") != params_fingerprint(src, uid):
+            stale.append(int(uid))
     if wrong_algo:
         raise SystemExit(
             f"{model_dir} checkpoints are not {STE_ALGO} "
@@ -1611,7 +1739,20 @@ def require_dqn_checkpoints(spec: ProxySpec, user_ids: Sequence[int]) -> None:
             "Point TUNE_DQN_EXP at DiscreteCQL trained on this 20-d vector "
             "(vanilla CQL is exp 8)."
         )
-    print(f"DiscreteCQL arm: {len(user_ids)} checkpoints from {model_dir}")
+    if wrong_gamma:
+        raise SystemExit(
+            f"{model_dir} checkpoints use weekly gamma {wrong_gamma[0][1]!r}, "
+            f"current DQN_WEEKLY_GAMMA={DQN_WEEKLY_GAMMA}. Retrain."
+        )
+    if stale:
+        raise SystemExit(
+            f"{model_dir} checkpoints were not trained on the current fit of {src} "
+            f"({len(stale)} of {len(user_ids)} participants, e.g. {stale[:5]}). "
+            f"Retrain: ADAPR_PARAMS_DIR={src.name} sbatch run_ste.sh, then point "
+            "TUNE_DQN_EXP at the new exp."
+        )
+    print(f"DiscreteCQL arm: {len(user_ids)} checkpoints from {model_dir} "
+          f"(trained on the current fit of {src.name})")
 
 
 def summarise(result: dict, label: str = "") -> None:
@@ -1702,7 +1843,7 @@ def cmd_eval(args) -> None:
     user_ids = load_user_ids(params_dir)
     require_fitted_blocks(params_dir, user_ids)
     spec = make_spec(args)
-    require_dqn_checkpoints(spec, user_ids)
+    require_dqn_checkpoints(spec, user_ids, Path(args.dqn_source_dir))
     t0 = time.perf_counter()
     result = evaluate(
         params_dir, user_ids, spec, n_jobs=args.jobs, proxy_to_true=args.proxy_to_true
@@ -1718,7 +1859,7 @@ def cmd_scan(args) -> None:
     user_ids = load_user_ids(base_dir)
     require_fitted_blocks(base_dir, user_ids)
     spec = make_spec(args)
-    require_dqn_checkpoints(spec, user_ids)
+    require_dqn_checkpoints(spec, user_ids, Path(args.dqn_source_dir))
     knob = KNOBS[args.knob]
     scratch = Path(args.scratch).expanduser().resolve()
 
@@ -1837,7 +1978,7 @@ def cmd_calibrate(args) -> None:
     user_ids = load_user_ids(base_dir)
     require_fitted_blocks(base_dir, user_ids)
     spec = make_spec(args)
-    require_dqn_checkpoints(spec, user_ids)
+    require_dqn_checkpoints(spec, user_ids, Path(args.dqn_source_dir))
     knob = KNOBS[args.knob]
     scratch = Path(args.scratch).expanduser().resolve()
     require_stable = bool(args.require_stable)
@@ -1982,6 +2123,13 @@ def cmd_calibrate(args) -> None:
                 f"wrote {out_dir} but diagnose reports it unstable -- this is a bug."
             )
         print(f"  wrote {out_dir}")
+        skeleton = skeleton_check(out_dir, user_ids)
+        worst_growth = _report_skeleton(skeleton)
+        if require_stable and not worst_growth < GAIN_LIMIT:
+            raise SystemExit(
+                f"{out_dir}: noise-free simulation grows (factor {worst_growth:.3f}); "
+                "the analytic gains missed an unstable participant."
+            )
         sign_violations = sign_story_report(out_dir, user_ids, knob_name=knob.name)
 
         if source_eval is None:
@@ -2017,6 +2165,7 @@ def cmd_calibrate(args) -> None:
             "spec": asdict(spec),
             "source_params_dir": str(base_dir),
             "loop_gains": written,
+            "skeleton_check": skeleton,
             "n_coefficients_scaled": len(audit),
             "stack": _knob_stack(base_dir, knob, kappa),
             "sign_violations": {k: sorted(v) for k, v in sign_violations.items()},
@@ -2091,6 +2240,12 @@ def cmd_apply(args) -> None:
             f"wrote {out_dir} but diagnose reports it unstable -- this is a bug."
         )
     print(f"  wrote {out_dir}  ({len(audit)} coefficients)")
+    skeleton = skeleton_check(out_dir, user_ids)
+    worst_growth = _report_skeleton(skeleton)
+    if require_stable and not worst_growth < GAIN_LIMIT:
+        raise SystemExit(
+            f"{out_dir}: noise-free simulation grows (factor {worst_growth:.3f})."
+        )
     sign_violations = sign_story_report(out_dir, user_ids, knob_name=knob.name)
 
     report = {
@@ -2099,11 +2254,12 @@ def cmd_apply(args) -> None:
         "knob": knob.name,
         "kappa": float(kappa),
         "kappa_hi": None,
-        "stable": not bool(unstable_users(written)),
+        "stable": (not bool(unstable_users(written))) and bool(worst_growth < GAIN_LIMIT),
         "apply": knob.apply,
         "multipliers": knob.build(kappa),
         "source_params_dir": str(base_dir),
         "loop_gains": written,
+        "skeleton_check": skeleton,
         "n_coefficients_scaled": len(audit),
         "stack": _knob_stack(base_dir, knob, kappa),
         "sign_violations": {k: sorted(v) for k, v in sign_violations.items()},
@@ -2114,7 +2270,7 @@ def cmd_apply(args) -> None:
 
     if args.eval:
         spec = make_spec(args)
-        require_dqn_checkpoints(spec, user_ids)
+        require_dqn_checkpoints(spec, user_ids, Path(args.dqn_source_dir))
         t0 = time.perf_counter()
         result = evaluate(
             out_dir, user_ids, spec, n_jobs=args.jobs, proxy_to_true=args.proxy_to_true
@@ -2304,7 +2460,7 @@ def cmd_diagnose(args) -> None:
     user_ids = load_user_ids(params_dir)
     rows = diagnose(params_dir, user_ids)
     print(
-        f"{params_dir.name}: compound E_w and CAE loop gains "
+        f"{params_dir.name}: analytic loop gains g^E (E_w) and g^Y (CAE) "
         f"(|g| < {GAIN_LIMIT:g} required)"
     )
     print(
@@ -2319,6 +2475,86 @@ def cmd_diagnose(args) -> None:
             f"{r['cae_g_zero']:>+9.3f} {r['cae_g_always']:>+10.3f}{flag}"
         )
     print(f"{len(bad)} of {len(rows)} participants unstable")
+
+
+def resolve_proxy_to_true(value) -> float:
+    """Number, or ``from:<folder>`` -> the ratio stored by ``cmd_ratio``."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text.startswith("from:"):
+        return float(text)
+    folder = Path(text[len("from:"):]).expanduser()
+    if not folder.is_absolute():
+        folder = PROJECT_ROOT / folder
+    report = json.loads((folder / "ste_tuning.json").read_text(encoding="utf-8"))
+    conf = report.get("confirmation") or {}
+    ratio = conf.get("proxy_to_true_estimate")
+    if ratio is None or not np.isfinite(float(ratio)) or float(ratio) <= 0:
+        raise SystemExit(
+            f"{folder}/ste_tuning.json has no confirmation ratio; run "
+            f"`tune_ste.py ratio --out-dir {folder} --exp <exp>` first."
+        )
+    return float(ratio)
+
+
+def cmd_ratio(args) -> None:
+    """Confirmation-to-proxy ratio of a calibrated folder (two-step calibration).
+
+    The proxy STE that the calibration solves for uses the vanilla-trained
+    DiscreteCQL transferred into the candidate folder. The confirmation
+    retrains DiscreteCQL in the written folder, which usually does better, so
+    the confirmed STE overshoots the target. This command reads both numbers,
+    stores ``proxy_to_true_estimate = confirmed / raw proxy`` in the folder's
+    ``ste_tuning.json``, and prints the recalibration command. Recalibrating
+    with ``--proxy-to-true from:<folder>`` makes the solver hit
+    ``target / ratio`` on the proxy scale, i.e. ``target`` on the confirmed
+    scale, under the working assumption that the ratio is locally constant in
+    kappa near the solution. Confirm the recalibrated folder once more; if it
+    is still off by more than the tolerance, repeat this step.
+    """
+    from ste_vanilla import aggregate_ste
+
+    out_dir = Path(args.out_dir).expanduser()
+    if not out_dir.is_absolute():
+        out_dir = PROJECT_ROOT / out_dir
+    report_path = out_dir / "ste_tuning.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    exp = args.exp or out_dir.name.removeprefix("env_para_")
+    confirmed = float(aggregate_ste(exp, userid_path=out_dir / "user_ids.txt"))
+    applied = float(report.get("proxy_to_true", 1.0) or 1.0)
+    achieved = report.get("achieved_mean_ste")
+    if achieved is None:
+        raise SystemExit(f"{report_path} has no proxy STE (apply without --eval?).")
+    raw_proxy = float(achieved) / applied
+    if not raw_proxy > 0:
+        raise SystemExit(f"raw proxy STE is {raw_proxy:g}; the ratio is undefined.")
+    ratio = confirmed / raw_proxy
+    target = report.get("target_mean_ste")
+    on_target = target is not None and abs(confirmed - float(target)) <= args.tol
+    report["confirmation"] = {
+        "exp": exp,
+        "confirmed_mean_ste": confirmed,
+        "raw_proxy_mean_ste": raw_proxy,
+        "proxy_to_true_applied": applied,
+        "proxy_to_true_estimate": ratio,
+        "target_mean_ste": target,
+        "tol": float(args.tol),
+        "on_target": bool(on_target),
+    }
+    write_report(report_path, report)
+    print(f"{out_dir.name}: confirmed STE {confirmed:.4f} (exp {exp}), raw proxy "
+          f"{raw_proxy:.4f}, ratio {ratio:.3f}")
+    if target is None:
+        return
+    if on_target:
+        print(f"  on target {float(target):g} (tol {args.tol:g}); no recalibration needed.")
+    else:
+        print(
+            f"  off target {float(target):g}. Recalibrate, then confirm again:\n"
+            f"    python tune_ste.py calibrate --knob {report.get('knob')} "
+            f"--targets {float(target):g} --proxy-to-true from:{out_dir} --overwrite ..."
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2343,14 +2579,22 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--jobs", type=int, default=None)
         sp.add_argument(
             "--proxy-to-true",
-            type=float,
-            default=1.0,
+            default="1.0",
             help=(
-                "Multiply each user's proxy STE (default 1.0). Not estimated "
-                "from DiscreteCQL; set only with an external shrinkage factor."
+                "Multiply each user's proxy STE (default 1.0). Either a number "
+                "or 'from:<folder>' to use the ratio confirmed/proxy that "
+                "`tune_ste.py ratio` stored in <folder>/ste_tuning.json."
             ),
         )
         sp.add_argument("--report", default=None)
+        sp.add_argument(
+            "--dqn-source-dir",
+            default=str(PARAMS_DIR),
+            help=(
+                "Folder the transferred DiscreteCQL must have been trained on "
+                "(default: vanilla). Checked by params_sha256 in the checkpoint metadata."
+            ),
+        )
         sp.add_argument(
             "--dqn-exp",
             default="8",
@@ -2417,8 +2661,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         help=(
             "Refuse to write a folder unless every participant has both "
-            "|E_w loop gain| < 1 and |CAE loop gain| < 1 under never-suggest "
-            "and always-suggest (default: on)"
+            "|g^E| < 1 and |g^Y| < 1 (stability.py) under never-suggest "
+            "and always-suggest, and the noise-free simulation of the written "
+            "folder does not grow (default: on)"
         ),
     )
     sp.set_defaults(func=cmd_calibrate)
@@ -2508,6 +2753,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_apply)
 
     sp = sub.add_parser(
+        "ratio",
+        help="Store confirmed/proxy STE of a calibrated folder (two-step calibration)",
+    )
+    sp.add_argument("--out-dir", required=True, help="Calibrated folder with ste_tuning.json")
+    sp.add_argument("--exp", default="",
+                    help="Confirmation STE_EXP (default: folder name without env_para_)")
+    sp.add_argument("--tol", type=float, default=0.02)
+    sp.set_defaults(func=cmd_ratio)
+
+    sp = sub.add_parser(
         "diagnose", help="E_w and CAE loop gains for a parameter directory"
     )
     sp.add_argument("--params-dir", default=str(PARAMS_DIR))
@@ -2518,6 +2773,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
+    if hasattr(args, "proxy_to_true"):
+        args.proxy_to_true = resolve_proxy_to_true(args.proxy_to_true)
     args.func(args)
 
 

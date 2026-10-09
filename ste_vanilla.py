@@ -16,7 +16,9 @@ A holdout ``gate_Δ - c·SE > 0`` is still recorded but never replaces
 CQL with never-send. The policy treats only when
 ``Q(s,1) - Q(s,0) > ADVANTAGE_MARGIN``.
 Training data are simulated under a random walking policy. Discount is 1
-within the week and 0.9 only at Saturday afternoon. Default residual noise
+within the week and 0.97 only at Saturday afternoon: an effective horizon of
+about 1/(1 - 0.97) = 33 weeks, close to the 36-week total that the STE
+measures (0.9 gave about 10 weeks and under-weighted slowly building burden). Default residual noise
 is AR(1) bootstrap (``--noise ar1``).
 
 Seed split (do not overlap these ranges)::
@@ -66,12 +68,23 @@ from experiment import OnlineEnv
 from vani_env import PARAMS_DIR, Env, EnvConfig
 
 
+def params_fingerprint(params_dir, uid: int) -> str:
+    """SHA-256 of ``params_env_<uid>.json``: identifies the fit a policy was trained on.
+
+    The folder path alone does not: ``env_para_vanilla`` is refit in place.
+    """
+    import hashlib
+
+    path = Path(params_dir) / f"params_env_{int(uid)}.json"
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _resolve_params_dir(params_dir=None) -> Path:
     """Canonical parameter folder used for train/eval metadata."""
     return Path(PARAMS_DIR if params_dir is None else params_dir).expanduser().resolve()
 
 SLOTS_PER_WEEK = N_RL_DAYS * N_RL_SLOTS
-DQN_WEEKLY_GAMMA = 0.9
+DQN_WEEKLY_GAMMA = 0.97
 # Non-terminal within-week slots use discount 1; the week-terminal slot uses
 # ``DQN_WEEKLY_GAMMA``. d3rlpy applies ``gamma ** interval``, so we set
 # ``gamma = DQN_WEEKLY_GAMMA`` and ``interval ∈ {0, 1}``.
@@ -780,6 +793,7 @@ def eval_ste_job(
         "continuing_task": True,
         "bootstrap_lookahead_weeks": 1,
         "params_dir": str(params_path),
+        "params_sha256": params_fingerprint(params_path, userid),
     }
     for key, value in expected.items():
         if metadata.get(key) != value:
@@ -941,6 +955,7 @@ def train_ste_job(
         "continuing_task": True,
         "bootstrap_lookahead_weeks": 1,
         "params_dir": str(params_path),
+        "params_sha256": params_fingerprint(params_path, userid),
         "i_w_fixed": 1,
         "j_w_fixed": 1,
         "seed": seed,
