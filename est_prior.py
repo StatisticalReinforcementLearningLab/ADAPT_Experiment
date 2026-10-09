@@ -103,7 +103,7 @@ from algorithm_helpers import (
 from vani_env import (
     PF_THETA_CAE_NAMES,
     assert_complete_week_slots,
-    cae_mediator_ewma_rows,
+    pf_cae_mediator_ewma_rows,
     trim_pf_cae_prior,
 )
 
@@ -695,7 +695,8 @@ def _build_fourSC_design(dat: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
       * 7-day pageview EMA, yesterday anticipated affect, and 7-day Fitbit
         wear (and their action interactions) are omitted.
       * AR-1 lag of 4-hour step count is a main effect only.
-      * Weekend has no action interaction; AM/PM enters as a main effect and
+      * Weekend has no action interaction, and neither has any 7-day summary
+        (suggestions sent, interaction); AM/PM enters as a main effect and
         as ``Ah*decisionTimeSlot`` (trailing column).
 
     Per-particle CAE substitution (``cae=0`` base + ``cae_j`` delta) is a
@@ -707,7 +708,6 @@ def _build_fourSC_design(dat: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
     int_ = np.ones(len(dat))
     lag1 = _fill_nan(dat["FourSC_lag1"].to_numpy())
     yest_step = _fill_nan(dat["YesterdayStepCount_norm"].to_numpy())
-    seven_step = _fill_nan(dat["EMA_StepCount_norm"].to_numpy())
     prior2 = _fill_nan(dat["prior2hour_step_norm"].to_numpy())
     rb = _fill_nan(
         dat["recent_burden_norm" if "recent_burden_norm" in dat.columns else "recentBurdenEma_norm"].to_numpy()
@@ -721,10 +721,10 @@ def _build_fourSC_design(dat: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
     Ah = dat["WalkingSuggestion"].to_numpy().astype(float)
 
     X = np.column_stack([
-        int_, lag1, yest_step, seven_step, prior2, rb,
+        int_, lag1, yest_step, prior2, rb,
         i7w, act_frac7, is_weekend, dt_, pu, cae,
-        Ah, Ah * yest_step, Ah * prior2, Ah * rb,
-        Ah * i7w, Ah * pu, Ah * cae,
+        Ah, Ah * yest_step, Ah * prior2,
+        Ah * pu, Ah * cae,
         Ah * dt_,
     ])
     y = dat["4hour_step_norm"].to_numpy(dtype=float)
@@ -753,8 +753,8 @@ def _build_antic_design(dat: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
         0 on the first day of each week (Monday), matching the PF's
         week-boundary lag clearing.
 
-    Walking-suggestion interactions are with \(E_w\), last-week CAE, and
-    recent burden only (no weekend or 7-day active-fraction action terms).
+    Walking-suggestion interactions are with ``E_w`` and last-week CAE only
+    (no weekend or 7-day summary action terms: active fraction, burden).
 
     Like for fourSC, the per-particle CAE substitution does not change
     the regression population parameter, so actual ``caeAverageLastWeek_norm``
@@ -789,7 +789,6 @@ def _build_antic_design(dat: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
         ws_m, ws_a,
         ws_m * pu, ws_a * pu,
         ws_m * cae, ws_a * cae,
-        ws_m * rb, ws_a * rb,
     ])
     y = dat_am["anticipated_affect_norm"].to_numpy(dtype=float)
     assert X.shape[1] == len(PF_THETA_ANTIC_NAMES)
@@ -814,7 +813,8 @@ def _build_CAE_design(dat: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
 
     EWMA summaries use RL-controlled Mon–Sat only (12 slots / 6 days).
     Missing slots are filled with that week's finite mean
-    (:func:`vani_env.cae_mediator_ewmas`), matching the runtime PF helper.
+    (:func:`vani_env.pf_cae_mediator_ewmas`: missing entries skipped), matching
+    the runtime PF helper.
     """
     assert_complete_week_slots(dat)
     n_w = len(dat) // K_SLOTS_WEEK
@@ -827,7 +827,7 @@ def _build_CAE_design(dat: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
     antic = dat["anticipated_affect_norm"].to_numpy().reshape(-1, K_SLOTS_WEEK)[
         :, :N_RL_SLOTS_WEEK
     ]
-    foursc_e, antic_e = cae_mediator_ewma_rows(foursc, antic)
+    foursc_e, antic_e = pf_cae_mediator_ewma_rows(foursc, antic)
 
     X = np.column_stack([
         np.ones(n_w), cae_lw, foursc_e, antic_e,
@@ -958,7 +958,7 @@ def _user_weekly_tensors(dat: pd.DataFrame) -> Dict[str, np.ndarray]:
     dat = dat.reset_index(drop=True)
 
     cols = [
-        "YesterdayStepCount_norm", "EMA_StepCount_norm", "prior2hour_step_norm",
+        "YesterdayStepCount_norm", "prior2hour_step_norm",
         "recent_burden_norm", "active_status_fraction_7days",
         "Interacted_7d_walk",
         "anticipated_affect_yesterday_norm",
@@ -2439,6 +2439,7 @@ def load_estimated_priors(path: Path = OUTPUT_PATH) -> Dict[str, Any]:
         "nu_0_MY":     [arr(pf["fourSC"]["nu_0"]), arr(pf["antic"]["nu_0"])],
         "Gamma_0_MY":  [arr(pf["fourSC"]["Gamma_0"]), arr(pf["antic"]["Gamma_0"])],
         "sigma2_MY":   [float(pf["fourSC"]["sigma2"]), float(pf["antic"]["sigma2"])],
+        "names_MY":    [pf["fourSC"].get("names"), pf["antic"].get("names")],
         "nu_0_Y":      nu_Y,
         "Gamma_0_Y":   G_Y,
         "sigma2_Y":    float(pf["CAE"]["sigma2"]),

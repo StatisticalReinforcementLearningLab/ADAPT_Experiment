@@ -190,8 +190,10 @@ def _participant_intervals(source, participant, source_id, d, paths):
     # positive intensity is the within-week arithmetic mean among positive
     # occasions for each generated trajectory.
     raw_pv = d["HourlyPageviewCount"].to_numpy(float)
-    z_one = -float(std["HourlyPageviewCount_shift"]) / float(std["HourlyPageviewCount_scale"])
-    positive = paths["pageview_std"] >= z_one
+    # Standardized value of one page view (log1p convention; legacy: log(1)=0).
+    _log_one = np.log(1.0) if std.get("HourlyPageviewCount_zero_count") is not None else np.log1p(1.0)
+    z_one = (_log_one - float(std["HourlyPageviewCount_shift"])) / float(std["HourlyPageviewCount_scale"])
+    positive = paths["pageview_std"] >= z_one - 1e-9
     obs_occ = _week_mean((raw_pv > 0).astype(float), 14)
     sim_occ = _week_mean(positive.astype(float), 14)
     rows.extend(_interval_rows(participant, "page_view_occurrence", obs_occ, sim_occ, np.arange(2, 13), "study_week"))

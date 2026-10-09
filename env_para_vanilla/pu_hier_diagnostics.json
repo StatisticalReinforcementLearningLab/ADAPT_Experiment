@@ -1,0 +1,55 @@
+{
+  "participants": [
+    13,
+    18,
+    22,
+    31,
+    33,
+    72,
+    75,
+    86,
+    106,
+    118,
+    128,
+    129,
+    143,
+    170,
+    184,
+    195,
+    204,
+    239,
+    248,
+    252,
+    269,
+    277,
+    291,
+    299,
+    307,
+    327,
+    333,
+    339
+  ],
+  "chains": 4,
+  "tune": 2000,
+  "draws": 3000,
+  "target_accept": 0.95,
+  "max_treedepth": 12,
+  "divergences": 4,
+  "max_rhat": 1.0041,
+  "min_ess_bulk": 859.6709,
+  "sigma_E_fixed": 0.3,
+  "re_sd_mode": 0.5,
+  "common_coefficients": [
+    "c1",
+    "d1"
+  ],
+  "E_limits": [
+    -2.094,
+    6.585
+  ],
+  "shared_noise_posterior_mean": {
+    "sigma_U1": 0.18666898617405278,
+    "sigma_U2": 0.18473212882584622,
+    "sigma_PV": 0.8643335081245799
+  }
+}

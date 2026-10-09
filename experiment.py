@@ -20,6 +20,7 @@ from functools import partial
 
 
 from ewm_utils import ewma_gamma, gamma_from_n
+import derived_covariates as dc
 
 # parameters for EWM
 EWM_WINDOW = 7
@@ -74,14 +75,18 @@ def _seeded_ewm(generated, base, window=EWM_WINDOW):
     observation. Copies of ``base`` occupy the missing prior days and are
     displaced as simulated values arrive.
     """
-    base = float(base) if np.isfinite(base) else 0.0
-    gen = [
-        float(v)
-        for v in list(generated)[-int(window):]
-        if np.isfinite(v)
-    ]
-    nbase = max(0, int(window) - len(gen))
-    return ewma_gamma([base] * nbase + gen, None, empty=base)
+    return dc.seeded_last_ewma(generated, base, window)
+
+
+def _participant_column_mean(df_csv, userid, col, default=0.0):
+    """Participant mean of ``col`` in the fitting panel (missing-predictor imputation value)."""
+    try:
+        d = pd.read_csv(df_csv, usecols=["ParticipantIdentifier", col])
+        v = d.loc[d["ParticipantIdentifier"].astype(str) == str(userid), col].astype(float)
+        m = float(v.mean())
+        return m if np.isfinite(m) else float(default)
+    except (FileNotFoundError, ValueError, KeyError):
+        return float(default)
 
 
 # parameters for rolling mean
@@ -368,7 +373,6 @@ class OnlineEnv:
         # Per-day covariate logs for PF / RL (not read from self.s at use time).
         self.logIsWeekend = np.zeros(self.D)
         self.logYesterdayStepCount = np.zeros(self.D)
-        self.logStepCountLast7DaysEma = np.zeros(self.T)
         self.logPageViewLast7DaysEma = np.zeros(self.D)
         self.logMorningFitbitWearLast7Days = np.zeros(self.D)
         self.logDailyAnticipatedAffectYesterday = np.zeros(self.D)
@@ -394,43 +398,23 @@ class OnlineEnv:
         )
         if not np.isfinite(self._pageViewLast7DaysEma_initial):
             self._pageViewLast7DaysEma_initial = 0.0
+        # Seeds of the derived history summaries on their log scale
+        # (derived_covariates.py; z = (log value - shift) / scale).
+        self._pv7_log_seed = invert_zscore(
+            self._pageViewLast7DaysEma_initial, self.env.cfg.pv7_shift, self.env.cfg.pv7_scale
+        )
         slot_ema = slot_ema_initials_from_df_fit(
             df_fit_11week_csv, participant_id=self.env.cfg.userid, n_slots=self.K
         )
-        self._stepCountLast7DaysEma_initial_by_slot = {
-            s: float(slot_ema["stepCountLast7DaysEma"][s]) for s in range(self.K)
-        }
         self._prior2HourStepCountEma7d_initial_by_slot = {
             s: float(slot_ema["prior2HourStepCountEma7d"][s]) for s in range(self.K)
         }
-        self._stepCountLast7DaysEma_initial = float(
-            self._stepCountLast7DaysEma_initial_by_slot[0]
-        )
-        self._step_ema_raw_seed_by_slot = {
-            s: max(
-                0.0,
-                invert_zscore(
-                    v, self.env.cfg.ema_step_shift, self.env.cfg.ema_step_scale
-                ),
-            )
-            for s, v in self._stepCountLast7DaysEma_initial_by_slot.items()
-        }
         self._p2h_ema_raw_seed_by_slot = {
-            s: max(
-                0.0,
-                invert_zscore(
-                    v,
-                    self.env.cfg.ema_prior2hour_shift,
-                    self.env.cfg.ema_prior2hour_scale,
-                ),
+            s: invert_zscore(
+                v, self.env.cfg.ema_prior2hour_shift, self.env.cfg.ema_prior2hour_scale
             )
             for s, v in self._prior2HourStepCountEma7d_initial_by_slot.items()
         }
-        self._hist_foursc_by_slot: dict[int, list[float]] = {s: [] for s in range(self.K)}
-        self._stepCountLast7DaysEma_by_slot: dict[int, float] = dict(
-            self._stepCountLast7DaysEma_initial_by_slot
-        )
-        self.s["stepCountLast7DaysEma"] = self._stepCountLast7DaysEma_initial
         self.s["prior2HourStepCountEma7d"] = float(
             self._prior2HourStepCountEma7d_initial_by_slot[0]
         )
@@ -451,19 +435,25 @@ class OnlineEnv:
         self._ws_interaction_initial = float(self.s.get("activitySuggestionInteractLast7Days", 0.0))
         if not np.isfinite(self._ws_interaction_initial):
             self._ws_interaction_initial = 0.0
-        self._ws_interaction_last = self._ws_interaction_initial
         self._hist_ws_action: list[float] = []
         self._hist_ws_interaction: list[float] = []
+        # Imputation value when no suggestion was delivered in the window:
+        # the participant's mean of the summary in the fitting panel (the same
+        # rule the fits use for a missing predictor).
+        self._interact7_fill = _participant_column_mean(
+            df_fit_11week_csv, self.env.cfg.userid, "Interacted_7d_walk",
+            default=self._ws_interaction_initial,
+        )
 
         self.activityStatusTodayAll = np.zeros(self.D)
 
         # Seed previous-7-day morning-wearing fraction from df_fit_11week baseline.
         # Repeating 7 times preserves the baseline average at simulation start.
         self._wear7_initial = float(self.s.get("morningFitbitWearLast7Days", 0.0))
-        self._hist_morning_wear = [self._wear7_initial] * 7
+        self._hist_morning_wear = []  # morning wear of each simulated day (+ next morning)
 
         self._active_days7_initial = float(self.s.get("activeDaysLast7Days", 0.0))
-        self._hist_active_days = [self._active_days7_initial] * ACTIVE_STATUS_ROLLING_WINDOW
+        self._hist_active_days = []
 
         # ── Baseline slot [0]: pre-study values ──────────────────────────────
         # ``caeAverageLastWeek`` and ``perceivedUtilityLastWeek`` are loaded
@@ -677,18 +667,15 @@ class OnlineEnv:
         """Append this slot to the 14-slot delivered-only interaction window."""
         self._hist_ws_action.append(float(Ah))
         self._hist_ws_interaction.append(float(ws_interaction))
-        frac = _delivered_interaction_fraction(
-            self._hist_ws_action,
+        frac = dc.seeded_last_ewma_masked(
             self._hist_ws_interaction,
-            INTERACTION_ROLLING_WINDOW,
-            fallback=self._ws_interaction_last,
+            [a == 1.0 for a in self._hist_ws_action],
+            self._ws_interaction_initial,
+            dc.WINDOW_SLOTS,
         )
-        self.s["activitySuggestionInteractLast7Days"] = frac
-        window_a = np.asarray(
-            self._hist_ws_action[-INTERACTION_ROLLING_WINDOW:], dtype=float
+        self.s["activitySuggestionInteractLast7Days"] = (
+            frac if np.isfinite(frac) else self._interact7_fill
         )
-        if np.any(window_a == 1.0):
-            self._ws_interaction_last = frac
 
     def _reset_episode_state(self):
         """Reset mutable episode histories before simulating a policy."""
@@ -698,24 +685,17 @@ class OnlineEnv:
         self.s["activitySuggestionsSentLast7Days"] = (
             self._activitySuggestionsSentLast7Days_initial
         )
-        self._ws_interaction_last = self._ws_interaction_initial
         self._hist_ws_action = []
         self._hist_ws_interaction = []
 
         self.s["activitySuggestionInteractLast7Days"] = self._ws_interaction_initial
 
         self.s["morningFitbitWearLast7Days"] = self._wear7_initial
-        self._hist_morning_wear = [self._wear7_initial] * 7
-        self._hist_active_days = [self._active_days7_initial] * ACTIVE_STATUS_ROLLING_WINDOW
+        self._hist_morning_wear = []
+        self._hist_active_days = []
+        self.s["activeDaysLast7Days"] = self._active_days7_initial
 
         self._hist_prior2hour_by_slot = {s: [] for s in range(self.K)}
-        self._hist_foursc_by_slot = {s: [] for s in range(self.K)}
-        self._stepCountLast7DaysEma_by_slot = dict(
-            self._stepCountLast7DaysEma_initial_by_slot
-        )
-        self.s["stepCountLast7DaysEma"] = float(
-            self._stepCountLast7DaysEma_initial_by_slot[0]
-        )
         self.s["prior2HourStepCountEma7d"] = float(
             self._prior2HourStepCountEma7d_initial_by_slot[0]
         )
@@ -743,7 +723,6 @@ class OnlineEnv:
         s = self.s
         env = self.env
         s["decisionTimeSlot"] = float(t)
-        s["stepCountLast7DaysEma"] = self._stepCountLast7DaysEma_by_slot[int(t)]
         df = env.gen_fourSC_mean(s, 1.0) - env.gen_fourSC_mean(s, 0.0)
         if int(t) == 0:
             da = env.gen_antic_mean(s, 1.0, 0.0) - env.gen_antic_mean(s, 0.0, 0.0)
@@ -813,7 +792,7 @@ class OnlineEnv:
             # (post-action, not used as decision-time state). Sunday is
             # generated for weekly CAE / E_w but is not an RL feature.
             if needs_belief:
-                full_ctx = self.get_context(k, N_RL_DAYS, 0)
+                full_ctx = self.get_context(k, N_RL_DAYS, 0, antic="agent")
                 dataset.record_full_week_mediators(
                     k, full_ctx["M_Y"], full_ctx["M_E"])
             if hasattr(agent, "record_timing_probe"):
@@ -846,26 +825,18 @@ class OnlineEnv:
         self.action_all[step_idx] = Ah
 
         slot = int(t_sim)
-        self.s["stepCountLast7DaysEma"] = self._stepCountLast7DaysEma_by_slot[slot]
-        self.logStepCountLast7DaysEma[step_idx] = float(self.s["stepCountLast7DaysEma"])
 
         # Pre-decision covariate: same slot's 2-hour window (also set before act()).
         self._generate_prior2hour_for_slot(sim_w, d_w, t_sim, d_global, step_idx)
         prior2HourStepCount = float(self.prior2HourStepCountAll[step_idx])
 
         fourSC = self.env.gen_fourSC(self.s, Ah, step_idx)
-        # When the interaction/page-view calibration is on, draw interaction
-        # first and condition page-view occurrence on I - p_I. Otherwise keep
-        # the historical call order so baseline RNG streams stay comparable.
-        if self.env.cfg.interaction_pageview_calibration:
-            ws_interaction = self.env.gen_ws_interaction(self.s, step_idx, Ah)
-            pv = self.env.gen_pageview(
-                self.s, Ah, self._jw_week(sim_w), step_idx,
-                ws_interaction=ws_interaction,
-            )
-        else:
-            pv = self.env.gen_pageview(self.s, Ah, self._jw_week(sim_w), step_idx)
-            ws_interaction = self.env.gen_ws_interaction(self.s, step_idx, Ah)
+        # Interaction first: page-view occurrence depends on interaction with
+        # a delivered suggestion.
+        ws_interaction = self.env.gen_ws_interaction(self.s, step_idx, Ah)
+        pv = self.env.gen_pageview(
+            self.s, Ah, self._jw_week(sim_w), step_idx, ws_interaction=ws_interaction,
+        )
 
         self.stepCountNext4HourAll[step_idx] = fourSC
         self.pageViewNext4HourAll[step_idx] = pv
@@ -884,20 +855,8 @@ class OnlineEnv:
         self.s["pageViewNext4HourLag1"] = pv
         self.s["prior2HourStepCount"] = prior2HourStepCount
         self._hist_prior2hour_by_slot[slot].append(
-            invert_log_zscore(
-                prior2HourStepCount,
-                self.env.cfg.prior2hour_log_shift,
-                self.env.cfg.prior2hour_log_scale,
-            )
+            self._z_to_log(prior2HourStepCount, self.env.cfg.prior2hour_log_shift, self.env.cfg.prior2hour_log_scale)
         )
-        self._hist_foursc_by_slot[slot].append(
-            invert_log_zscore(
-                fourSC,
-                self.env.cfg.fourSC_log_shift,
-                self.env.cfg.fourSC_log_scale,
-            )
-        )
-        self._stepCountLast7DaysEma_by_slot[slot] = self._stepCountLast7DaysEma_for_slot(slot)
 
         # Update rolling delivered-only interaction fraction after this slot.
         self._record_ws_interaction(Ah, ws_interaction)
@@ -921,11 +880,8 @@ class OnlineEnv:
         self.logActiveDaysLast7Days[d_global] = float(
             self.s.get("activeDaysLast7Days", 0.0)
         )
-        self.logPageViewLast7DaysEma[d_global] = _seeded_ewm(
-            self._hist_daily_pv,
-            self._pageViewLast7DaysEma_initial,
-        )
-        self.logMorningFitbitWearLast7Days[d_global] = _rolling_mean_last(self._hist_morning_wear, 7)
+        self.logPageViewLast7DaysEma[d_global] = float(self.s["pageViewLast7DaysEma"])
+        self.logMorningFitbitWearLast7Days[d_global] = float(self.s["morningFitbitWearLast7Days"])
 
         raw_burden = _seeded_ewm(
             self._hist_daily_suggestions,
@@ -945,9 +901,14 @@ class OnlineEnv:
         self._today_action[:] = 0.0
 
     def _end_day(self, sim_w, d_w, d_global):
-        # Yesterday's step count = sum of the two 4-hour slots (AM + PM).
-        daily_sum_step = float(np.sum(self._today_fourSC))
-        daily_mean_pv = np.mean(self._today_pageview)
+        # "Yesterday's step count" and the daily page-view summary are built
+        # from the two decision windows (derived_covariates.py): mean of the
+        # two windows' log counts, standardized.
+        daily_sum_step = self._yesterday_step_z(self._today_fourSC)
+        daily_mean_pv = float(np.mean([
+            self._z_to_log(v, self.env.cfg.pageview_log_shift, self.env.cfg.pageview_log_scale)
+            for v in self._today_pageview
+        ]))
 
         ws_m = float(self._today_action[0])
         ws_a = float(self._today_action[1])
@@ -973,9 +934,9 @@ class OnlineEnv:
         self.dailyAnticipatedAffectAll[d_global] = antic                                   # latent, always finite
 
         day_base = self._step_idx(sim_w, d_w, 0)
-        daily_sum_step_agent = float(np.sum(
+        daily_sum_step_agent = self._yesterday_step_z(
             self.stepCountNext4HourAll[day_base:day_base + self.K]
-        ))
+        )
         self.logTodayStepCount[d_global] = daily_sum_step_agent
 
         survey_present = float(daily_pres) == 1.0
@@ -996,13 +957,17 @@ class OnlineEnv:
 
         self._hist_daily_pv.append(float(daily_mean_pv))
         self._hist_morning_wear.append(float(fitbit))
-        self.s["pageViewLast7DaysEma"] = _seeded_ewm(
-            self._hist_daily_pv,
-            self._pageViewLast7DaysEma_initial,
+        self.s["pageViewLast7DaysEma"] = zscore_value(
+            _seeded_ewm(self._hist_daily_pv, self._pv7_log_seed),
+            self.env.cfg.pv7_shift,
+            self.env.cfg.pv7_scale,
         )
 
-        past7_wear = _rolling_mean_last(self._hist_morning_wear, 7)
-        self.s["morningFitbitWearLast7Days"] = past7_wear
+        # The wear just drawn is tomorrow morning's; tomorrow's 7-day summary
+        # covers the mornings before it (current morning excluded).
+        self.s["morningFitbitWearLast7Days"] = _seeded_ewm(
+            self._hist_morning_wear[:-1], self._wear7_initial
+        )
 
         if d_global + 1 < self.D:
             self.logYesterdayStepCount[d_global + 1] = daily_sum_step_agent
@@ -1019,9 +984,8 @@ class OnlineEnv:
         self._dp_wk[d_w] = daily_pres
 
         self._hist_active_days.append(float(self.s.get("activityStatusToday", 0.0)))
-        self.s["activeDaysLast7Days"] = _rolling_mean_last(
-            self._hist_active_days,
-            ACTIVE_STATUS_ROLLING_WINDOW,
+        self.s["activeDaysLast7Days"] = _seeded_ewm(
+            self._hist_active_days, self._active_days7_initial
         )
 
     def _finalize_week(self, sim_w):
@@ -1048,10 +1012,6 @@ class OnlineEnv:
             self.logActivitySuggestionInteractLast7Days[step_idx] = float(
                 self.s.get("activitySuggestionInteractLast7Days", 0.0)
             )
-            self.s["stepCountLast7DaysEma"] = self._stepCountLast7DaysEma_by_slot[int(t_sim)]
-            self.logStepCountLast7DaysEma[step_idx] = float(
-                self.s["stepCountLast7DaysEma"]
-            )
             self.action_all[step_idx] = Ah
 
             fourSC = self.env.gen_fourSC(self.s, Ah, step_idx)
@@ -1068,16 +1028,6 @@ class OnlineEnv:
 
             self.s["stepCountNext4HourLag1"] = fourSC
             self.s["pageViewNext4HourLag1"] = pv
-            self._hist_foursc_by_slot[int(t_sim)].append(
-                invert_log_zscore(
-                    fourSC,
-                    self.env.cfg.fourSC_log_shift,
-                    self.env.cfg.fourSC_log_scale,
-                )
-            )
-            self._stepCountLast7DaysEma_by_slot[int(t_sim)] = (
-                self._stepCountLast7DaysEma_for_slot(int(t_sim))
-            )
             # Sunday has no walking suggestion; still occupies a slot in the
             # 14-slot delivered-only interaction window.
             self._record_ws_interaction(0.0, 0.0)
@@ -1143,36 +1093,22 @@ class OnlineEnv:
 
         self._week_finalized[sim_w] = True
 
+    @staticmethod
+    def _z_to_log(z, shift, scale):
+        """Standardized value -> log(x+1) scale."""
+        return float(z) * float(scale) + float(shift)
+
+    def _yesterday_step_z(self, foursc_z_pair):
+        """Mean of the day's two next-4h log step counts, standardized."""
+        cfg = self.env.cfg
+        logs = [self._z_to_log(z, cfg.fourSC_log_shift, cfg.fourSC_log_scale) for z in foursc_z_pair]
+        return zscore_value(float(np.mean(logs)), cfg.yesterday_step_shift, cfg.yesterday_step_scale)
+
     def _week_norm(self, sim_w):
         return study_week_norm(sim_w + 1, n_weeks=self.nweek)
 
-    def _stepCountLast7DaysEma_for_slot(self, slot):
-        """EWM of prior ≤7 same-slot *raw* 4-hour counts, then EMA z-score.
-
-        Matches ``1_data_extraction`` ``EMA_StepCount`` (groupby DecisionTime)
-        followed by ``3_standardization`` ``EMA_StepCount_norm``. The 7-day
-        window is left-padded with the study-entry EMA (first finite
-        per-slot value from ``df_fit_11week``, inverted to raw counts)
-        until enough simulated slots exist.
-        """
-        slot = int(slot)
-        raw_ema = _seeded_ewm(
-            self._hist_foursc_by_slot[slot],
-            self._step_ema_raw_seed_by_slot[slot],
-        )
-        return zscore_value(
-            raw_ema, self.env.cfg.ema_step_shift, self.env.cfg.ema_step_scale
-        )
-
     def _prior2HourStepCountEma7d_for_slot(self, slot):
-        """EWM of prior ≤7 same-slot *raw* prior-2-hour counts, then EMA z-score.
-
-        Matches ``1_data_extraction`` ``EMA_Prior2HourStepCount`` (groupby
-        DecisionTime) followed by ``3_standardization`` ``EMA_Prior2HourStepCount_norm``.
-        The 7-day window is left-padded with the study-entry EMA (first
-        finite per-slot value from ``df_fit_11week``, inverted to raw
-        counts) until enough simulated slots exist.
-        """
+        """Same-slot 7-day EWMA of prior-2h log steps (``derived_covariates``), z-scored."""
         slot = int(slot)
         raw_ema = _seeded_ewm(
             self._hist_prior2hour_by_slot[slot],
@@ -1200,7 +1136,6 @@ class OnlineEnv:
                 lag1 = 0.0
         return build_fourSC_features(
             yesterdayStepCount=self.logYesterdayStepCount[d_global],
-            stepCountLast7DaysEma=self.logStepCountLast7DaysEma[step_idx],
             prior2HourStepCount=float(self.prior2HourStepCountAll[step_idx]),
             activitySuggestionsSentLast7Days=float(
                 self.activitySuggestionsSentLast7DaysAll[step_idx]
@@ -1241,15 +1176,16 @@ class OnlineEnv:
     def _pf_cae_row(self, sim_w):
         """PF CAE transition row: EWMA of Mon–Sat mediators only (12 slots / 6 days).
 
-        Anticipated affect uses the agent-visible series (LOCF on missed
-        daily surveys). Current-week and historical CAE rows share this.
+        Anticipated affect uses answered check-ins only; missed days are
+        skipped by the EWMA, as in the RL state. Current-week and historical
+        CAE rows share this.
         """
         slot_start = self._step_idx(sim_w, 0, 0)
         slot_stop = slot_start + N_RL_DAYS * self.K
         day_start = self._day_idx(sim_w, 0)
         day_stop = day_start + N_RL_DAYS
         foursc_wk = self.stepCountNext4HourAll[slot_start:slot_stop]
-        antic_wk = self.dailyAnticipatedAffectAgentAll[day_start:day_stop]
+        antic_wk = self.dailyAnticipatedAffectObsAll[day_start:day_stop]
         return build_pf_CAE_features(0.0, foursc_wk, antic_wk)
 
     def _rl_context_vector(self, k, d, t):
@@ -1288,8 +1224,18 @@ class OnlineEnv:
             cae_row_fn=self._pf_cae_row,
         )
 
-    def get_context(self, k, d, t):
-        """Decision-point context: mediators from trajectories, ``C`` from logs."""
+    def get_context(self, k, d, t, *, antic="observed"):
+        """Decision-point context: mediators from trajectories, ``C`` from logs.
+
+        ``antic="observed"`` (decision states): anticipated affect only on days
+        with an answered check-in (NaN otherwise, skipped by the within-week
+        EWMA). ``antic="agent"``: last answered value carried forward; used for
+        the full-week record that supplies the Stage-1 response.
+        """
+        if antic not in ("observed", "agent"):
+            raise ValueError(f"antic must be 'observed' or 'agent', got {antic!r}")
+        antic_src = (self.dailyAnticipatedAffectObsAll if antic == "observed"
+                     else self.dailyAnticipatedAffectAgentAll)
         E_w = self.E_known_all[k] if (
             0 <= k < self.nweek and not np.isnan(self.E_known_all[k])
         ) else 0.0
@@ -1307,7 +1253,7 @@ class OnlineEnv:
         for dd in range(N_RL_DAYS):
             d_global = self._day_idx(k, dd)
             if dd < d and 0 <= d_global < self.D:
-                M_Y[dd, 2] = self.dailyAnticipatedAffectAgentAll[d_global]
+                M_Y[dd, 2] = antic_src[d_global]
                 M_E[dd, 2] = self.morningFitbitWearAll[d_global]
                 M_E[dd, 3] = self.dailySurveyCompleteAll[d_global]
             for tt in range(self.K):
@@ -1340,7 +1286,6 @@ _setup_log("OnlineEnv defined.")
 P_MY_FOURSC = int(
     build_fourSC_features(
         yesterdayStepCount=0.0,
-        stepCountLast7DaysEma=0.0,
         prior2HourStepCount=0.0,
         activitySuggestionsSentLast7Days=0.0,
         activitySuggestionInteractLast7Days=0.0,
@@ -1508,15 +1453,79 @@ def _save_trajectories_for_algo(save_mode, algo_name):
 # (missing file, ImportError from est_prior/statsmodels, corrupt JSON) raises
 # instead of silently installing zeros for PF and Q.
 # ──────────────────────────────────────────────────────────────────
-def _coerce_pf_fourSC_prior(nu, Gamma, *, label="fourSC"):
-    """Pad a saved PF fourSC prior that predates ``Ah*decisionTimeSlot``.
+# PF mediator columns removed when the action interactions with 7-day
+# summaries were dropped (fourSC 20 -> 18, antic 15 -> 13). Saved priors that
+# still carry them are marginalized (rows/columns dropped) until est_prior.py
+# is rerun; a refit without these regressors is the proper fix.
+_LEGACY_FOURSC_DROPPED = {
+    "stepCountLast7DaysEma": 3,
+    "Ah*activitySuggestionsSentLast7Days": 15,
+    "Ah*activitySuggestionInteractLast7Days": 16,
+}
+# 18-d priors from before the same-slot 7-day step EWMA was removed.
+_LEGACY18_FOURSC_DROPPED = {"stepCountLast7DaysEma": 3}
+_LEGACY_ANTIC_DROPPED = {
+    "A0_morning_by_recent_burden": 13,
+    "A1_afternoon_by_recent_burden": 14,
+}
 
-    The new column is trailing, so padding appends a zero mean with unit
-    variance (the zero-centring step later floors / rescales it)."""
+
+def _marginalize_legacy_prior(nu, Gamma, dropped, new_dim, label):
+    keep = [i for i in range(nu.size) if i not in set(dropped.values())]
+    nu2, G2 = nu[keep], Gamma[np.ix_(keep, keep)]
+    assert nu2.size == new_dim
+    _setup_log(
+        f"[priors] marginalized legacy PF {label} prior {nu.size} -> {new_dim} "
+        f"(dropped {', '.join(dropped)}); rerun est_prior.py for a refit"
+    )
+    return nu2, G2
+
+
+def _coerce_pf_antic_prior(nu, Gamma, *, label="antic"):
     nu = np.asarray(nu, dtype=float).ravel()
     Gamma = np.asarray(Gamma, dtype=float)
+    if nu.size == P_MY_ANTIC:
+        return nu, Gamma
+    if nu.size == P_MY_ANTIC + len(_LEGACY_ANTIC_DROPPED):
+        return _marginalize_legacy_prior(nu, Gamma, _LEGACY_ANTIC_DROPPED, P_MY_ANTIC, label)
+    raise ValueError(f"PF {label} prior dim {nu.size} incompatible with {P_MY_ANTIC}")
+
+
+def _coerce_pf_fourSC_prior(nu, Gamma, *, label="fourSC", names=None):
+    """Bring a saved PF fourSC prior to the current design.
+
+    When the saved coefficient ``names`` are available, coefficients are
+    matched by name: columns no longer in the design are marginalized out
+    (rows/columns dropped) and a missing ``Ah*decisionTimeSlot`` is padded.
+    Without names, the dimension decides: legacy 20-d priors (same-slot 7-day
+    step EWMA and the 7-day action interactions) and 18-d priors (7-day step
+    EWMA) are marginalized. Priors that predate ``Ah*decisionTimeSlot`` are
+    padded: the new column is trailing, so padding appends a zero mean."""
+    nu = np.asarray(nu, dtype=float).ravel()
+    Gamma = np.asarray(Gamma, dtype=float)
+    if names is not None:
+        names = list(names)
+        if names == list(PF_THETA_FOURSC_NAMES):
+            return nu, Gamma
+        have = [n for n in PF_THETA_FOURSC_NAMES if n in names]
+        missing = [n for n in PF_THETA_FOURSC_NAMES if n not in names]
+        if missing not in ([], ["Ah*decisionTimeSlot"]):
+            raise ValueError(f"PF {label} prior lacks {missing}")
+        keep = [names.index(n) for n in have]
+        nu2, G2 = nu[keep], Gamma[np.ix_(keep, keep)]
+        _setup_log(
+            f"[priors] matched PF {label} prior by name {nu.size} -> {len(keep)} "
+            f"(dropped {sorted(set(names) - set(have))}); rerun est_prior.py for a refit"
+        )
+        if missing:
+            return _coerce_pf_fourSC_prior(nu2, G2, label=label)
+        return nu2, G2
     if nu.size == P_MY_FOURSC:
         return nu, Gamma
+    if nu.size == P_MY_FOURSC + len(_LEGACY_FOURSC_DROPPED):
+        return _marginalize_legacy_prior(nu, Gamma, _LEGACY_FOURSC_DROPPED, P_MY_FOURSC, label)
+    if nu.size == P_MY_FOURSC + len(_LEGACY18_FOURSC_DROPPED):
+        return _marginalize_legacy_prior(nu, Gamma, _LEGACY18_FOURSC_DROPPED, P_MY_FOURSC, label)
     if nu.size == P_MY_FOURSC - 1:
         nu2, G2 = pad_prior_append(nu, Gamma, P_MY_FOURSC)
         # Prior sd of the new A×slot column = the PF's own uncertainty about
@@ -1543,7 +1552,6 @@ _ANTIC_TIMING_PAIRS = (
     ("A0_morning", "A1_afternoon"),
     ("A0_morning_by_perceived_utility_lastweek", "A1_afternoon_by_perceived_utility_lastweek"),
     ("A0_morning_by_CAE_avg_lastweek", "A1_afternoon_by_CAE_avg_lastweek"),
-    ("A0_morning_by_recent_burden", "A1_afternoon_by_recent_burden"),
 )
 
 
@@ -2056,7 +2064,9 @@ def _configure_priors(params_dir=None, *, force=False):
         _setup_log(f"[priors] loaded estimated priors from {_priors_src}")
         nu_0_MY        = list(_priors["nu_0_MY"])
         Gamma_0_MY     = list(_priors["Gamma_0_MY"])
-        nu_0_MY[0], Gamma_0_MY[0] = _coerce_pf_fourSC_prior(nu_0_MY[0], Gamma_0_MY[0])
+        nu_0_MY[0], Gamma_0_MY[0] = _coerce_pf_fourSC_prior(
+            nu_0_MY[0], Gamma_0_MY[0], names=(_priors.get("names_MY") or [None])[0])
+        nu_0_MY[1], Gamma_0_MY[1] = _coerce_pf_antic_prior(nu_0_MY[1], Gamma_0_MY[1])
         sigma2_MY      = _priors["sigma2_MY"]
         nu_0_Y         = _priors["nu_0_Y"]
         Gamma_0_Y      = _priors["Gamma_0_Y"]
@@ -2211,7 +2221,9 @@ def _apply_fitted_loo_priors(fitted, held_out_uid):
     Gamma_0_MY = [np.asarray(pf["fourSC"]["Gamma_0"], dtype=float),
                   np.asarray(pf["antic"]["Gamma_0"], dtype=float)]
     nu_0_MY[0], Gamma_0_MY[0] = _coerce_pf_fourSC_prior(
-        nu_0_MY[0], Gamma_0_MY[0], label="LOO fourSC")
+        nu_0_MY[0], Gamma_0_MY[0], label="LOO fourSC", names=pf["fourSC"].get("names"))
+    nu_0_MY[1], Gamma_0_MY[1] = _coerce_pf_antic_prior(
+        nu_0_MY[1], Gamma_0_MY[1], label="LOO antic")
     sigma2_MY = [float(pf["fourSC"]["sigma2"]), float(pf["antic"]["sigma2"])]
     nu_0_Y, Gamma_0_Y = trim_pf_cae_prior(
         np.asarray(pf["CAE"]["nu_0"], dtype=float),

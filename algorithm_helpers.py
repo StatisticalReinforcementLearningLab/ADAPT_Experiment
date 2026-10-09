@@ -868,7 +868,7 @@ def clip_prob(pi_hat, epsilon_0):
     return np.clip(pi_hat, epsilon_0, 1.0 - epsilon_0)
 
 
-def weekly_pv_sum_for_ew(slot_pv, *, shift=None, scale=None):
+def weekly_pv_sum_for_ew(slot_pv, *, shift=None, scale=None, zero_count=None):
     """Weekly pageview summary for E_w.
 
     Matches ``4_perceived_utility.build_user_blocks``:
@@ -876,8 +876,8 @@ def weekly_pv_sum_for_ew(slot_pv, *, shift=None, scale=None):
     1. Each of the 14 decision slots (7 days × 2 times) has a 4-hour-window
        pageview count. Script 3 keeps the raw count in
        ``HourlyPageviewCount`` and writes log-then-z to
-       ``HourlyPageviewCount_norm``: ``log(x)`` for ``x>=1`` (no ``+1``),
-       and ``log(0.5)`` for count 0 so zeros still sit below 1.
+       ``HourlyPageviewCount_norm``: ``log(x+1)`` z-scored with the
+       positive-count mean / SD (legacy folders: ``log(x)`` / ``log(0.5)``).
    2. ``PV_sum`` is the **mean** over those 14 normalized slot values:
 
            PV_sum = (1/14) * sum_i HourlyPageviewCount_norm_i
@@ -888,14 +888,17 @@ def weekly_pv_sum_for_ew(slot_pv, *, shift=None, scale=None):
         Length-14 (or flattened week) slot values. Pass ``HourlyPageviewCount_norm``
         directly, **or** raw counts with ``shift`` / ``scale`` from
         ``std_params.json`` (``HourlyPageviewCount_shift`` / ``scale``) to apply
-        log(x) per positive slot (count 0 uses log(0.5)) and z-score before averaging.
+        log(x+1) per slot (legacy: pass ``zero_count``) and z-score before averaging.
     """
     v = np.asarray(slot_pv, dtype=float).ravel()
     if v.size == 0:
         return 0.0
     if shift is not None and scale is not None:
         v = np.where(np.isfinite(v), v, 0.0)
-        logged = np.where(v > 0.0, np.log(v), np.log(0.5))
+        if zero_count is None:  # current convention: log(x+1) for every count
+            logged = np.log1p(np.maximum(v, 0.0))
+        else:  # legacy: log(x) for positives, log(zero_count) for zero
+            logged = np.where(v > 0.0, np.log(np.maximum(v, 1e-12)), np.log(float(zero_count)))
         v = (logged - float(shift)) / float(scale)
     if not np.any(np.isfinite(v)):
         return 0.0
@@ -1598,7 +1601,6 @@ PF_THETA_FOURSC_NAMES = [
     "intercept",
     "stepCountNext4HourLag1",
     "yesterdayStepCount",
-    "stepCountLast7DaysEma",
     "prior2HourStepCount",
     "activitySuggestionsSentLast7Days",
     "activitySuggestionInteractLast7Days",
@@ -1610,8 +1612,6 @@ PF_THETA_FOURSC_NAMES = [
     "Ah",
     "Ah*yesterdayStepCount",
     "Ah*prior2HourStepCount",
-    "Ah*activitySuggestionsSentLast7Days",
-    "Ah*activitySuggestionInteractLast7Days",
     "Ah*perceivedUtilityLastWeek",
     "Ah*caeAverageLastWeek",
     "Ah*decisionTimeSlot",
@@ -1631,15 +1631,12 @@ PF_THETA_ANTIC_NAMES = [
     "A1_afternoon_by_perceived_utility_lastweek",
     "A0_morning_by_CAE_avg_lastweek",
     "A1_afternoon_by_CAE_avg_lastweek",
-    "A0_morning_by_recent_burden",
-    "A1_afternoon_by_recent_burden",
 ]
 
 
 def build_fourSC_features(
     *,
     yesterdayStepCount,
-    stepCountLast7DaysEma,
     prior2HourStepCount,
     activitySuggestionsSentLast7Days,
     activitySuggestionInteractLast7Days,
@@ -1658,7 +1655,9 @@ def build_fourSC_features(
     Reduced vs ``gen_fourSC_mean``: no 7-day pageview EMA, no yesterday
     anticipated affect, no 7-day morning Fitbit wear (nor their action
     interactions). AR-1 lag of 4-hour step count is a main effect only.
-    Weekend is a main effect only. AM/PM enters as a main effect and as
+    Weekend is a main effect only. The action does not interact with any
+    7-day summary (suggestions sent, interaction, active days): those
+    move too slowly to identify a within-person moderation. AM/PM enters as a main effect and as
     ``Ah*decisionTimeSlot`` (trailing column), so the PF fourSC model can
     carry a morning/afternoon difference in the send effect — the same
     identification as Stage 1b and the env's own fourSC model.
@@ -1674,7 +1673,7 @@ def build_fourSC_features(
     x = np.array([
         1.0,
         float(stepCountNext4HourLag1),
-        float(yesterdayStepCount), float(stepCountLast7DaysEma),
+        float(yesterdayStepCount),
         float(prior2HourStepCount),
         float(activitySuggestionsSentLast7Days),
         float(activitySuggestionInteractLast7Days),
@@ -1682,8 +1681,6 @@ def build_fourSC_features(
         is_weekend, float(decisionTimeSlot), _pu, _cae,
         Ah,
         Ah * float(yesterdayStepCount), Ah * float(prior2HourStepCount),
-        Ah * float(activitySuggestionsSentLast7Days),
-        Ah * float(activitySuggestionInteractLast7Days),
         Ah * _pu, Ah * _cae,
         Ah * float(decisionTimeSlot),
     ], dtype=float)
@@ -1784,8 +1781,8 @@ def build_antic_features(
     r"""PF anticipated-affect feature vector.
 
     Same main effects as ``vani_env.gen_antic_mean``, but walking-suggestion
-    interactions are only with \(E_w\), last-week CAE, and recent burden
-    (no weekend or 7-day active-fraction action terms).
+    interactions are only with \(E_w\) and last-week CAE (no weekend or
+    7-day summary action terms: active fraction, recent burden).
 
     Pass ``cae=0.0`` for PF base rows; per-particle CAE is added via
     :func:`build_pf_data`.  ``pu`` / ``cae`` override ``perceivedUtility`` /
@@ -1821,8 +1818,6 @@ def build_antic_features(
             ws_afternoon * _pu,
             ws_morning * _cae,
             ws_afternoon * _cae,
-            ws_morning * rb,
-            ws_afternoon * rb,
         ],
         dtype=float,
     )
@@ -1837,8 +1832,6 @@ def build_antic_features(
 _FOURSC_MAIN_FOR_A = {
     "Ah*yesterdayStepCount": "yesterdayStepCount",
     "Ah*prior2HourStepCount": "prior2HourStepCount",
-    "Ah*activitySuggestionsSentLast7Days": "activitySuggestionsSentLast7Days",
-    "Ah*activitySuggestionInteractLast7Days": "activitySuggestionInteractLast7Days",
     "Ah*perceivedUtilityLastWeek": "perceivedUtilityLastWeek",
     "Ah*caeAverageLastWeek": "caeAverageLastWeek",
     "Ah*decisionTimeSlot": "decisionTimeSlot",
@@ -1847,11 +1840,9 @@ _FOURSC_IDX = {n: i for i, n in enumerate(PF_THETA_FOURSC_NAMES)}
 _ANTIC_IDX = {n: i for i, n in enumerate(PF_THETA_ANTIC_NAMES)}
 _ANTIC_WS_COLS = {
     0: ("A0_morning", (("A0_morning_by_perceived_utility_lastweek", "perceived_utility_lastweek"),
-                       ("A0_morning_by_CAE_avg_lastweek", "CAE_avg_lastweek"),
-                       ("A0_morning_by_recent_burden", "recent_burden"))),
+                       ("A0_morning_by_CAE_avg_lastweek", "CAE_avg_lastweek"))),
     1: ("A1_afternoon", (("A1_afternoon_by_perceived_utility_lastweek", "perceived_utility_lastweek"),
-                         ("A1_afternoon_by_CAE_avg_lastweek", "CAE_avg_lastweek"),
-                         ("A1_afternoon_by_recent_burden", "recent_burden"))),
+                         ("A1_afternoon_by_CAE_avg_lastweek", "CAE_avg_lastweek"))),
 }
 
 

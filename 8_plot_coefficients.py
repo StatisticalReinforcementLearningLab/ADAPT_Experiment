@@ -128,7 +128,6 @@ SHORT_LABELS = {
     "week": "week",
     "fourSC_lag1": "lag1",
     "yesterday_step_count": "ystep",
-    "seven_day_step_count_avg": "step7",
     "prior2hour_step_count": "p2h",
     "EMA_Prior2HourStepCount": "EMA_p2h",
     "recent_burden": "burden",

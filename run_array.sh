@@ -101,6 +101,27 @@ echo "NWEEK=${NWEEK}"
 echo "RESULTS_ROOT=${RESULTS_ROOT}"
 echo "SAVE_MODE=${SAVE_MODE}"
 echo "seed-idx=${SLURM_ARRAY_TASK_ID}"
+echo "ADAPR_GENERATOR_CALIBRATION=${ADAPR_GENERATOR_CALIBRATION-<unset>}"
+echo "ADAPR_PARAMS_DIR=${ADAPR_PARAMS_DIR}"
+echo "host=$(hostname)"
+
+python3 - <<'PY'
+import hashlib, json, os
+from pathlib import Path
+p = Path(os.environ["ADAPR_EXPERIMENT_PARAMS_DIR"]) / "params_env_13.json"
+raw = p.read_bytes()
+d = json.loads(raw)
+m = dict(zip(d["theta_penalized_PV_names"], d["theta_penalized_PV"]))
+vani = Path("vani_env.py").resolve()
+print("DEBUG path", p.resolve())
+print("DEBUG mtime", p.stat().st_mtime)
+print("DEBUG params_md5", hashlib.md5(raw).hexdigest())
+print("DEBUG alpha3", m.get("alpha3_action"))
+print("DEBUG gamma3", m.get("gamma3_action"))
+print("DEBUG vani_env", vani, hashlib.md5(vani.read_bytes()).hexdigest())
+print("DEBUG calib", os.environ.get("ADAPR_GENERATOR_CALIBRATION"))
+print("DEBUG PYTHONPATH", os.environ.get("PYTHONPATH", ""))
+PY
 
 EXTRA_ARGS=()
 if [ "${ACTION_BLOCK_C}" = "0" ]; then
