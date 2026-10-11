@@ -2308,6 +2308,7 @@ def _stage_args(args, **overrides) -> argparse.Namespace:
         report=None,
         dqn_exp=getattr(args, "dqn_exp", None),
         dqn_model_dir=getattr(args, "dqn_model_dir", None),
+        dqn_source_dir=getattr(args, "dqn_source_dir", str(PARAMS_DIR)),
         scratch=args.scratch,
         out_prefix=args.out_prefix,
         out_suffix=args.out_suffix,
