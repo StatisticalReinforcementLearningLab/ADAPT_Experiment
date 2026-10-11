@@ -1374,7 +1374,7 @@ def _refresh_phi_dims():
 
 # ── RL hyperparameters (shared) ──
 # Weekly discount used by micro-query agents. V1--V6 are registered at
-# gamma_bar=0.9; V7 / V8 are the gamma_bar=0.5 and 0.99 sensitivities of
+# gamma_bar=0.9; V7 / V8 are the gamma_bar=0.5 and 0.97 sensitivities of
 # the base. The per-slot matrix is built by _gamma_dt_micro (1 within
 # week, gamma_bar on the terminal slot).
 GAMMA_BAR = 0.9
@@ -1763,7 +1763,7 @@ def _default_reward_redistribution_priors():
 def _default_variant_q_priors():
     return {
         name: {"mu_0": np.zeros(P_RL_MICRO), "Sigma_0": np.eye(P_RL_MICRO), "sigma2": 1.0}
-        for name in ("g09", "g099", "v4")
+        for name in ("g09", "g097", "v4")
     }
 
 
@@ -2090,9 +2090,9 @@ def _configure_priors(params_dir=None, *, force=False):
             variant_q_priors["g09"] = _coerce_q_prior(
                 _priors["q_no_td_modify_g09"], P_RL_MICRO, "q_no_td_modify_g09",
             )
-        if "q_no_td_modify_g099" in _priors:
-            variant_q_priors["g099"] = _coerce_q_prior(
-                _priors["q_no_td_modify_g099"], P_RL_MICRO, "q_no_td_modify_g099",
+        if "q_no_td_modify_g097" in _priors:
+            variant_q_priors["g097"] = _coerce_q_prior(
+                _priors["q_no_td_modify_g097"], P_RL_MICRO, "q_no_td_modify_g097",
             )
         if "q_redistribution" in _priors:
             variant_q_priors.update({
@@ -2247,9 +2247,9 @@ def _apply_fitted_loo_priors(fitted, held_out_uid):
         name: _coerce_q_prior(prior, P_RL_MICRO, f"LOO q_redistribution.{name}")
         for name, prior in (fitted.get("q_redistribution") or {}).items()
     })
-    if fitted.get("q_no_td_modify_g099"):
-        variant_q_priors["g099"] = _coerce_q_prior(
-            fitted["q_no_td_modify_g099"], P_RL_MICRO, "LOO q_no_td_modify_g099",
+    if fitted.get("q_no_td_modify_g097"):
+        variant_q_priors["g097"] = _coerce_q_prior(
+            fitted["q_no_td_modify_g097"], P_RL_MICRO, "LOO q_no_td_modify_g097",
         )
     for prior in variant_q_priors.values():
         prior["mu_0"] = np.asarray(prior["mu_0"], dtype=float)
@@ -2389,12 +2389,15 @@ def _make_online_env(uid, seed=42, params_dir=None):
 def _q_prior_for_gamma(gamma_bar):
     """Q prior whose FQI discount matches ``gamma_bar`` when available.
 
-    0.99 uses ``q_no_td_modify_g099`` after ``est_prior.py`` is regenerated;
-    older LOO / shared files fall back to the 0.9 prior.
+    0.97 uses ``q_no_td_modify_g097`` after ``est_prior.py`` is regenerated;
+    older LOO / shared files fall back to the 0.9 prior (with a warning).
     """
     g = float(gamma_bar)
-    if abs(g - 0.99) < 1e-9 and "g099" in variant_q_priors:
-        return variant_q_priors["g099"]
+    if abs(g - 0.97) < 1e-9:
+        if "g097" in variant_q_priors:
+            return variant_q_priors["g097"]
+        _setup_log("[priors] no q_no_td_modify_g097 prior; using the 0.9 prior. "
+                   "Rerun est_prior.py (and --loo).")
     if g >= 0.9:
         return variant_q_priors["g09"]
     return {
@@ -2670,7 +2673,7 @@ _ALGORITHM_RUNNERS = {
         run_micro_query_reward_design, reward_design="v4", gamma_bar=0.9,
         add_terminal_residual=True),
     "rl_v7_base_g05": partial(run_micro_query, gamma_bar=0.5),
-    "rl_v8_base_g099": partial(run_micro_query, gamma_bar=0.99),
+    "rl_v8_base_g097": partial(run_micro_query, gamma_bar=0.97),
     "never_send": run_never_send,
     "always_send": run_always_send,
     "random_send": run_random_send,

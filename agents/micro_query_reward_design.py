@@ -2,6 +2,7 @@
 import numpy as np
 
 from algorithm_helpers import (
+    rlsvi_initial_noise,
     N_RL_DAYS, N_RL_SLOTS, QUERY_D, QUERY_T, STAGE1_SHARE_NAMES,
     _stack_param_store, build_phi_action,
     build_redistribution_phi, build_rl_training_data, _next_slot,
@@ -141,9 +142,8 @@ class MicroQueryRewardDesignAgent:
         dataset.bootstrap_week0(np.asarray(week0_actions, dtype=int), self.rng)
         self.b_hat_hist[0], self.b_tilde_hist[0] = self.Y_1, 0.0
         p = self.mu_0_rl.size
-        self.z_store[0] = [self.rng.multivariate_normal(np.zeros(p), self.Sigma_0_rl)
-                           for _ in range(self.B)]
-        self.betas_store[0] = [self.mu_0_rl + z for z in self.z_store[0]]
+        self.betas_store[0], self.z_store[0] = rlsvi_initial_noise(
+            self.mu_0_rl, self.Sigma_0_rl, self.B, self.rng)  # z_store holds standardized noise
         self.betas_target = self.betas_store[0]
         self.steps_since_target_update = 0
         self._current_betas_day1, self._current_betas_rest = self.betas_store[0], None

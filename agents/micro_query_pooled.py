@@ -9,6 +9,7 @@ import numpy as np
 
 from agents.micro_query import MicroQueryAgent
 from algorithm_helpers import (
+    rlsvi_initial_noise,
     N_RL_DAYS,
     N_RL_SLOTS,
     build_rl_training_data,
@@ -40,12 +41,9 @@ class PooledRLSVILearner:
         self.target_update_C = int(target_update_C)
         self.rng = rng
         p = self.mu_0_rl.shape[0]
-        z0 = [
-            self.rng.multivariate_normal(np.zeros(p), self.Sigma_0_rl)
-            for _ in range(self.B)
-        ]
-        self.z_store = {0: z0}
-        self.betas_store = {0: [self.mu_0_rl + z for z in z0]}
+        betas0, xi0 = rlsvi_initial_noise(self.mu_0_rl, self.Sigma_0_rl, self.B, self.rng)
+        self.z_store = {0: xi0}  # standardized noise state (see compute_rlsvi_betas)
+        self.betas_store = {0: betas0}
         self.betas_target = self.betas_store[0]
         self.steps_since_target_update = 0
 

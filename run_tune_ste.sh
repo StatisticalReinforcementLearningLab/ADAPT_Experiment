@@ -45,10 +45,13 @@
 #TUNE_PROXY_TO_TRUE=from:env_para_ste<t>,TUNE_OVERWRITE=1 run_tune_ste.sh
 #   5. validate again (and ratio, to record the final confirmed STE)
 #
-# Three-folder protocol from vanilla (no κ=2 fatigue folder):
-#   STE 0.2 = burden_path (A→ME+ME→E+E→MY), else benefit_foursc;
-#   STE 0.5 / 0.8 = benefit_foursc. Needs --overwrite if old stacked
-#   folders are still on disk.
+# Protocol from vanilla (vanilla itself is the middle scenario, STE ≈ 0.47):
+#   STE 0.2         = benefit (A→MY ×κ, κ < 1)        -> env_para_ste0.2
+#   STE 0.2 burden  = burden_path (A→ME −κ, ME→E floor, centered E→MY)
+#                                                      -> env_para_ste0.2_burden
+#   STE 0.8         = benefit (κ > 1), else benefit_foursc -> env_para_ste0.8
+#   Needs --overwrite (TUNE_OVERWRITE=1) if folders from the old protocol
+#   are still on disk.
 #   sbatch --export=ALL,TUNE_PHASE=protocol,TUNE_OVERWRITE=1 run_tune_ste.sh
 #
 # Overrides (sbatch --export=ALL,VAR=value,...):
@@ -57,8 +60,10 @@
 #   TUNE_KNOB         burden_path|benefit_foursc|fatigue|... (burden_shift = fatigue)
 #   TUNE_STE02_TARGET     protocol low-STE target              default 0.2
 #   TUNE_BURDEN_KAPPA0    burden_path search start             default 0.3
-#   TUNE_STE02_BENEFIT_KAPPA0  benefit fallback start if 0.2 misses  default 1
-#   TUNE_BENEFIT_TARGETS  protocol high-STE targets            default "0.5 0.8"
+#   TUNE_STE02_BENEFIT_KAPPA0  benefit (κ < 1) start for the low target  default 0.5
+#   TUNE_BENEFIT_TARGETS  protocol high-STE targets            default "0.8"
+#   TUNE_BENEFIT_KAPPA0   benefit (κ > 1) start for high targets  default 1.5
+#   TUNE_HIGH_FALLBACK_KAPPA0  benefit_foursc fallback start     default 2
 #   TUNE_OVERWRITE    1 to pass --overwrite (needed when replacing folders
 #                     written under an older knob name/semantics)  default 0
 #   TUNE_TARGETS      target mean STE values                   default "0.2 0.5 0.8"
@@ -121,8 +126,8 @@ TUNE_KNOB="${TUNE_KNOB:-action}"
 TUNE_TARGETS="${TUNE_TARGETS:-0.2 0.5 0.8}"
 TUNE_STE02_TARGET="${TUNE_STE02_TARGET:-0.2}"
 TUNE_BURDEN_KAPPA0="${TUNE_BURDEN_KAPPA0:-0.3}"
-TUNE_STE02_BENEFIT_KAPPA0="${TUNE_STE02_BENEFIT_KAPPA0:-1.0}"
-TUNE_BENEFIT_TARGETS="${TUNE_BENEFIT_TARGETS:-0.5 0.8}"
+TUNE_STE02_BENEFIT_KAPPA0="${TUNE_STE02_BENEFIT_KAPPA0:-0.5}"
+TUNE_BENEFIT_TARGETS="${TUNE_BENEFIT_TARGETS:-0.8}"
 TUNE_OVERWRITE="${TUNE_OVERWRITE:-0}"
 if [[ "${TUNE_KNOB}" == "burden_shift" || "${TUNE_KNOB}" == "fatigue" ]]; then
   TUNE_KAPPA0="${TUNE_KAPPA0:-0.2}"
@@ -357,7 +362,8 @@ case "${TUNE_PHASE}" in
       --burden-kappa0 "${TUNE_BURDEN_KAPPA0}" \
       --ste02-benefit-kappa0 "${TUNE_STE02_BENEFIT_KAPPA0}" \
       --benefit-targets ${TUNE_BENEFIT_TARGETS} \
-      --benefit-kappa0 "${TUNE_BENEFIT_KAPPA0:-2}" \
+      --benefit-kappa0 "${TUNE_BENEFIT_KAPPA0:-1.5}" \
+      --high-fallback-kappa0 "${TUNE_HIGH_FALLBACK_KAPPA0:-2}" \
       --out-prefix "${TUNE_OUT_PREFIX}" \
       "${SUFFIX_ARGS[@]+"${SUFFIX_ARGS[@]}"}" \
       --scratch "${TUNE_SCRATCH}" \
