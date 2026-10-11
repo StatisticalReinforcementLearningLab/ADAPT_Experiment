@@ -9,19 +9,25 @@ fitted from the ADAPT MRT)::
     A ──(−)──> ME (PV, FW, PJ)      ──(+)──> E_{w+1} ──(+)──> MY_{w+1} ──> Y_{w+2}
                                      (ME→E)             (E→MY)
 
-Variants (``protocol`` writes three folders plus untouched vanilla; all
-searches start from vanilla, not from a stacked fatigue folder):
+Variants (``protocol`` writes three folders; every search starts from
+vanilla). The 2026-10-07 vanilla refit has a confirmed STE of 0.473
+(DiscreteCQL, exp 1), so vanilla is the middle scenario:
 
-1. **vanilla** — the fitted environment, untouched.
-2. **STE 0.2** — first try knob ``burden_path``: fix the transmissions
-   (E→MY ``+κ_e``, default 0.3; ME→E floored at 0.05) and *search only*
-   A→ME mains ``−κ``. One raw ``κ`` must not be added to A→ME (≈0.3),
-   ME→E (≈1), and E→MY (≈0.003) together — that reintroduces the
-   never-send σ-inflation that ``fatigue`` decoupled. If the search
-   cannot hit 0.2, fall back to ``benefit_foursc`` on vanilla.
-3. **STE 0.5 / 0.8** — ``benefit_foursc`` on vanilla: *scale* A→MY by
-   ``κ`` (keeps each user's A×wear / A×interact / A×steps CATE ratios)
-   and *shift* fourSC→Y by ``c(κ−1)`` (capped). ``κ > 1`` raises STE.
+1. **vanilla** — the fitted environment, untouched (STE ≈ 0.47).
+2. **STE 0.2** — knob ``benefit``: *scale* the direct action effects A→MY
+   by κ < 1 (keeps each user's A×wear / A×interact / A×steps CATE ratios).
+   The never-send arm and σ_i are exactly vanilla's.
+3. **STE 0.2, burden** — knob ``burden_path`` on vanilla
+   (``<prefix>0.2_burden``): the same STE reached through engagement
+   burden. Fixed transmissions (centered E→MY ``+κ_e``, default 0.3;
+   ME→E floored at 0.05) and a search over the A→ME mains ``−κ``.
+4. **STE 0.8** — knob ``benefit`` with κ > 1; if that misses or is
+   unstable, ``benefit_foursc`` (A→MY ×κ plus a centered fourSC→Y shift
+   ``c(κ−1)``, capped).
+
+All three targets but the burden variant move one dial, the size of the
+direct effect, so differences between them are differences in effect size
+rather than in mechanism.
 
 Shift vs scale — the rule used throughout
 -----------------------------------------
@@ -2364,95 +2370,72 @@ def _calibrate_status(stage_args) -> int:
 
 
 def cmd_protocol(args) -> None:
-    """Root-find STE 0.2 / 0.5 / 0.8 from vanilla (no stacked fatigue folder).
+    """Three effect sizes from vanilla, plus a burden variant at the low one.
 
-    STE 0.2: ``burden_path`` first (A→ME, ME→E, E→MY together). If that
-    search misses or is unstable, ``benefit_foursc`` on the same vanilla
-    source. STE 0.5 / 0.8: ``benefit_foursc`` on vanilla. Variant 1 is
-    the untouched vanilla folder.
+    The fitted vanilla folder is the middle scenario (no folder is written;
+    its confirmed STE is measured by ``run_ste.sh`` on vanilla). The other
+    folders all start from vanilla:
+
+    * low target (default 0.2), ``benefit`` knob (A→MY ×κ, κ < 1)
+      -> ``<prefix><low><suffix>``. Only the direct action effect is scaled,
+      so the never-send arm and σ_i are identical to vanilla.
+    * same low target, ``burden_path`` knob (A→ME −κ, ME→E floored, centered
+      E→MY shift) -> ``<prefix><low><suffix>_burden``: the same STE reached
+      through engagement burden instead of a smaller benefit.
+    * high targets (default 0.8), ``benefit`` knob (κ > 1); if that misses or
+      is unstable, ``benefit_foursc`` on vanilla.
     """
     scratch = Path(args.scratch)
-    ste02 = float(args.ste02_target)
-    raise_targets = [float(t) for t in args.benefit_targets]
-    dest_02 = calibrated_out_dir(args.out_prefix, ste02, args.out_suffix)
-    dest_hi = [
-        calibrated_out_dir(args.out_prefix, t, args.out_suffix)
-        for t in raise_targets
-    ]
-    stamp_02 = _report_stamp(dest_02)
-    stamps_hi = [_report_stamp(d) for d in dest_hi]
+    low = float(args.ste02_target)
+    high_targets = [float(t) for t in args.benefit_targets]
+    dest_low = calibrated_out_dir(args.out_prefix, low, args.out_suffix)
+    dest_burden = calibrated_out_dir(args.out_prefix, low, f"{args.out_suffix}_burden")
+    dest_hi = [calibrated_out_dir(args.out_prefix, t, args.out_suffix) for t in high_targets]
+    stamps = {d: _report_stamp(d) for d in [dest_low, dest_burden, *dest_hi]}
 
-    print("=" * 70)
-    print(
-        f"PROTOCOL STE {ste02:g}: burden_path on {Path(args.params_dir).name} "
-        f"-> {dest_02.name}"
-    )
-    print("=" * 70)
+    def banner(text: str) -> None:
+        print("\n" + "=" * 70 + f"\nPROTOCOL {text}\n" + "=" * 70, flush=True)
+
+    banner(f"STE {low:g}: benefit (κ < 1) on {Path(args.params_dir).name} -> {dest_low.name}")
     _calibrate_status(_stage_args(
-        args,
-        knob="burden_path",
-        targets=[ste02],
-        kappa0=float(args.burden_kappa0),
-        scratch=str(scratch) + "_burden_path",
+        args, knob="benefit", targets=[low], kappa0=float(args.ste02_benefit_kappa0),
+        scratch=str(scratch) + "_low_benefit",
     ))
 
-    if _written_this_run(dest_02, stamp_02):
-        print(f"\nprotocol: {dest_02.name} written by burden_path; skip benefit fallback.")
-    else:
-        if _tuned_folder_stable(dest_02) and not _written_this_run(dest_02, stamp_02):
-            print(
-                f"\nprotocol: {dest_02.name} is leftover (stable=true but not "
-                "rewritten this run); trying benefit_foursc fallback."
-            )
-        print("\n" + "=" * 70)
-        print(
-            f"PROTOCOL STE {ste02:g}: burden_path missed; "
-            f"fallback benefit_foursc on {Path(args.params_dir).name} "
-            f"-> {dest_02.name}"
-        )
-        print("=" * 70)
+    banner(f"STE {low:g} with burden: burden_path on {Path(args.params_dir).name} "
+           f"-> {dest_burden.name}")
+    _calibrate_status(_stage_args(
+        args, knob="burden_path", targets=[low], kappa0=float(args.burden_kappa0),
+        out_suffix=f"{args.out_suffix}_burden", scratch=str(scratch) + "_low_burden",
+    ))
+
+    for target, dest in zip(high_targets, dest_hi):
+        banner(f"STE {target:g}: benefit (κ > 1) on {Path(args.params_dir).name} -> {dest.name}")
         _calibrate_status(_stage_args(
-            args,
-            knob="benefit_foursc",
-            targets=[ste02],
-            kappa0=float(args.ste02_benefit_kappa0),
-            scratch=str(scratch) + "_ste02_benefit",
+            args, knob="benefit", targets=[target], kappa0=float(args.benefit_kappa0),
+            scratch=str(scratch) + f"_high_benefit_{target:g}",
         ))
+        if not _written_this_run(dest, stamps[dest]):
+            banner(f"STE {target:g}: benefit missed; fallback benefit_foursc -> {dest.name}")
+            _calibrate_status(_stage_args(
+                args, knob="benefit_foursc", targets=[target],
+                kappa0=float(args.high_fallback_kappa0),
+                scratch=str(scratch) + f"_high_benefit_foursc_{target:g}", overwrite=True,
+            ))
 
-    print("\n" + "=" * 70)
-    print(
-        f"PROTOCOL STE {' '.join(f'{t:g}' for t in raise_targets)}: "
-        f"benefit_foursc on {Path(args.params_dir).name}"
-    )
-    print("=" * 70)
-    _calibrate_status(_stage_args(
-        args,
-        knob="benefit_foursc",
-        targets=raise_targets,
-        kappa0=float(args.benefit_kappa0),
-        scratch=str(scratch) + "_benefit",
-    ))
-
-    written_dirs = []
-    if _written_this_run(dest_02, stamp_02):
-        written_dirs.append(dest_02)
-    for d, before in zip(dest_hi, stamps_hi):
-        if _written_this_run(d, before):
-            written_dirs.append(d)
-    written = [d.name for d in written_dirs]
-    wanted = [dest_02.name] + [d.name for d in dest_hi]
+    wanted = [dest_low, dest_burden, *dest_hi]
+    written_dirs = [d for d in wanted if _written_this_run(d, stamps[d])]
     written_list = Path(str(scratch) + "_written")
     written_list.write_text("".join(f"{d}\n" for d in written_dirs), encoding="utf-8")
-
-    print("\nprotocol written: " + (", ".join(written) if written else "(none)"))
-    if written == wanted:
-        print("protocol complete: vanilla + " + ", ".join(written))
+    print("\nprotocol written: " + (", ".join(d.name for d in written_dirs) or "(none)"))
+    print("middle scenario: the untouched vanilla folder (its STE comes from run_ste.sh on vanilla)")
+    if len(written_dirs) == len(wanted):
+        print("protocol complete")
         return
-    print(
-        "protocol incomplete; confirmation CQL will pick up folders "
-        "rewritten this run (not leftover ste_tuning.json)."
-    )
-    raise SystemExit(2 if written else 1)
+    missing = [d.name for d in wanted if d not in written_dirs]
+    print(f"protocol incomplete; missing {missing}. Confirmation CQL will run only on "
+          "folders rewritten this run.")
+    raise SystemExit(2 if written_dirs else 1)
 
 
 def cmd_diagnose(args) -> None:
@@ -2680,28 +2663,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--ste02-target",
         type=float,
         default=0.2,
-        help="Low STE target tried first with burden_path (default 0.2)",
+        help="Low STE target, reached with benefit and with burden_path (default 0.2)",
     )
     sp.add_argument(
         "--burden-kappa0",
         type=float,
         default=0.3,
-        help="Search start for burden_path on the 0.2 target (default 0.3)",
+        help="Search start for burden_path on the low target (default 0.3)",
     )
     sp.add_argument(
         "--ste02-benefit-kappa0",
         type=float,
-        default=1.0,
-        help="Search start for benefit_foursc if burden_path misses 0.2",
+        default=0.5,
+        help="Search start for benefit (κ < 1) on the low target (default 0.5)",
     )
     sp.add_argument(
         "--benefit-targets",
         type=float,
         nargs="+",
-        default=[0.5, 0.8],
-        help="High STE targets via benefit_foursc on vanilla (default 0.5 0.8)",
+        default=[0.8],
+        help="High STE targets via benefit (κ > 1) on vanilla (default 0.8)",
     )
-    sp.add_argument("--benefit-kappa0", type=float, default=2.0)
+    sp.add_argument("--benefit-kappa0", type=float, default=1.5,
+                    help="Search start for benefit on the high targets (default 1.5)")
+    sp.add_argument("--high-fallback-kappa0", type=float, default=2.0,
+                    help="Search start for the benefit_foursc fallback (default 2)")
     sp.add_argument("--out-prefix", default="env_para_ste")
     sp.add_argument("--out-suffix", default="")
     sp.add_argument("--overwrite", action="store_true")

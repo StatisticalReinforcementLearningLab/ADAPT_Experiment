@@ -57,18 +57,18 @@ NEVER_SEND = "never_send"
 NOISY_FIELD = "cae_runs"
 Z95 = 1.96
 
-# Table / CSV order (includes the γ̄=0.99 sensitivity). Figure omits it.
+# Table / CSV order.
 TABLE_ARMS = [
     ("rl_v7_base_g05", "RLSVI (\u03b3=0.5)"),
     ("rl_v1_base_g09", "RLSVI (\u03b3=0.9)"),
-    ("rl_v8_base_g099", "RLSVI (\u03b3=0.99)"),
+    ("rl_v8_base_g097", "RLSVI (\u03b3=0.97)"),
     ("rl_v2_mtd_g09", "RLSVI (\u03b3=0.9)\n+ bottleneck value"),
     ("rl_v5_invariant_weekly", "RLSVI (\u03b3=0.9)\n+ potential shaping"),
     ("rl_v6_invariant_redistributed", "RLSVI (\u03b3=0.9)\n+ potential shaping\n+ learned redistribution"),
     ("random_send", "Random send p=0.5"),
     ("always_send", "Always send"),
 ]
-OMIT_FROM_FIGURE = frozenset({"rl_v8_base_g099"})
+OMIT_FROM_FIGURE = frozenset()
 OMIT_NO_ALWAYS = OMIT_FROM_FIGURE | {"always_send"}
 BASELINE_ARMS = frozenset({"random_send", "always_send"})
 

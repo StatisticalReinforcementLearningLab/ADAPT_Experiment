@@ -1,6 +1,7 @@
 import numpy as np
 
 from algorithm_helpers import (
+    rlsvi_initial_noise,
     N_RL_DAYS,
     N_RL_SLOTS,
     TERMINAL_D,
@@ -101,12 +102,8 @@ class MicroQueryAgent_ModifiedTDLoss:
         self.b_tilde_hist[0] = 0.0
 
         # Week 0: sample joint theta_0 = mu_0 + z_0 with z_0 ~ N(0, Sigma_0).
-        z0 = [
-            self.rng.multivariate_normal(np.zeros(p), self.Sigma_0_joint)
-            for _ in range(self.B)
-        ]
-        self.z_store[0] = z0
-        theta0 = [self.mu_0_joint + z0_b for z0_b in z0]
+        theta0, xi0 = rlsvi_initial_noise(self.mu_0_joint, self.Sigma_0_joint, self.B, self.rng)
+        self.z_store[0] = xi0  # standardized noise state (see compute_rlsvi_betas)
         self.alphas_store[0] = [th[:p_eta].copy() for th in theta0]
         self.betas_store[0]  = [th[p_eta:].copy() for th in theta0]
 

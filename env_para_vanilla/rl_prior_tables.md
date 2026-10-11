@@ -235,33 +235,33 @@
 | RL | q_no_td_modify_g09 | beta | 24 | A*walk_interaction_7d | 0.000902 | 0.002290 |
 | RL | q_no_td_modify_g09 | beta | 25 | A*weekday_vs_weekend | 0.058788 | 0.006079 |
 | RL | q_no_td_modify_g09 | beta | 26 | A*slot_pm | 0.014459 | 0.005477 |
-| RL | q_no_td_modify_g099 | beta | 0 | intercept | 0.025446 | 0.182046 |
-| RL | q_no_td_modify_g099 | beta | 1 | weekday_vs_weekend | -0.059204 | 0.303921 |
-| RL | q_no_td_modify_g099 | beta | 2 | slot_pm | -0.005038 | 0.011376 |
-| RL | q_no_td_modify_g099 | beta | 3 | E_w | 0.002408 | 0.104214 |
-| RL | q_no_td_modify_g099 | beta | 4 | b_hat | 1.659114 | 0.107138 |
-| RL | q_no_td_modify_g099 | beta | 5 | b_tilde | 0.000000 | 1.000000 |
-| RL | q_no_td_modify_g099 | beta | 6 | M_Y_anticipated_affect_ewma | 0.528929 | 0.021255 |
-| RL | q_no_td_modify_g099 | beta | 7 | M_Y_fourSC_ewma | -0.018081 | 0.020086 |
-| RL | q_no_td_modify_g099 | beta | 8 | M_E_pageview_ewma | 0.005334 | 0.000537 |
-| RL | q_no_td_modify_g099 | beta | 9 | M_E_fitbit_wear_ewma | -0.228627 | 0.011598 |
-| RL | q_no_td_modify_g099 | beta | 10 | M_E_survey_complete_ewma | -0.053168 | 0.005919 |
-| RL | q_no_td_modify_g099 | beta | 11 | yesterday_step_count | -0.027722 | 0.005972 |
-| RL | q_no_td_modify_g099 | beta | 12 | prior2hour_step_count | -0.017382 | 0.000836 |
-| RL | q_no_td_modify_g099 | beta | 13 | active_status_fraction_7days | 0.238420 | 0.060212 |
-| RL | q_no_td_modify_g099 | beta | 14 | recent_burden | -0.019533 | 0.009819 |
-| RL | q_no_td_modify_g099 | beta | 15 | walk_interaction_7d | -0.008912 | 0.056347 |
-| RL | q_no_td_modify_g099 | beta | 16 | A | 0.026188 | 0.003241 |
-| RL | q_no_td_modify_g099 | beta | 17 | A*E_w | -0.018744 | 0.006838 |
-| RL | q_no_td_modify_g099 | beta | 18 | A*b_hat | 0.006654 | 0.003587 |
-| RL | q_no_td_modify_g099 | beta | 19 | A*b_tilde | 0.000000 | 1.000000 |
-| RL | q_no_td_modify_g099 | beta | 20 | A*yesterday_step_count | -0.002026 | 0.008642 |
-| RL | q_no_td_modify_g099 | beta | 21 | A*prior2hour_step_count | 0.008408 | 0.001518 |
-| RL | q_no_td_modify_g099 | beta | 22 | A*active_status_fraction_7days | -0.024300 | 0.003680 |
-| RL | q_no_td_modify_g099 | beta | 23 | A*recent_burden | -0.007320 | 0.002701 |
-| RL | q_no_td_modify_g099 | beta | 24 | A*walk_interaction_7d | 0.001488 | 0.002819 |
-| RL | q_no_td_modify_g099 | beta | 25 | A*weekday_vs_weekend | 0.063479 | 0.006653 |
-| RL | q_no_td_modify_g099 | beta | 26 | A*slot_pm | 0.016328 | 0.007069 |
+| RL | q_no_td_modify_g097 | beta | 0 | intercept | 0.026409 | 0.176966 |
+| RL | q_no_td_modify_g097 | beta | 1 | weekday_vs_weekend | -0.060182 | 0.289471 |
+| RL | q_no_td_modify_g097 | beta | 2 | slot_pm | -0.005226 | 0.010748 |
+| RL | q_no_td_modify_g097 | beta | 3 | E_w | 0.002592 | 0.100226 |
+| RL | q_no_td_modify_g097 | beta | 4 | b_hat | 1.632866 | 0.104001 |
+| RL | q_no_td_modify_g097 | beta | 5 | b_tilde | 0.000000 | 1.000000 |
+| RL | q_no_td_modify_g097 | beta | 6 | M_Y_anticipated_affect_ewma | 0.515668 | 0.020155 |
+| RL | q_no_td_modify_g097 | beta | 7 | M_Y_fourSC_ewma | -0.017655 | 0.019526 |
+| RL | q_no_td_modify_g097 | beta | 8 | M_E_pageview_ewma | 0.005098 | 0.000516 |
+| RL | q_no_td_modify_g097 | beta | 9 | M_E_fitbit_wear_ewma | -0.223370 | 0.010942 |
+| RL | q_no_td_modify_g097 | beta | 10 | M_E_survey_complete_ewma | -0.052192 | 0.005650 |
+| RL | q_no_td_modify_g097 | beta | 11 | yesterday_step_count | -0.027342 | 0.005754 |
+| RL | q_no_td_modify_g097 | beta | 12 | prior2hour_step_count | -0.016888 | 0.000811 |
+| RL | q_no_td_modify_g097 | beta | 13 | active_status_fraction_7days | 0.231758 | 0.058484 |
+| RL | q_no_td_modify_g097 | beta | 14 | recent_burden | -0.019142 | 0.009304 |
+| RL | q_no_td_modify_g097 | beta | 15 | walk_interaction_7d | -0.009724 | 0.054429 |
+| RL | q_no_td_modify_g097 | beta | 16 | A | 0.025240 | 0.003131 |
+| RL | q_no_td_modify_g097 | beta | 17 | A*E_w | -0.018281 | 0.006593 |
+| RL | q_no_td_modify_g097 | beta | 18 | A*b_hat | 0.006489 | 0.003414 |
+| RL | q_no_td_modify_g097 | beta | 19 | A*b_tilde | 0.000000 | 1.000000 |
+| RL | q_no_td_modify_g097 | beta | 20 | A*yesterday_step_count | -0.001921 | 0.008285 |
+| RL | q_no_td_modify_g097 | beta | 21 | A*prior2hour_step_count | 0.008191 | 0.001469 |
+| RL | q_no_td_modify_g097 | beta | 22 | A*active_status_fraction_7days | -0.023210 | 0.003514 |
+| RL | q_no_td_modify_g097 | beta | 23 | A*recent_burden | -0.007138 | 0.002599 |
+| RL | q_no_td_modify_g097 | beta | 24 | A*walk_interaction_7d | 0.001352 | 0.002688 |
+| RL | q_no_td_modify_g097 | beta | 25 | A*weekday_vs_weekend | 0.062399 | 0.006515 |
+| RL | q_no_td_modify_g097 | beta | 26 | A*slot_pm | 0.015893 | 0.006671 |
 | RL | q_redistribution_v3 | beta | 0 | intercept | 0.580491 | 0.175965 |
 | RL | q_redistribution_v3 | beta | 1 | weekday_vs_weekend | -0.163542 | 0.240515 |
 | RL | q_redistribution_v3 | beta | 2 | slot_pm | -0.037872 | 0.009528 |
@@ -473,7 +473,7 @@ Gaussian GEE on the final fitted-Q regression from pooled FQI (``phi_obs`` vs bo
 | -0.008293 | 0.014193 | -0.584278 | 0.559033 | False | False | q_no_td_modify | fqi_target | 2 | slot_pm | True | 0.500000 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.029763 | beta |
 | 0.001532 | 0.005767 | 0.265653 | 0.790507 | False | False | q_no_td_modify | fqi_target | 3 | E_w | True | 0.577290 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.029763 | beta |
 | 1.153230 | 0.005921 | 194.777712 | 0.000000 | True | True | q_no_td_modify | fqi_target | 4 | b_hat | True | 0.919943 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.029763 | beta |
-| 2.701549e-16 |  |  |  | False | False | q_no_td_modify | fqi_target | 5 | b_tilde | False | 0.000000 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.029763 | beta |
+| 1.749831e-16 |  |  |  | False | False | q_no_td_modify | fqi_target | 5 | b_tilde | False | 0.000000 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.029763 | beta |
 | 0.285147 | 0.015756 | 18.097723 | 3.321149e-73 | True | True | q_no_td_modify | fqi_target | 6 | M_Y_anticipated_affect_ewma | True | 0.311549 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.029763 | beta |
 | -0.008936 | 0.005985 | -1.493012 | 0.135434 | False | False | q_no_td_modify | fqi_target | 7 | M_Y_fourSC_ewma | True | 0.969806 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.029763 | beta |
 | 0.000210 | 0.001653 | 0.127036 | 0.898912 | False | False | q_no_td_modify | fqi_target | 8 | M_E_pageview_ewma | True | 1.107588 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.029763 | beta |
@@ -487,7 +487,7 @@ Gaussian GEE on the final fitted-Q regression from pooled FQI (``phi_obs`` vs bo
 | 0.010832 | 0.028296 | 0.382803 | 0.701866 | False | False | q_no_td_modify | fqi_target | 16 | A | True | 0.499915 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.029763 | beta |
 | -0.010089 | 0.013404 | -0.752680 | 0.451642 | False | False | q_no_td_modify | fqi_target | 17 | A*E_w | True | 0.734168 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.029763 | beta |
 | 0.003416 | 0.011957 | 0.285686 | 0.775119 | False | False | q_no_td_modify | fqi_target | 18 | A*b_hat | True | 0.633764 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.029763 | beta |
-| 9.669081e-17 |  |  |  | False | False | q_no_td_modify | fqi_target | 19 | A*b_tilde | False | 0.000000 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.029763 | beta |
+| 1.251922e-16 |  |  |  | False | False | q_no_td_modify | fqi_target | 19 | A*b_tilde | False | 0.000000 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.029763 | beta |
 | 0.000922 | 0.004701 | 0.196114 | 0.844521 | False | False | q_no_td_modify | fqi_target | 20 | A*yesterday_step_count | True | 0.771463 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.029763 | beta |
 | 0.003934 | 0.005033 | 0.781603 | 0.434448 | False | False | q_no_td_modify | fqi_target | 21 | A*prior2hour_step_count | True | 0.643886 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.029763 | beta |
 | -0.007643 | 0.027425 | -0.278695 | 0.780479 | False | False | q_no_td_modify | fqi_target | 22 | A*active_status_fraction_7days | True | 0.364389 | 3360 | 28 | 27 | exchangeable | 25 | 1.000000 | 0.029763 | beta |

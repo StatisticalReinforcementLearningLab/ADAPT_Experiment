@@ -45,7 +45,7 @@ markers = {
     "rl_v6_invariant_redistributed": "d-",
     "rl_v6_invariant_redistributed_resid": "s-",
     "rl_v7_base_g05": "o-",
-    "rl_v8_base_g099": "o--",
+    "rl_v8_base_g097": "o--",
     "never_send": "x-",
     "always_send": "*-",
     "random_send": "+-",
@@ -59,8 +59,8 @@ Z95 = 1.96
 
 NEVER_SEND_BASELINE = "never_send"
 ALWAYS_SEND_BASELINE = "always_send"
-# γ̄=0.99 base is a sensitivity in the registry; omit from figures.
-OMIT_FROM_PLOTS = frozenset({"rl_v8_base_g099"})
+# Arms registered but left out of figures (none at present).
+OMIT_FROM_PLOTS = frozenset()
 
 
 def _style_for(name):

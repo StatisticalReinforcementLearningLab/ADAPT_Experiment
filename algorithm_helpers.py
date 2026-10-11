@@ -31,7 +31,7 @@ EXPERIMENT_ALGORITHMS = (
     "rl_v6_invariant_redistributed",
     "rl_v6_invariant_redistributed_resid",
     "rl_v7_base_g05",
-    "rl_v8_base_g099",
+    "rl_v8_base_g097",
     "never_send",
     "always_send",
     "random_send",
@@ -45,7 +45,7 @@ EXPERIMENT_ALGORITHM_LABELS = {
         "RL V4: return-invariant redistributed + terminal residual (γ̄=0.9)"
     ),
     "rl_v7_base_g05": "RL base (γ̄=0.5 sensitivity)",
-    "rl_v8_base_g099": "RL base (γ̄=0.99 sensitivity)",
+    "rl_v8_base_g097": "RL base (γ̄=0.97, study-length horizon)",
     "never_send": "Never send (π_A=0)",
     "always_send": "Always send (π_A=1)",
     "random_send": "Random send (π_A=0.5)",
@@ -1082,8 +1082,47 @@ def empirical_bayes_sigma2_ensemble(X, targets_per_b, mu_0, Sigma_0, fallback=1.
     return empirical_bayes_sigma2(X, y_bar, mu_0, Sigma_0, fallback)
 
 
+
+# ---------------------------------------------------------------------------
+# RLSVI ensemble noise: persistent, standardized
+# ---------------------------------------------------------------------------
+# Each ensemble member keeps a standardized noise state xi ~ N(0, I) that
+# follows an AR(1) process across weeks,
+#     xi_w = rho * xi_{w-1} + sqrt(1 - rho^2) * eps_w,   eps_w ~ N(0, I),
+# and the parameter perturbation is z_w = L_w xi_w with L_w L_w^T = Sigma_w.
+# Every week's perturbation therefore has exactly the posterior covariance
+# Sigma_w (the earlier z_w ~ N(gamma z_{w-1}, (1 - gamma^2) Sigma_w) had
+# variance gamma^2 Var(z_{w-1}) + (1 - gamma^2) Sigma_w, which lags behind a
+# shrinking posterior). The persistence rho equals the weekly discount
+# gamma_bar unless a caller passes ``rho`` explicitly. The ``z_store`` /
+# ``z_prev`` containers hold xi.
+
+
+def _noise_cholesky(Sigma):
+    """Cholesky factor of a symmetrized, eigenvalue-floored covariance."""
+    S = 0.5 * (np.asarray(Sigma, dtype=float) + np.asarray(Sigma, dtype=float).T)
+    min_eig = float(np.linalg.eigvalsh(S).min())
+    if min_eig < 1e-6:
+        S = S + (1e-6 - min_eig) * np.eye(S.shape[0])
+    return np.linalg.cholesky(S)
+
+
+def rlsvi_initial_noise(mu_0, Sigma_0, B, rng):
+    """Week-0 ensemble: theta_0 = mu_0 + L_0 xi_0, xi_0 ~ N(0, I). Returns (thetas, xi)."""
+    mu_0 = np.asarray(mu_0, dtype=float).ravel()
+    L = _noise_cholesky(Sigma_0)
+    xi = [rng.standard_normal(mu_0.size) for _ in range(int(B))]
+    return [mu_0 + L @ x for x in xi], xi
+
+
+def _persistent_noise(xi_prev, L, rho, rng):
+    """One AR(1) step of the standardized noise; returns (z, xi)."""
+    xi_prev = np.asarray(xi_prev, dtype=float).ravel()
+    xi = rho * xi_prev + np.sqrt(1.0 - rho * rho) * rng.standard_normal(xi_prev.size)
+    return L @ xi, xi
+
 def compute_rlsvi_betas(Phi, targets_per_b, mu_0, Sigma_0, sigma2,
-                        gamma_bar, z_prev, rng):
+                        gamma_bar, z_prev, rng, rho=None):
     """
     RLSVI with per-ensemble TD targets and discounted noise.
 
@@ -1097,12 +1136,13 @@ def compute_rlsvi_betas(Phi, targets_per_b, mu_0, Sigma_0, sigma2,
         mu_{w-1}^{(b)}  = Sigma_{w-1} (Sigma_0^{-1} mu_0
                                         + Phi^T y^{(b)} / sigma2)
 
-    Discounted noise (AR(1) process across weeks):
+    Persistent standardized noise (persistence rho = gamma_bar by default):
 
-        z_{w-1}^{(b)} ~ N(gamma_bar * z_{w-2}^{(b)},
-                          (1 - gamma_bar^2) * Sigma_{w-1})
+        xi^{(b)} = rho * xi_prev^{(b)} + sqrt(1 - rho^2) * eps,  z^{(b)} = L xi^{(b)},
+        L L^T = Sigma_{w-1},
 
-    Final parameter:  beta_{w-1}^{(b)} = mu_{w-1}^{(b)} + z_{w-1}^{(b)}
+    so z^{(b)} ~ N(0, Sigma_{w-1}) exactly.
+    Final parameter:  beta_{w-1}^{(b)} = mu_{w-1}^{(b)} + z^{(b)}
 
     Parameters
     ----------
@@ -1111,15 +1151,17 @@ def compute_rlsvi_betas(Phi, targets_per_b, mu_0, Sigma_0, sigma2,
     mu_0          : (p,) – prior mean
     Sigma_0       : (p, p) – prior covariance
     sigma2        : float – observation noise variance
-    gamma_bar     : float – AR(1) coefficient for the noise discount
-    z_prev        : list of B (p,) arrays – previous noise vectors z_{w-2}^{(b)}
+    gamma_bar     : float – weekly discount; also the noise persistence rho
+    z_prev        : list of B (p,) arrays – previous standardized noise xi^{(b)}
     rng           : numpy.random.Generator
+    rho           : float – noise persistence (default gamma_bar)
 
     Returns
     -------
     betas : list of B (p,) arrays – beta_{w-1}^{(b)}
-    z_new : list of B (p,) arrays – updated noise vectors z_{w-1}^{(b)}
+    z_new : list of B (p,) arrays – updated standardized noise xi^{(b)}
     """
+    rho = float(gamma_bar) if rho is None else float(rho)
     B = len(targets_per_b)
     Sigma_0_inv = np.linalg.inv(Sigma_0)
 
@@ -1129,11 +1171,7 @@ def compute_rlsvi_betas(Phi, targets_per_b, mu_0, Sigma_0, sigma2,
         Sigma_post = spd_inverse(
             Sigma_0_inv + (1.0 / sigma2) * (Phi.T @ Phi))
 
-    noise_cov = (1.0 - gamma_bar ** 2) * Sigma_post
-    noise_cov = 0.5 * (noise_cov + noise_cov.T)
-    min_eig = np.linalg.eigvalsh(noise_cov).min()
-    if min_eig < 1e-6:
-        noise_cov += (1e-6 - min_eig) * np.eye(noise_cov.shape[0])
+    L_post = _noise_cholesky(Sigma_post)
     precomp = Sigma_0_inv @ mu_0
 
     betas, z_new = [], []
@@ -1143,13 +1181,9 @@ def compute_rlsvi_betas(Phi, targets_per_b, mu_0, Sigma_0, sigma2,
         else:
             mu_b = Sigma_post @ (
                 precomp + (1.0 / sigma2) * (Phi.T @ targets_per_b[b]))
-        try:
-            z_b = rng.multivariate_normal(gamma_bar * z_prev[b], noise_cov)
-        except np.linalg.LinAlgError:
-            L = np.linalg.cholesky(noise_cov + 1e-4 * np.eye(noise_cov.shape[0]))
-            z_b = gamma_bar * z_prev[b] + L @ rng.standard_normal(noise_cov.shape[0])
+        z_b, xi_b = _persistent_noise(z_prev[b], L_post, rho, rng)
         betas.append(mu_b + z_b)
-        z_new.append(z_b)
+        z_new.append(xi_b)
 
     return betas, z_new
 
@@ -1164,8 +1198,8 @@ def compute_rlsvi_betas_with_alphas(
     mu_0, Sigma_0,
     # ── single modified-TD loss noise variance ──
     sigma2_Q,
-    # ── joint AR(1) noise ──
-    gamma_bar, z_prev, rng,
+    # ── joint persistent standardized noise ──
+    gamma_bar, z_prev, rng, rho=None,
 ):
     r"""
     Jointly sample (alpha, beta) under the modified-TD-loss posterior. In the
@@ -1210,10 +1244,11 @@ def compute_rlsvi_betas_with_alphas(
     All three block targets (block A: 0; block B: ``targets_per_b``; block C:
     ``Y_terminal``) are independent of ``eta``, so the joint posterior
     parameters of ``theta`` are driven only by the joint design / prior and
-    do not require a separate AR(1) chain on the ``eta`` block. We sample a
-    single joint AR(1) innovation
-        z^{(b)} ~ N( gamma_bar * z_prev[b],  (1 - gamma_bar^2) * Sigma_post^{(b)} )
-    of dimension ``p`` and add it to the joint posterior mean.
+    do not require a separate AR(1) chain on the ``eta`` block.     We keep a
+    single joint standardized noise state xi^{(b)} of dimension ``p``
+    (``z_prev``), advance it by xi = rho xi_prev + sqrt(1 - rho^2) eps, and
+    add z^{(b)} = L^{(b)} xi^{(b)}, L^{(b)} L^{(b)T} = Sigma_post^{(b)}, to the
+    joint posterior mean, so z^{(b)} ~ N(0, Sigma_post^{(b)}) exactly.
 
     Closed-form joint posterior per ensemble member b
     -------------------------------------------------
@@ -1274,17 +1309,20 @@ def compute_rlsvi_betas_with_alphas(
         Shared noise variance for all three blocks in the bottleneck-state TD
         loss.
     gamma_bar : float
-        AR(1) coefficient for the joint noise discount.
+        Weekly discount; also the noise persistence rho.
     z_prev : list of B (p,) arrays
-        Previous joint AR(1) noise vectors.
+        Previous joint standardized noise states xi^{(b)}.
+    rho : float, optional
+        Noise persistence (default ``gamma_bar``).
     rng : numpy.random.Generator
 
     Returns
     -------
     betas : list of B (p_beta,) arrays   – beta block of theta^{(b)}.
     alphas : list of B (p_eta,) arrays   – eta block of theta^{(b)}.
-    z_new : list of B (p,) arrays        – joint AR(1) noise for the next call.
+    z_new : list of B (p,) arrays        – joint standardized noise for the next call.
     """
+    rho = float(gamma_bar) if rho is None else float(rho)
     B = len(targets_per_b)
     mu_0 = np.asarray(mu_0, dtype=float).ravel()
     Sigma_0 = np.asarray(Sigma_0, dtype=float)
@@ -1362,28 +1400,18 @@ def compute_rlsvi_betas_with_alphas(
         )
         mu_b_joint = Sigma_post @ rhs
 
-        noise_cov = (1.0 - gamma_bar ** 2) * Sigma_post
-        noise_cov = 0.5 * (noise_cov + noise_cov.T)
-        min_eig = np.linalg.eigvalsh(noise_cov).min()
-        if min_eig < 1e-6:
-            noise_cov += (1e-6 - min_eig) * np.eye(p)
-
         z_prev_b = np.asarray(z_prev[b], dtype=float).ravel()
         if z_prev_b.size != p:
             raise ValueError(
                 f"z_prev[{b}].size={z_prev_b.size} != joint dim {p}"
             )
-        try:
-            z_b = rng.multivariate_normal(gamma_bar * z_prev_b, noise_cov)
-        except np.linalg.LinAlgError:
-            L = np.linalg.cholesky(noise_cov + 1e-4 * np.eye(p))
-            z_b = gamma_bar * z_prev_b + L @ rng.standard_normal(p)
+        z_b, xi_b = _persistent_noise(z_prev_b, _noise_cholesky(Sigma_post), rho, rng)
 
         theta_b = mu_b_joint + z_b
 
         alphas.append(theta_b[:p_eta])
         betas.append(theta_b[p_eta:])
-        z_new.append(z_b)
+        z_new.append(xi_b)
 
     return betas, alphas, z_new
 
