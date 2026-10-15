@@ -22,7 +22,7 @@ ROOT_DIR = BASE_DIR / "rawdata"
 OUT_DIR = BASE_DIR / "Xueqing"
 
 DATE_START = "2024-11-01"
-DATE_END = "2026-07-26"
+DATE_END = "2026-10-14"
 FOLDER_FMT = "%Y-%m-%d"
 
 # Parallelism for per-day Fitbit extraction (I/O-heavy; keep modest on Dropbox)

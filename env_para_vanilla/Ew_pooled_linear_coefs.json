@@ -1,12 +1,12 @@
 {
-  "intercept": 0.782,
-  "E_lag": 0.072,
+  "intercept": 0.436,
+  "E_lag": 0.057,
   "PV_sum": 0.0,
-  "FW_sum": 0.113,
-  "PJ_sum": 0.155,
+  "FW_sum": 0.314,
+  "PJ_sum": 0.184,
   "J_close": 0.0,
-  "half_J_close": 0.249,
-  "U1_impute_mean": 4.122065727699531,
-  "U2_impute_mean": 4.230046948356808,
+  "half_J_close": 0.3,
+  "U1_impute_mean": 4.208480565371024,
+  "U2_impute_mean": 4.342756183745583,
   "E_lag0": 2.0
 }
