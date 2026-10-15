@@ -22,21 +22,30 @@
     252,
     269,
     277,
+    281,
     291,
     299,
     307,
     327,
     333,
-    339
+    339,
+    345,
+    346,
+    350,
+    356,
+    361,
+    369,
+    381,
+    393
   ],
   "chains": 4,
   "tune": 2000,
   "draws": 3000,
   "target_accept": 0.95,
   "max_treedepth": 12,
-  "divergences": 4,
-  "max_rhat": 1.0041,
-  "min_ess_bulk": 859.6709,
+  "divergences": 3,
+  "max_rhat": 1.0064,
+  "min_ess_bulk": 726.6798,
   "sigma_E_fixed": 0.3,
   "re_sd_mode": 0.5,
   "common_coefficients": [
@@ -44,12 +53,12 @@
     "d1"
   ],
   "E_limits": [
-    -2.094,
-    6.585
+    -2.384,
+    4.157
   ],
   "shared_noise_posterior_mean": {
-    "sigma_U1": 0.18666898617405278,
-    "sigma_U2": 0.18473212882584622,
-    "sigma_PV": 0.8643335081245799
+    "sigma_U1": 0.19791747891262484,
+    "sigma_U2": 0.18944091662372936,
+    "sigma_PV": 0.874367354826792
   }
 }
