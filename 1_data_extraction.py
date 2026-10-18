@@ -2,9 +2,10 @@
 #
 # Reads the ADAPTS MRT source tables under `DATA_FOLDER` and writes one CSV per
 # stream (surveys, schedule, page views, walking suggestions, wearables, steps).
-# Cohort rules (completers, wear/FourSC, weekly/daily response, ≥1 CAE week,
-# high-CAE ceiling) are the constants in the setup cell below — not a
-# hand-picked ID list.
+# Cohort rules (83-day completers, minus the high-CAE ceiling) are the
+# constants in the setup cell below. Low wear, low FourSC, missing weekly or
+# daily surveys, and zero CAE weeks are all retained (no-CAE users get a
+# model-imputed baseline CAE in 5_fit_vanilla_testbed.py).
 # Next: `2_combine_data_frame.py`.
 
 # 0. Setup
@@ -22,6 +23,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.ticker import MaxNLocator
+
+from dropout_utils import build_participant_dropout_table, max_raw_observation_timestamp
 
 
 plt.ion()
@@ -43,6 +46,27 @@ folder = DATA_FOLDER
 # completer for the designed MRT (not early dropout / never-started).
 MIN_ACTIVE_SPAN_DAYS = 83
 
+# Fallback local timezone used throughout extraction.
+DEFAULT_IANA_TIMEZONE = "America/New_York"
+
+# Derive the extract cutoff from observed raw events. Scheduled due dates are
+# deliberately excluded because they can extend beyond the actual snapshot.
+DATA_EXTRACT_TIMESTAMP = max_raw_observation_timestamp(folder)
+DATA_EXTRACT_DATE = DATA_EXTRACT_TIMESTAMP.tz_convert(
+    DEFAULT_IANA_TIMEZONE
+).tz_localize(None).normalize()
+print(
+    "Latest raw observation:",
+    DATA_EXTRACT_TIMESTAMP,
+    "=> extract date",
+    DATA_EXTRACT_DATE.date(),
+)
+
+# Participant 379 is an observed early dropout. Retain the short-span starter
+# so the hierarchical fits give them population coefficients where outcomes
+# (including CAE) are absent after dropout.
+FORCE_INCLUDE_IDS = ("379",)
+
 # Staff / engineering accounts are not analysis units.
 EXTRA_TESTER_IDS = ("test-Yuxuan",)
 
@@ -50,8 +74,6 @@ EXTRA_TESTER_IDS = ("test-Yuxuan",)
 # rows, or the participant is missing from that table), treat stamps as
 # US Eastern. Do not use UTC wall clock (shifts evening local dates) and
 # do not leave NaT (drops otherwise span-eligible completers).
-DEFAULT_IANA_TIMEZONE = "America/New_York"
-
 # ---------------------------------------------------------------------------
 # B. Analysis-sample restriction: wearable primary-outcome availability
 # ---------------------------------------------------------------------------
@@ -64,24 +86,23 @@ DEFAULT_IANA_TIMEZONE = "America/New_York"
 #   B2. count of non-missing FourSC (hourly StepCount)
 #       ≥ MIN_FOURSC_NON_NAN
 #
-# Scientific rationale: available-case / completers for the sensor outcome —
-# need enough wear-valid decision windows *and* usable proximal step outcomes.
-MIN_DECISION_WINDOW_WEAR_SUM = 20  # require ≥ this many wear-valid 4h windows
-MIN_FOURSC_NON_NAN = 20           # require ≥ this many non-missing FourSC
+# Thresholds stay in the audit. They no longer remove anyone: low wear and
+# low FourSC are part of the retained sample.
+MIN_DECISION_WINDOW_WEAR_SUM = 20  # audit threshold for wear-valid 4h windows
+MIN_FOURSC_NON_NAN = 20            # audit threshold for non-missing FourSC
+EXCLUDE_IF_INSUFFICIENT_WEAR = False
+EXCLUDE_IF_INSUFFICIENT_FOURSC = False
 
 # ---------------------------------------------------------------------------
 # C. Survey-response availability (self-report moderators / outcomes)
 # ---------------------------------------------------------------------------
-# Exclude participants with zero observed weekly surveys (all week_present==0)
-# or zero observed daily EOD surveys (all daily_present==0). With no responses
-# they contribute no information to survey-based analyses / missingness models
-# for those panels.
-# Also require ≥1 week with a non-missing CAE item. week_present can be 1 from
-# a check-in that skipped CAE; a all-NaN CAE_avg makes the script-5 CAE model
-# a fallback-zero and was the Jun-2026 "no CAE obs" drop (users 251, 257).
-EXCLUDE_IF_ALL_WEEKLY_SURVEYS_MISSING = True
-EXCLUDE_IF_ALL_DAILY_SURVEYS_MISSING = True
-EXCLUDE_IF_ALL_CAE_MISSING = True
+# No weekly check-in, no daily survey, and zero CAE weeks are all retained
+# (2026-10-17: no-CAE users 112, 251, 257, 388 added back; their baseline
+# CAE is imputed from the fitted CAE model in script 5). High-CAE ceiling
+# below still removes people.
+EXCLUDE_IF_ALL_WEEKLY_SURVEYS_MISSING = False
+EXCLUDE_IF_ALL_DAILY_SURVEYS_MISSING = False
+EXCLUDE_IF_ALL_CAE_MISSING = False
 MIN_WEEKLY_SURVEYS_PRESENT = 1
 MIN_DAILY_SURVEYS_PRESENT = 1
 MIN_CAE_WEEKS_PRESENT = 1
@@ -102,15 +123,10 @@ MANUAL_EXCLUSION_OVERRIDE_IDS = ()
 # Do not hand-edit participant IDs here.
 EXCLUDED_PARTICIPANT_IDS: tuple[str, ...] = ()
 
-# Analysis sample as of 2026-09-01 (Eastern default for missing device TZ):
-# 43 span-eligible (≥83-day EOD-task span) → 15 excluded → 28 fitted.
-# Wear/FourSC < 20: 112, 117, 138, 219.
-# No weekly and/or no daily (and/or no CAE week): 82, 112, 251, 257, 259.
-# Both: 112.
-# High-CAE ceiling (min weekly CAE_avg ≥ 6 or week-1 CAE_avg = 7):
-# 37, 141, 151, 160, 188, 225, 285.
-# July 26 extract had 31 after also dropping 248, 259, 291, 327, 339 for
-# FourSC < 20 under UTC wall-clock conversion; 259 still fails daily.
+# October 14 2026 extract: 54 span-eligible plus short-span dropout 379.
+# Drop the high-CAE ceiling (37, 141, 151, 160, 188, 225, 285, 359). The
+# no-CAE users (112, 251, 257, 388) are retained since 2026-10-17.
+# Sample size 47 (was 42).
 
 # Device metadata (timezone lookup source)
 
@@ -484,6 +500,16 @@ complete_participant_ids = np.setdiff1d(
     span_qualified_participant_ids,
     np.array([str(x) for x in MANUAL_EXCLUSION_OVERRIDE_IDS], dtype=object),
 )
+_eod_ids = set(summary_surveytask["ParticipantIdentifier"].map(lambda x: str(x)))
+_force_present = [str(x) for x in FORCE_INCLUDE_IDS if str(x) in _eod_ids]
+_force_absent = [str(x) for x in FORCE_INCLUDE_IDS if str(x) not in _eod_ids]
+if _force_absent:
+    print(f"WARNING: force-include IDs have no end-of-day task: {_force_absent}")
+if _force_present:
+    complete_participant_ids = np.union1d(
+        complete_participant_ids,
+        np.array(_force_present, dtype=object),
+    )
 print(
     "Span-eligible analysis starters (wearable rules applied later):",
     complete_participant_ids,
@@ -498,6 +524,7 @@ surveyquestionresults["ParticipantIdentifier"] = surveyquestionresults[
 summary_surveytask["ParticipantIdentifier"] = summary_surveytask[
     "ParticipantIdentifier"
 ].astype(str)
+summary_surveytask.to_csv(folder / "summary_surveytask.csv", index=False)
 
 # filter out incomplete participants from surveytask and surveyquestionresults
 surveytask = surveytask[surveytask['ParticipantIdentifier'].isin(complete_participant_ids)]
@@ -1027,18 +1054,15 @@ def audit_analysis_sample_exclusions(
     """
     Apply analysis-sample exclusion rules and return an audit table.
 
-    Rules:
-      1) HourWearing: sum over 4h post-decision windows
-         < MIN_DECISION_WINDOW_WEAR_SUM
-      2) FourSC: count of non-missing hourly StepCount
-         < MIN_FOURSC_NON_NAN
-      3) Weekly surveys: sum(week_present) < MIN_WEEKLY_SURVEYS_PRESENT
-      4) Daily surveys: sum(daily_present) < MIN_DAILY_SURVEYS_PRESENT
-      5) CAE: weeks with any non-missing CAE-1..12 < MIN_CAE_WEEKS_PRESENT
-      6) High-CAE ceiling: 12-week min CAE_avg ≥ MIN_WEEKLY_CAE_THRESHOLD
-         or week-1 CAE_avg = WEEK1_CAE_CEILING
+    Rules that remove someone:
+      * No week with a non-missing CAE item.
+      * High-CAE ceiling: 12-week min CAE_avg ≥ MIN_WEEKLY_CAE_THRESHOLD
+        or week-1 CAE_avg = WEEK1_CAE_CEILING.
+    Wear, FourSC, and missing weekly or daily surveys are recorded and
+    retained. FORCE_INCLUDE_IDS are kept.
     """
     override = {str(pid) for pid in MANUAL_EXCLUSION_OVERRIDE_IDS}
+    force_include = {str(pid) for pid in FORCE_INCLUDE_IDS}
 
     def _non_nan_counts(df, value_col):
         if df is None or len(df) == 0 or value_col not in df.columns:
@@ -1108,24 +1132,29 @@ def audit_analysis_sample_exclusions(
         min_cae = min_weekly_cae.get(pid_key, np.nan)
         w1_cae = week1_cae.get(pid_key, np.nan)
 
+        low_wear = n_wear < MIN_DECISION_WINDOW_WEAR_SUM
+        low_foursc = n_foursc < MIN_FOURSC_NON_NAN
+        no_daily = n_daily < MIN_DAILY_SURVEYS_PRESENT
+        retain_low_engagement = low_wear or low_foursc or no_daily
+
         reasons = []
-        if n_wear < MIN_DECISION_WINDOW_WEAR_SUM:
+        if EXCLUDE_IF_INSUFFICIENT_WEAR and low_wear:
             reasons.append("insufficient_decision_window_wear")
-        if n_foursc < MIN_FOURSC_NON_NAN:
+        if EXCLUDE_IF_INSUFFICIENT_FOURSC and low_foursc:
             reasons.append("no_foursc_step_outcomes")
         if (
             EXCLUDE_IF_ALL_WEEKLY_SURVEYS_MISSING
             and n_weekly < MIN_WEEKLY_SURVEYS_PRESENT
+            and not retain_low_engagement
         ):
             reasons.append("all_weekly_surveys_missing")
-        if (
-            EXCLUDE_IF_ALL_DAILY_SURVEYS_MISSING
-            and n_daily < MIN_DAILY_SURVEYS_PRESENT
-        ):
+        if EXCLUDE_IF_ALL_DAILY_SURVEYS_MISSING and no_daily:
             reasons.append("all_daily_surveys_missing")
         if EXCLUDE_IF_ALL_CAE_MISSING and n_cae < MIN_CAE_WEEKS_PRESENT:
             reasons.append("all_cae_missing")
-        if EXCLUDE_IF_HIGH_CAE:
+        if pid_key in force_include:
+            reasons = []
+        elif EXCLUDE_IF_HIGH_CAE:
             if np.isfinite(min_cae) and float(min_cae) >= float(
                 MIN_WEEKLY_CAE_THRESHOLD
             ):
@@ -2123,13 +2152,18 @@ df_gif_all.to_csv(os.path.join(folder, 'df_gif_all.csv'), index=False)
 #   treatment: 
 # - case 2- missing days: user didn't wear fitbit for most hours between the wakeup and bedtime
 
-# using heartrate to define drop out...etc
-# Filter to cohort BEFORE timezone conversion (huge win on multi-GB files).
+# Retain every non-tester EOD-task starter long enough to measure terminal
+# inactivity, including short-span starters such as 379. The modeling tables
+# remain restricted to ``complete_participant_ids`` below.
+dropout_participant_ids = set(
+    summary_surveytask["ParticipantIdentifier"].astype(str)
+)
+
 _hr_usecols = ["DateTime", "ParticipantIdentifier", "Value"]
 heartratebymin = pd.read_csv(folder / "filtered_activities-heart.csv", usecols=_hr_usecols)
 heartratebymin["ParticipantIdentifier"] = heartratebymin["ParticipantIdentifier"].astype(str)
 heartratebymin = heartratebymin[
-    heartratebymin["ParticipantIdentifier"].isin(complete_participant_ids)
+    heartratebymin["ParticipantIdentifier"].isin(dropout_participant_ids)
 ].copy()
 print(heartratebymin.head())
 
@@ -2146,6 +2180,10 @@ print(heartratebymin.head())
 heartratebymin["DateTime"] = pd.to_datetime(heartratebymin["DateTime"], errors="coerce")
 heartratebymin["Date"] = _as_calendar_dates(heartratebymin["DateTime"])
 heartratebymin = heartratebymin.sort_values(by=["ParticipantIdentifier", "DateTime"])
+heartratebymin_all_starters = heartratebymin
+heartratebymin = heartratebymin_all_starters[
+    heartratebymin_all_starters["ParticipantIdentifier"].isin(complete_participant_ids)
+].copy()
 
 summary = (
     heartratebymin.dropna(subset=["Date"])
@@ -2171,7 +2209,7 @@ _step_usecols = ["DateTime", "ParticipantIdentifier", "Value"]
 stepcountbymin = pd.read_csv(folder / "filtered_activities-steps.csv", usecols=_step_usecols)
 stepcountbymin["ParticipantIdentifier"] = stepcountbymin["ParticipantIdentifier"].astype(str)
 stepcountbymin = stepcountbymin[
-    stepcountbymin["ParticipantIdentifier"].isin(complete_participant_ids)
+    stepcountbymin["ParticipantIdentifier"].isin(dropout_participant_ids)
 ].copy()
 print(stepcountbymin.head())
 
@@ -2186,6 +2224,27 @@ stepcountbymin = convert_utc_columns_to_user_local(
 stepcountbymin["DateTime"] = pd.to_datetime(stepcountbymin["DateTime"], errors="coerce")
 stepcountbymin["Date"] = _as_calendar_dates(stepcountbymin["DateTime"])
 stepcountbymin = stepcountbymin.sort_values(by=["ParticipantIdentifier", "DateTime"])
+stepcountbymin_all_starters = stepcountbymin
+stepcountbymin = stepcountbymin_all_starters[
+    stepcountbymin_all_starters["ParticipantIdentifier"].isin(complete_participant_ids)
+].copy()
+
+# Participant-level terminal-inactivity audit on the designed 84-day window.
+# This output covers all starters and does not alter protocol eligibility.
+_pageview_dropout = pageview[["ParticipantIdentifier", "Timestamp"]].copy()
+_pageview_dropout["ParticipantIdentifier"] = _pageview_dropout[
+    "ParticipantIdentifier"
+].astype(str)
+_pageview_dropout["Date"] = _as_calendar_dates(_pageview_dropout["Timestamp"])
+participant_dropout, _participant_dropout_daily = build_participant_dropout_table(
+    summary_surveytask,
+    _pageview_dropout,
+    heartratebymin_all_starters,
+    stepcountbymin_all_starters,
+    observation_end=DATA_EXTRACT_DATE,
+)
+participant_dropout.to_csv(folder / "participant_dropout.csv", index=False)
+print(f"Wrote {folder / 'participant_dropout.csv'} ({len(participant_dropout)} starters)")
 
 summary = (
     stepcountbymin.dropna(subset=["Date"])
@@ -3007,12 +3066,10 @@ if _analysis_exclude_df.empty:
 else:
     print(
         f"Analysis-sample rules excluded {len(EXCLUDED_PARTICIPANT_IDS)} "
-        f"span-eligible participants "
-        f"(wear≥{MIN_DECISION_WINDOW_WEAR_SUM}; "
-        f"FourSC≥{MIN_FOURSC_NON_NAN}; "
-        f"weekly≥{MIN_WEEKLY_SURVEYS_PRESENT}; "
-        f"daily≥{MIN_DAILY_SURVEYS_PRESENT}; "
-        f"CAE≥{MIN_CAE_WEEKS_PRESENT}; "
+        f"participants "
+        f"(keep wear<{MIN_DECISION_WINDOW_WEAR_SUM}, "
+        f"FourSC<{MIN_FOURSC_NON_NAN}, and missing weekly or daily; "
+        f"drop CAE weeks<{MIN_CAE_WEEKS_PRESENT}; "
         f"drop min CAE≥{MIN_WEEKLY_CAE_THRESHOLD:g} or "
         f"week-1 CAE={WEEK1_CAE_CEILING:g}):"
     )

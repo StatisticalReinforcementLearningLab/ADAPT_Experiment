@@ -84,6 +84,8 @@ from statsmodels.genmod.cov_struct import Exchangeable
 from statsmodels.genmod.families import Gaussian
 from statsmodels.genmod.generalized_estimating_equations import GEE
 
+from dropout_utils import in_study_mask
+
 # Feature builders for the RL Q / reward / bottleneck regressions.
 # We import directly from algorithm.py to guarantee the prior dimensions stay
 # synchronised with the agent's runtime phi.
@@ -103,6 +105,7 @@ from algorithm_helpers import (
 from vani_env import (
     PF_THETA_CAE_NAMES,
     assert_complete_week_slots,
+    mask_dropout_fit_outcomes,
     pf_cae_mediator_ewma_rows,
     trim_pf_cae_prior,
 )
@@ -232,9 +235,27 @@ def load_df_fit(path: Optional[Path] = None) -> pd.DataFrame:
     if not p.is_file():
         raise FileNotFoundError(f"df_fit not found: {p}")
     print(f"Loading df_fit from {p}", flush=True)
-    df = _filter_users_with_cae_obs(_week_fix_and_filter(pd.read_csv(p)))
+    # Users with no observed CAE are kept (2026-10-17): they inform the PF
+    # mediator priors; the reward / Q priors are fit on ``_cae_users`` only,
+    # because their reward (CAE) is never observed.
+    df = _week_fix_and_filter(
+        mask_dropout_fit_outcomes(pd.read_csv(p))
+    )
     assert_complete_week_slots(df)
     return df
+
+
+def _cae_users(df: pd.DataFrame) -> pd.DataFrame:
+    """Rows of participants with at least one observed weekly CAE."""
+    has = (
+        df.groupby("ParticipantIdentifier", sort=False)["CAE_avg_norm"]
+        .apply(lambda s: np.isfinite(s.to_numpy(dtype=float)).any())
+    )
+    keep = has[has].index
+    dropped = sorted(int(x) for x in has[~has].index)
+    if dropped:
+        print(f"Reward/Q priors: excluding users with no CAE observations: {dropped}")
+    return df.loc[df["ParticipantIdentifier"].isin(keep)].copy()
 
 
 def _fill_nan(x: np.ndarray, default: float = 0.0) -> np.ndarray:
@@ -954,8 +975,12 @@ def _user_weekly_tensors(dat: pd.DataFrame) -> Dict[str, np.ndarray]:
     finite.
     """
     assert_complete_week_slots(dat)
-    n_w = len(dat) // K_SLOTS_WEEK
     dat = dat.reset_index(drop=True)
+    eligible_weeks = in_study_mask(dat).reshape(-1, K_SLOTS_WEEK).all(axis=1)
+    if not eligible_weeks.all():
+        first_ineligible = int(np.flatnonzero(~eligible_weeks)[0])
+        dat = dat.iloc[: first_ineligible * K_SLOTS_WEEK].copy()
+    n_w = len(dat) // K_SLOTS_WEEK
 
     cols = [
         "YesterdayStepCount_norm", "prior2hour_step_norm",
@@ -2512,18 +2537,19 @@ def fit_all_priors(df_fit: pd.DataFrame) -> Dict[str, Any]:
     data cannot leak through a previously saved ``rl_priors.json``.
     """
     pf = fit_pf_priors(df_fit)
-    reward = fit_reward_prior(df_fit)  # retained for legacy compatibility
-    reward_redistribution = fit_reward_redistribution_priors(df_fit, gamma_bar=0.9)
-    q_no_mod = fit_q_prior(df_fit, gamma_terminal=0.5)
-    q_no_mod_g09 = fit_q_prior(df_fit, gamma_terminal=0.9)
-    q_no_mod_g097 = fit_q_prior(df_fit, gamma_terminal=0.97)
+    df_q = _cae_users(df_fit)
+    reward = fit_reward_prior(df_q)  # retained for legacy compatibility
+    reward_redistribution = fit_reward_redistribution_priors(df_q, gamma_bar=0.9)
+    q_no_mod = fit_q_prior(df_q, gamma_terminal=0.5)
+    q_no_mod_g09 = fit_q_prior(df_q, gamma_terminal=0.9)
+    q_no_mod_g097 = fit_q_prior(df_q, gamma_terminal=0.97)
     q_redistribution = {
-        "v3": fit_q_potential_prior(df_fit, gamma_terminal=0.9),
-        "v4": fit_q_redistribution_prior(df_fit, gamma_terminal=0.9),
+        "v3": fit_q_potential_prior(df_q, gamma_terminal=0.9),
+        "v4": fit_q_redistribution_prior(df_q, gamma_terminal=0.9),
         "v4_resid": fit_q_redistribution_prior(
-            df_fit, gamma_terminal=0.9, add_terminal_residual=True),
+            df_q, gamma_terminal=0.9, add_terminal_residual=True),
     }
-    q_mod_joint = fit_q_td_modify_joint_prior(df_fit, gamma_terminal=0.9)
+    q_mod_joint = fit_q_td_modify_joint_prior(df_q, gamma_terminal=0.9)
     return {
         "pf": pf,
         "reward": reward,
@@ -2583,6 +2609,7 @@ def main() -> Dict[str, Any]:
 
     print("Fitting PF mediator / Y / tY priors ...")
     pf = fit_pf_priors(df_fit)
+    df_q = _cae_users(df_fit)
     for name, d in pf.items():
         n = None if d["nu_0"] is None else len(d["nu_0"])
         print(f"  {name:9s}: p={n}, sigma2={d['sigma2']:.4f}")
@@ -2614,43 +2641,42 @@ def main() -> Dict[str, Any]:
         )
 
     print("Fitting reward-shaping eta prior ...")
-    reward = fit_reward_prior(df_fit)
+    reward = fit_reward_prior(df_q)
     print(f"  reward: p={len(reward['mu_0'])}, sigma2={reward['sigma2']:.4f}")
 
     print("Fitting V4 two-stage redistribution priors (γ̄=0.9) ...")
-    reward_redistribution = fit_reward_redistribution_priors(df_fit, gamma_bar=0.9)
+    reward_redistribution = fit_reward_redistribution_priors(df_q, gamma_bar=0.9)
     for name, prior in reward_redistribution["daily_mediators"].items():
         print(f"  Stage 1 {name}: p={len(prior['mu_0'])}, sigma2={prior['sigma2']:.4f}")
     for name, prior in reward_redistribution["redistribution"].items():
         print(f"  Stage 2 {name}: p={len(prior['mu_0'])}, sigma2={prior['sigma2']:.4f}")
 
     print("Fitting Q-function prior (no TD-modify, γ̄=0.5 for V7) ...")
-    q_no_mod = fit_q_prior(df_fit, gamma_terminal=0.5)
+    q_no_mod = fit_q_prior(df_q, gamma_terminal=0.5)
     print(f"  Q (no TD-modify, γ̄=0.5): p={len(q_no_mod['mu_0'])}, "
         f"sigma2={q_no_mod['sigma2']:.4f}")
 
     print("Fitting Q prior for the γ̄=0.9 base (V1) ...")
-    q_no_mod_g09 = fit_q_prior(df_fit, gamma_terminal=0.9)
+    q_no_mod_g09 = fit_q_prior(df_q, gamma_terminal=0.9)
     print(f"  Q (gamma=0.9): p={len(q_no_mod_g09['mu_0'])}, "
           f"sigma2={q_no_mod_g09['sigma2']:.4f}")
 
     print("Fitting Q prior for the γ̄=0.97 base (V8) ...")
-    q_no_mod_g097 = fit_q_prior(df_fit, gamma_terminal=0.97)
+    q_no_mod_g097 = fit_q_prior(df_q, gamma_terminal=0.97)
     print(f"  Q (gamma=0.97): p={len(q_no_mod_g097['mu_0'])}, "
           f"sigma2={q_no_mod_g097['sigma2']:.4f}")
 
     print("Fitting V5 / V6 / V6-leftover Q priors (γ̄=0.9) ...")
     q_redistribution = {
-        "v3": fit_q_potential_prior(df_fit, gamma_terminal=0.9),
-        "v4": fit_q_redistribution_prior(df_fit, gamma_terminal=0.9),
-        "v4_resid": fit_q_redistribution_prior(
-            df_fit, gamma_terminal=0.9, add_terminal_residual=True),
+        "v3": fit_q_potential_prior(df_q, gamma_terminal=0.9),
+        "v4": fit_q_redistribution_prior(df_q, gamma_terminal=0.9),
+        "v4_resid": fit_q_redistribution_prior(df_q, gamma_terminal=0.9, add_terminal_residual=True),
     }
     for variant, prior in q_redistribution.items():
         print(f"  Q ({variant}): p={len(prior['mu_0'])}, sigma2={prior['sigma2']:.4f}")
 
     print("Summarizing pooled RL Q GEE coefficients ...")
-    pooled_rl_q = build_pooled_rl_q_summary(df_fit)
+    pooled_rl_q = build_pooled_rl_q_summary(df_q)
     if pooled_rl_q.empty:
         print("  pooled RL Q GEE: no users contributed")
     else:
@@ -2662,7 +2688,7 @@ def main() -> Dict[str, Any]:
         )
 
     print("Fitting joint (alpha, beta) prior for modified-TD-loss RLSVI (γ̄=0.9) ...")
-    q_mod_joint = fit_q_td_modify_joint_prior(df_fit, gamma_terminal=0.9)
+    q_mod_joint = fit_q_td_modify_joint_prior(df_q, gamma_terminal=0.9)
     if q_mod_joint["mu_0"] is not None:
         print(f"  Q joint: p={len(q_mod_joint['mu_0'])}, "
               f"p_eta={q_mod_joint['p_eta']}, "

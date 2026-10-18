@@ -63,7 +63,13 @@ from scipy.optimize import minimize
 from scipy.special import logsumexp
 import json
 
-from vani_env import E_QUAD_HI, E_QUAD_LO, pv_hurdle_occurrence_z_gap
+from dropout_utils import in_study_mask
+from vani_env import (
+    E_QUAD_HI,
+    E_QUAD_LO,
+    mask_dropout_fit_outcomes,
+    pv_hurdle_occurrence_z_gap,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +118,7 @@ WORK_DIR.mkdir(parents=True, exist_ok=True)
 
 folder = COMBINED_DIR
 
-df_fit = pd.read_csv(folder / "df_fit.csv")
+df_fit = mask_dropout_fit_outcomes(pd.read_csv(folder / "df_fit.csv"))
 # df_fit is already study weeks 1–12 (burn-in / week 0 / week 13 dropped upstream).
 
 
@@ -796,12 +802,11 @@ def build_user_blocks(
         last week's Sunday tools. Missing weeks keep the mediator arrays
         empty.
 
-      - Weekly intensity summaries for the transition use fixed denominators
-        (``/14``, ``/7``): a missing or absent PV slot counts as a zero page
-        view (the standardized zero-count value ``z0``, i.e. imputed on the
-        raw scale before standardization), and a missing FW / PJ day counts
-        as 0 (not worn / not completed). Missing PV lags are also ``z0``;
-        missing recent burden is the participant mean.
+      - Weekly transition summaries use fixed 14/7 denominators while the
+        participant is enrolled: a missing PV slot counts as standardized
+        zero and missing FW/PJ as 0. Post-dropout slots are excluded from both
+        numerator and denominator. Missing PV lags are ``z0``; missing recent
+        burden is the participant mean.
 
       - The state transition uses separate weekly summaries:
             PV_sum_trans, FW_sum_trans, PJ_sum_trans
@@ -871,11 +876,13 @@ def build_user_blocks(
         pv_ctx_rows = []
         a0_list, a1_list = [], []
         fw_list, pj_list = [], []
+        slot_eligible_list, day_eligible_list = [], []
         day_is_weekend_list, day_burden_list = [], []
         day_fw_lag_list, day_pj_lag_list = [], []
 
         for _d, g_day in g_week.groupby(date_col, sort=True):
             g_day = g_day.sort_values(decision_col, na_position="last")
+            eligible_slots = in_study_mask(g_day)
 
             aa = g_day[a_col].to_numpy(dtype=float)
             pv = g_day[PV_col].to_numpy(dtype=float)
@@ -890,6 +897,7 @@ def build_user_blocks(
             )
 
             for k in range(len(g_day)):
+                slot_eligible_list.append(bool(eligible_slots[k]))
                 z_k = float(pv[k]) if not np.isnan(pv[k]) else np.nan
                 pv_z_list.append(z_k)
                 lv = float(pv_log[k]) if k < len(pv_log) and not np.isnan(pv_log[k]) else np.nan
@@ -909,6 +917,7 @@ def build_user_blocks(
 
             row_morning = g_day.loc[g_day[decision_col] == 0].iloc[0]
             row_afternoon = g_day.loc[g_day[decision_col] == 1].iloc[0]
+            day_eligible_list.append(bool(eligible_slots.any()))
 
             A0_day = float(row_morning[a_col]) if not pd.isna(row_morning[a_col]) else 0.0
             A1_day = float(row_afternoon[a_col]) if not pd.isna(row_afternoon[a_col]) else 0.0
@@ -953,17 +962,35 @@ def build_user_blocks(
         day_burden = np.asarray(day_burden_list, dtype=float)
         day_FW_lag = np.asarray(day_fw_lag_list, dtype=float)
         day_PJ_lag = np.asarray(day_pj_lag_list, dtype=float)
+        slot_eligible = np.asarray(slot_eligible_list, dtype=bool)
+        day_eligible = np.asarray(day_eligible_list, dtype=bool)
 
-        # Fixed 14/7 denominators. A missing or absent PV slot is a zero count
-        # (z0 on the standardized scale); a missing FW / PJ day is 0 (not
-        # worn / not completed), the same convention as vani_env / ew_hat.
-        if np.any(~np.isnan(pv_z)):
-            n_pv_obs = int(np.sum(~np.isnan(pv_z)))
-            PV_sum = float((np.nansum(pv_z) + max(14 - n_pv_obs, 0) * pv_z0) / 14.0)
+        # Missing outcomes while enrolled keep the original zero convention.
+        # Post-dropout slots/days are ineligible and leave both numerator and
+        # denominator, rather than being fitted as disengaged zeros.
+        n_slot_eligible = int(slot_eligible.sum())
+        n_pv_obs = int(np.sum(np.isfinite(pv_z) & slot_eligible))
+        if n_slot_eligible and n_pv_obs:
+            PV_sum = float(
+                (
+                    np.nansum(pv_z[slot_eligible])
+                    + (n_slot_eligible - n_pv_obs) * pv_z0
+                )
+                / n_slot_eligible
+            )
         else:
             PV_sum = np.nan
-        FW_sum = float(np.nansum(FW_daily) / 7.0) if np.any(~np.isnan(FW_daily)) else np.nan
-        PJ_sum = float(np.nansum(PJ_daily) / 7.0) if np.any(~np.isnan(PJ_daily)) else np.nan
+        n_day_eligible = int(day_eligible.sum())
+        FW_sum = (
+            float(np.nansum(FW_daily[day_eligible]) / n_day_eligible)
+            if n_day_eligible and np.any(np.isfinite(FW_daily[day_eligible]))
+            else np.nan
+        )
+        PJ_sum = (
+            float(np.nansum(PJ_daily[day_eligible]) / n_day_eligible)
+            if n_day_eligible and np.any(np.isfinite(PJ_daily[day_eligible]))
+            else np.nan
+        )
         return {
             "week": int(week),
             "is_missing_week": False,

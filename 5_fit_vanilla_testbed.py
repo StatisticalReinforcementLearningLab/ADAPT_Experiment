@@ -31,7 +31,12 @@ import pytensor.tensor as pt
 from patsy import dmatrix
 from pathlib import Path
 
-from vani_env import assert_complete_week_slots, cae_mediator_ewma_rows
+from vani_env import (
+    assert_complete_week_slots,
+    cae_mediator_ewma_rows,
+    impute_baseline_cae,
+    mask_dropout_fit_outcomes,
+)
 
 PROJECT_ROOT = Path(
     os.environ.get("ADAPR_PROJECT_ROOT", Path(__file__).resolve().parent)
@@ -60,7 +65,10 @@ if (
 ):
     shutil.copy2(std_params_source, std_params_dest)
 
-df_fit = pd.read_csv(folder / 'df_fit.csv')
+df_fit = mask_dropout_fit_outcomes(pd.read_csv(folder / 'df_fit.csv'))
+
+with open(std_params_dest, encoding="utf-8") as f:
+    std_params = json.load(f)
 
 file_params_env_prefix = str(work_folder / 'params_env_')
 file_pred_prefix = str(work_folder / 'pred_')
@@ -115,6 +123,7 @@ def safe_nanmean(x, default=0.0):
     if np.all(np.isnan(x)):
         return default
     return np.nanmean(x)
+
 
 def _store_group_effects_as_series(effects_by_group):
     """Wrap a ``{group_key: 1d array}`` mapping as ``{group_key: pd.Series}``.
@@ -863,27 +872,26 @@ seed = 2026
 
 dat_user_all = []
 
-# Script 1 already drops all-missing CAE and the high-CAE ceiling at
-# cohort construction. Keep this check as a safety net: a all-NaN
-# CAE_avg_norm would yield a fallback-zero CAE model and unrealistic
-# downstream trajectories.
+# Users with no observed CAE (all-NaN ``CAE_avg_norm``) are retained since
+# 2026-10-17. The Bayesian random-coefficient CAE fit simply has no rows for
+# them, so their CAE coefficients are the population slopes (b_i = 0), and
+# their baseline CAE is imputed from the fitted model (``cae_baseline_norm``
+# below). They still inform every other model.
 _all_userids = df_fit['ParticipantIdentifier'].unique()
 _has_cae_obs = (
     df_fit.groupby('ParticipantIdentifier', sort=False)['CAE_avg_norm']
     .apply(lambda s: np.any(~np.isnan(s.to_numpy(dtype=float))))
 )
-userid_all = np.array(
-    [uid for uid in _all_userids if bool(_has_cae_obs.get(uid, False))],
-    dtype=int,
-)
-excluded_userids = np.array(
+userid_all = np.array([int(uid) for uid in _all_userids], dtype=int)
+no_cae_userids = np.array(
     [uid for uid in _all_userids if not bool(_has_cae_obs.get(uid, False))],
     dtype=int,
 )
-if excluded_userids.size > 0:
+if no_cae_userids.size > 0:
     print(
-        "Excluding users with no CAE observations: "
-        + ", ".join(str(int(u)) for u in excluded_userids)
+        "Users with no CAE observations (kept; CAE coefficients = population, "
+        "baseline CAE model-imputed): "
+        + ", ".join(str(int(u)) for u in no_cae_userids)
     )
 if userid_all.size == 0:
     raise ValueError("No users with observed CAE values remain after filtering.")
@@ -1168,6 +1176,7 @@ print(mixedlm_ws_interaction.summary())
 theta_pageview_list = []
 theta_fitbitwearing_list = []
 theta_eodcomplete_list = []
+cae_baseline_rows = []
 
 for i, userid in enumerate(userid_all):
     dat_user = df_fit[df_fit['ParticipantIdentifier'] == userid].copy()
@@ -1453,6 +1462,28 @@ for i, userid in enumerate(userid_all):
     pred_CAE = CAE_cond @ theta_CAE_mean
 
     idx_obs_CAE = ~np.isnan(CAE_avg_sw)
+
+    # Preserve the previous baseline formula for the requested comparison
+    # table. This is not used by the simulator.
+    _cae_lw_raw_first = float(dat_user['CAE_avg_lastweek_norm'].to_numpy(dtype=float)[0])
+    if np.isfinite(_cae_lw_raw_first):
+        cae_baseline_old = _cae_lw_raw_first
+    else:
+        _a1 = float(np.clip(theta_CAE_mean[1], -0.95, 0.95))
+        _mu_u = (
+            theta_CAE_mean[0]
+            + theta_CAE_mean[2] * float(week_sw[0])
+            + theta_CAE_mean[3] * float(np.nanmean(foursc_e))
+            + theta_CAE_mean[4] * float(np.nanmean(antic_e))
+        ) / (1.0 - _a1)
+        if np.any(idx_obs_CAE):
+            _k0 = int(np.flatnonzero(idx_obs_CAE)[0])      # panel week index of first CAE
+            _steps = _k0 + 1                                # panel week k0 = study week k0 + 2
+            cae_baseline_old = float(
+                _mu_u + _a1 ** _steps * (CAE_avg_sw[_k0] - _mu_u)
+            )
+        else:
+            cae_baseline_old = float(_mu_u)
     resid_CAE = np.full_like(CAE_avg_sw, np.nan, dtype=float)
 
     if np.any(idx_obs_CAE):
@@ -1512,6 +1543,43 @@ for i, userid in enumerate(userid_all):
 
     alpha_CAE_short_avg_l2 = None
 
+    # Exact baseline backcast from the first observed full CAE using the
+    # actual week-varying panel intercepts c_2,...,c_12. Week-1 covariates
+    # are outside the panel, so c_2 initializes m_1 = c_2 / (1 - a1).
+    _c_panel = (
+        theta_CAE_mean[0]
+        + theta_CAE_mean[2] * week_sw
+        + theta_CAE_mean[3] * foursc_e
+        + theta_CAE_mean[4] * antic_e
+    )
+    _y_all = np.concatenate(([_cae_lw_raw_first], CAE_avg_sw))
+    cae_baseline_norm, cae_baseline_source = impute_baseline_cae(
+        theta_CAE=theta_CAE_mean,
+        c_panel=_c_panel,
+        y_obs=_y_all,
+    )
+    _full_obs_weeks = np.flatnonzero(np.isfinite(_y_all)) + 1
+    _first_full_week = (
+        int(_full_obs_weeks[0]) if _full_obs_weeks.size else np.nan
+    )
+    cae_baseline_rows.append(
+        {
+            "uid": int(userid),
+            "source": cae_baseline_source,
+            "k": _first_full_week,
+            "old_value_norm": float(cae_baseline_old),
+            "new_value_norm": float(cae_baseline_norm),
+            "new_value_raw": (
+                float(std_params["CAE_avg_shift"])
+                + float(std_params["CAE_avg_scale"]) * float(cae_baseline_norm)
+            ),
+        }
+    )
+    if cae_baseline_source != "observed":
+        print(
+            f"User {userid}: no week-1 CAE; baseline imputed = "
+            f"{cae_baseline_norm:.3f} (norm scale, {cae_baseline_source})"
+        )
 
     print(f"The full random-coefficient Bayesian CAE_short_avg fit is ready for user {userid}")
 
@@ -1538,6 +1606,8 @@ for i, userid in enumerate(userid_all):
         "cae_sign_prior_mode": SIGN_PRIOR_MODE,
         "theta_CAE": json_float_list(theta_CAE_mean, digits),
         "theta_CAE_names": THETA_CAE_NAMES,
+        "cae_baseline_norm": round(float(cae_baseline_norm), digits),
+        "cae_baseline_source": cae_baseline_source,
 
         "theta_CAE_short_avg": json_float_list(theta_CAE_short_avg_mean, digits),
         "theta_CAE_short_avg_names": THETA_CAE_SHORT_AVG_NAMES,
@@ -1597,6 +1667,14 @@ np.savetxt(file_user_ids, userid_all, fmt='%d')
 df_fit.loc[df_fit["ParticipantIdentifier"].isin(userid_all)].to_csv(
     work_folder / "df_fit_11week.csv",
     index=False,
+)
+
+cohort_check_dir = PROJECT_ROOT / "docs" / "cohort_checks_20261017"
+cohort_check_dir.mkdir(parents=True, exist_ok=True)
+pd.DataFrame(cae_baseline_rows).sort_values("uid").to_csv(
+    cohort_check_dir / "cae_baseline_imputation.csv",
+    index=False,
+    float_format="%.6f",
 )
 
 # Residual pools for the simulator's partial pooling are built by vani_env

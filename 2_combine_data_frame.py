@@ -103,6 +103,8 @@ df_planning = _as_str_id(pd.read_csv(folder / "df_end_all.csv"))
 
 df_notwearing = _as_str_id(pd.read_csv(folder / "missing_days.csv"))
 df_wearing_morning = _as_str_id(pd.read_csv(folder / "wear_day.csv"))
+df_dropout = _as_str_id(pd.read_csv(folder / "participant_dropout.csv"))
+df_study_dates = _as_str_id(pd.read_csv(folder / "summary_surveytask.csv"))
 
 # 2. Parse dates
 
@@ -125,6 +127,9 @@ df_planning["Date"] = pd.to_datetime(df_planning["date"])
 
 df_notwearing["Date"] = pd.to_datetime(df_notwearing["Date"])
 df_wearing_morning["Date"] = pd.to_datetime(df_wearing_morning["Date"])
+df_study_dates["date_min"] = pd.to_datetime(
+    df_study_dates["date_min"], errors="coerce"
+).dt.normalize()
 
 # 3. Base panel + wearable / engagement merges
 
@@ -352,6 +357,31 @@ df_merged = df_merged.sort_values(
 df_merged["day"] = (
     df_merged.groupby("ParticipantIdentifier")["Date"]
     .transform(lambda s: s.rank(method="dense").astype(int))
+)
+df_merged = df_merged.merge(
+    df_study_dates[["ParticipantIdentifier", "date_min"]],
+    on="ParticipantIdentifier",
+    how="left",
+    validate="m:1",
+)
+if df_merged["date_min"].isna().any():
+    missing = sorted(
+        df_merged.loc[df_merged["date_min"].isna(), "ParticipantIdentifier"]
+        .astype(str)
+        .unique()
+    )
+    raise ValueError(f"Missing summary_surveytask date_min for participants: {missing}")
+# Stable protocol day: calendar offset from the participant's first local EOD
+# task. Do not use the dense rank above, which shifts non-Monday starters when
+# their partial week 0 is removed.
+df_merged["study_day"] = (
+    (df_merged["Date"] - df_merged["date_min"]).dt.days + 1
+).astype(int)
+df_merged = df_merged.merge(
+    df_dropout[["ParticipantIdentifier", "dropout_day"]],
+    on="ParticipantIdentifier",
+    how="left",
+    validate="m:1",
 )
 
 print(df_merged.groupby("ParticipantIdentifier")["week"].unique())

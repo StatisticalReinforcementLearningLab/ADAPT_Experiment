@@ -57,6 +57,8 @@ FIT_COLUMNS = [
     "DecisionTime",
     "week",
     "day",
+    "study_day",
+    "dropout_day",
     "dow",
     "is_weekend",
     # interventions

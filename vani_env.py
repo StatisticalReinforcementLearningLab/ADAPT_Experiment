@@ -43,6 +43,73 @@ import numpy as np
 import numpy.random as rd
 import pandas as pd
 
+from dropout_utils import mask_post_dropout_outcomes
+
+
+DROPOUT_OUTCOME_COLUMNS = (
+    "4hour_step",
+    "4hour_step_norm",
+    "prior2hour_step",
+    "prior2hour_step_norm",
+    "active_status",
+    "Interacted_walk",
+    "anticipated_affect",
+    "anticipated_affect_norm",
+    "HourlyPageviewCount",
+    "HourlyPageviewCount_norm",
+    "morning_wearing",
+    "nextday_wearing",
+    "daily_present",
+    "week_present",
+    "Exp-tool-1",
+    "Exp-tool-1_norm",
+    "Exp-tool-2",
+    "Exp-tool-2_norm",
+    "CAE_avg",
+    "CAE_avg_norm",
+    "CAE_short_avg",
+    "CAE_short_avg_norm",
+)
+
+DROPOUT_WEEKLY_OUTCOME_COLUMNS = (
+    "week_present",
+    "Exp-tool-1",
+    "Exp-tool-1_norm",
+    "Exp-tool-2",
+    "Exp-tool-2_norm",
+    "CAE_avg",
+    "CAE_avg_norm",
+    "CAE_short_avg",
+    "CAE_short_avg_norm",
+)
+
+
+def mask_dropout_fit_outcomes(df: pd.DataFrame) -> pd.DataFrame:
+    """Mask modeled outcomes on/after dropout and invalid weekly emissions.
+
+    Weekly survey values are replicated across their calendar week upstream.
+    If dropout occurs during that week, mask the weekly outcome on every row
+    so a pre-dropout Monday copy cannot leak an end-of-week post-dropout zero.
+    """
+    out = mask_post_dropout_outcomes(df, DROPOUT_OUTCOME_COLUMNS)
+    required = {"ParticipantIdentifier", "week", "study_day", "dropout_day"}
+    if required.issubset(out.columns):
+        dropout = pd.to_numeric(out["dropout_day"], errors="coerce")
+        study_day = pd.to_numeric(out["study_day"], errors="coerce")
+        week_has_dropout = (
+            np.isfinite(dropout)
+            & out.assign(_post=study_day >= dropout)
+            .groupby(["ParticipantIdentifier", "week"], sort=False)["_post"]
+            .transform("any")
+            .to_numpy(dtype=bool)
+        )
+        weekly = [
+            col for col in DROPOUT_WEEKLY_OUTCOME_COLUMNS if col in out.columns
+        ]
+        if weekly and week_has_dropout.any():
+            out.loc[week_has_dropout, weekly] = np.nan
+    return out
+
 from ewm_utils import ewma_gamma
 
 PROJECT_ROOT = Path(
@@ -541,6 +608,55 @@ def cae_mediator_ewma_rows(foursc_weeks, antic_weeks) -> tuple[np.ndarray, np.nd
     for i in range(n):
         foursc_e[i], antic_e[i] = cae_mediator_ewmas(foursc_weeks[i], antic_weeks[i])
     return foursc_e, antic_e
+
+
+def impute_baseline_cae(
+    theta_CAE,
+    c_panel,
+    y_obs,
+) -> tuple[float, str]:
+    """Backcast study-week-1 CAE from the first observed full CAE.
+
+    For study weeks ``w=2..12``, the fitted transition is
+    ``y_w = c_w + a1*y_{w-1} + eps_w``. ``c_panel`` contains the actual
+    weekly intercepts ``c_2,...,c_12`` and
+    ``a1 = clip(theta_CAE[1], -0.95, 0.95)``. Because week-1 covariates are
+    outside the fitting panel, initialize at ``m_1 = c_2/(1-a1)``.
+
+    If the first observed full CAE is ``y_k``, propagate the mean to week k,
+    ``M_k = a1**(k-1)*m_1 + sum_{j=2..k} a1**(k-j)*c_j``, then return
+    ``m_1 + a1**(k-1)*(y_k-M_k)``. Later observations add no information
+    given ``y_k`` under the Markov model. An observed ``y_1`` is returned
+    verbatim; no observations returns ``m_1``.
+    """
+    theta_CAE = np.asarray(theta_CAE, dtype=float).ravel()
+    c_panel = np.asarray(c_panel, dtype=float).ravel()
+    y_obs = np.asarray(y_obs, dtype=float).ravel()
+
+    if theta_CAE.size < 2:
+        raise ValueError("theta_CAE must contain at least intercept and AR(1) slope")
+    if c_panel.size != 11 or y_obs.size != 12:
+        raise ValueError("c_panel must contain weeks 2..12 and y_obs weeks 1..12")
+    if not np.all(np.isfinite(c_panel)):
+        raise ValueError("all transition intercepts c_2..c_12 must be finite")
+
+    a1 = float(np.clip(theta_CAE[1], -0.95, 0.95))
+    m1 = float(c_panel[0] / (1.0 - a1))
+
+    if np.isfinite(y_obs[0]):
+        return float(y_obs[0]), "observed"
+
+    future_obs = np.flatnonzero(np.isfinite(y_obs[1:]))
+    if future_obs.size == 0:
+        return m1, "model_mean"
+
+    k = int(future_obs[0]) + 2
+    mean_k = m1
+    for study_week in range(2, k + 1):
+        mean_k = float(c_panel[study_week - 2] + a1 * mean_k)
+
+    y1_hat = m1 + a1 ** (k - 1) * (float(y_obs[k - 1]) - mean_k)
+    return float(y1_hat), f"backcast_{k - 1}w"
 
 
 def build_CAE_features(CAE_lastweek, week_norm, foursc_wk, antic_wk) -> np.ndarray:
@@ -2248,4 +2364,41 @@ def make_initial_state(df_fit_11week_csv=None, participant_id=None):
     if row is not None:
         s["expTool1"] = _float_csv_cell(row, "Exp-tool-1", default=float("nan"))
         s["expTool2"] = _float_csv_cell(row, "Exp-tool-2", default=float("nan"))
+    # Baseline CAE (study week 1). Observed -> the panel value. Missing (15 of
+    # 42 users in the 2026-10-14 extract, plus the no-CAE users) -> the value
+    # imputed from the fitted CAE model by 5_fit_vanilla_testbed.py and stored
+    # as ``cae_baseline_norm`` in params_env_{uid}.json next to the panel.
+    # Before 2026-10-17 a missing baseline silently became 0.0.
+    _obs_cae = _float_csv_cell(
+        row if row is not None else {},
+        "CAE_avg_lastweek_norm", "CAE_avg_lastweek", default=float("nan"),
+    )
+    s["caeBaselineSource"] = "observed"
+    if not math.isfinite(_obs_cae):
+        imputed = _imputed_cae_baseline(df_path, participant_id)
+        if imputed is None:
+            warnings.warn(
+                f"Participant {participant_id}: no week-1 CAE in {df_path} and no "
+                "'cae_baseline_norm' in its params_env json (rerun "
+                "5_fit_vanilla_testbed.py); using 0.0 (population mean) as before.",
+                RuntimeWarning, stacklevel=2,
+            )
+            s["caeAverageLastWeek"], s["caeBaselineSource"] = 0.0, "fallback_zero"
+        else:
+            s["caeAverageLastWeek"], s["caeBaselineSource"] = imputed
     return s
+
+
+def _imputed_cae_baseline(df_path, participant_id):
+    """``(cae_baseline_norm, source)`` from params_env_{uid}.json beside ``df_path``."""
+    if df_path is None or participant_id is None:
+        return None
+    p = Path(df_path).expanduser().resolve().parent / f"params_env_{int(participant_id)}.json"
+    if not p.is_file():
+        return None
+    with open(p, "r", encoding="utf-8") as f:
+        d = json.load(f)
+    v = d.get("cae_baseline_norm")
+    if v is None or not math.isfinite(float(v)):
+        return None
+    return float(v), str(d.get("cae_baseline_source", "imputed"))
