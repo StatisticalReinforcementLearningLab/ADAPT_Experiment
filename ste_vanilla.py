@@ -704,12 +704,17 @@ def rollout_total_cae(
         packet = oenv.get_week_packet(k)
         _ = packet
         i_w = int(i_w_fixed)
-        oenv.wp_all[k] = 1.0
+        oenv.wp_truth_all[k] = 1.0
+        oenv.wp_all[k] = 0.0 if oenv.dropped_out else 1.0
         oenv.start_week(k, i_w)
 
         for d in range(N_RL_DAYS):
+            d_global = oenv._day_idx(k, d)
+            oenv._ensure_day_started(k, d, d_global)
+            if oenv.dropped_out:
+                i_w = 0
             for t_slot in range(N_RL_SLOTS):
-                if policy == "zero":
+                if oenv.dropped_out or policy == "zero":
                     a = 0
                 elif policy == "bernoulli":
                     a = int(rng.random() < walk_prob)
@@ -718,7 +723,7 @@ def rollout_total_cae(
                     a = ste_policy_action(dqn, s_vec)
                 else:
                     raise ValueError(policy)
-                if policy != "dqn_greedy":
+                if policy != "dqn_greedy" and not oenv.dropped_out:
                     prepare_ste_state_vector(oenv, k, d, t_slot)
                 n_decisions += 1
                 n_treat += int(a)
@@ -727,7 +732,9 @@ def rollout_total_cae(
 
     # Index 0 is the pre-RL baseline; STE outcomes include simulated weeks only.
     weekly = np.asarray(oenv.CAE_all[1 : oenv.nweek + 1], dtype=float)
-    total = float(np.nansum(weekly))
+    if not np.all(np.isfinite(weekly)):
+        raise ValueError("true latent CAE must be finite for every simulated week")
+    total = float(np.sum(weekly))
     treat_rate = float(n_treat / n_decisions) if n_decisions else 0.0
     if return_weekly and return_stats:
         return total, weekly, treat_rate

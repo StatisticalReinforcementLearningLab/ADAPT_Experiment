@@ -827,6 +827,7 @@ def main() -> None:
     all_cae_latent_full = {}   # raw-scale latent CAE incl. baseline
     all_cae_noisy_full = {}    # raw-scale realized CAE incl. baseline
     all_piA = {}
+    all_dropout_day = {}
     latent_available = True    # set False if any run lacks the latent field
 
     uid_parts = []
@@ -848,6 +849,7 @@ def main() -> None:
         latent_parts = []
         noisy_parts = []
         piA_parts = []
+        dropout_parts = []
 
         for d in run_dirs:
             f = d / f"{name}.npz"
@@ -863,12 +865,21 @@ def main() -> None:
             else:
                 latent_available = False
             piA_parts.append(data["piA_runs"])                       # (1, n_users, W, 6, 2)
+            if "dropout_day" in data:
+                dropout_parts.append(
+                    np.asarray(data["dropout_day"], dtype=int)
+                )
+            else:
+                dropout_parts.append(
+                    np.full(data[NOISY_FIELD].shape[:2], -1, dtype=int)
+                )
 
         if not noisy_parts:
             print(f"No {name}.npz found in any run folder; skipping {name}")
             continue
         all_cae_noisy_full[name] = np.concatenate(noisy_parts, axis=0)
         all_piA[name] = np.concatenate(piA_parts, axis=0)
+        all_dropout_day[name] = np.concatenate(dropout_parts, axis=0)
         if latent_available and latent_parts:
             all_cae_latent_full[name] = np.concatenate(latent_parts, axis=0)
 
@@ -923,11 +934,38 @@ def main() -> None:
             latent_stats, "latent (no noise)", "latent", out=out,
         )
 
+    dropout_summary = []
+    for name in algorithms:
+        day = np.asarray(all_dropout_day[name], dtype=int)
+        dropped = day > 0
+        dropout_summary.append(
+            {
+                "algorithm": name,
+                "fraction_dropped_week12": float(
+                    np.mean(dropped & (day <= 84))
+                ),
+                "fraction_dropped_week36": float(
+                    np.mean(dropped & (day <= 252))
+                ),
+                "mean_dropout_week_among_dropouts": (
+                    float(np.mean(np.ceil(day[dropped] / 7.0)))
+                    if np.any(dropped)
+                    else np.nan
+                ),
+                "n_episodes": int(day.size),
+                "n_dropped_week36": int(dropped.sum()),
+            }
+        )
+    pd.DataFrame(dropout_summary).to_csv(
+        out / "dropout_summary.csv", index=False
+    )
+
     # Save aggregated arrays too (raw scale).
     for name in algorithms:
         payload = {
             "cae_noisy_runs": all_cae_noisy_full[name],
             "piA_runs": all_piA[name],
+            "dropout_day": all_dropout_day[name],
         }
         if name in all_cae_latent_full:
             payload["cae_latent_runs"] = all_cae_latent_full[name]

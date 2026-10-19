@@ -28,7 +28,8 @@ both hurdle parts directly.
 
 Page-view occurrence also includes the interaction with a delivered
 suggestion (``theta_penalized_PV_interaction``, 4b); interaction is therefore
-generated before page views. There are no post-fit generator calibrations.
+generated before page views. The constant daily app-dropout hazard is loaded
+from ``generator_calibration.json``; all participant dynamics remain fitted.
 """
 from __future__ import annotations
 
@@ -1112,6 +1113,34 @@ class EnvConfig:
 
         params_path = Path(params_dir).expanduser().resolve()
         self.params_dir = params_path
+        calibration_enabled = (
+            os.environ.get("ADAPR_GENERATOR_CALIBRATION", "1")
+            .strip()
+            .lower()
+            not in {"0", "false", "no", "off"}
+        )
+        self.dropout_hazard_day = 0.0
+        if calibration_enabled:
+            calibration_path = params_path / "generator_calibration.json"
+            calibration = (
+                _load_json(calibration_path) if calibration_path.is_file() else {}
+            )
+            if "dropout_hazard_day" not in calibration:
+                warnings.warn(
+                    f"{calibration_path} has no dropout_hazard_day; "
+                    "defaulting to 0.0",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            else:
+                self.dropout_hazard_day = float(
+                    calibration["dropout_hazard_day"]
+                )
+        if not 0.0 <= self.dropout_hazard_day <= 1.0:
+            raise ValueError(
+                "dropout_hazard_day must be between 0 and 1, got "
+                f"{self.dropout_hazard_day}"
+            )
         std = _load_json(params_path / "std_params.json")
         self.limits_fourSC = std["4hour_step_count_limit"]
         self.fourSC_log_shift = float(std["4hour_step_count_shift"])
@@ -1468,6 +1497,16 @@ class Env:
         # fresh Env (created per simulated episode) starts with fresh state.
         self._ar_prev: dict = {}
         self._resid_models: dict = {}
+
+    def dropout_hazard(self, state) -> float:
+        """Daily app-dropout hazard.
+
+        The calibrated implementation is constant. ``state`` is accepted so
+        a future extension can make dropout state-dependent without changing
+        the simulator hook.
+        """
+        del state
+        return float(self.cfg.dropout_hazard_day)
 
     def _sim_week_norm(self, study_week):
         """Stretch ``week_norm`` onto ``[-1, 1]`` over ``cfg.nweek``, like CAE."""

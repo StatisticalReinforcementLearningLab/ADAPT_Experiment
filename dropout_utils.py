@@ -11,6 +11,7 @@ import pandas as pd
 
 STUDY_DAYS = 84
 DEFAULT_DROPOUT_GAP_DAYS = 14
+DEFAULT_DROPOUT_RISK_WINDOW_DAYS = STUDY_DAYS - DEFAULT_DROPOUT_GAP_DAYS + 1
 RAW_OBSERVATION_TIMESTAMP_SPECS = (
     ("SurveyTasks.csv", "InsertedDate"),
     ("SurveyResults.csv", "InsertedDate"),
@@ -51,6 +52,60 @@ def max_raw_observation_timestamp(
     if not maxima:
         raise ValueError("no finite timestamps found in raw observation tables")
     return max(maxima)
+
+
+def calibrate_constant_daily_hazard(
+    participant_dropout: pd.DataFrame,
+    *,
+    risk_window_days: int = DEFAULT_DROPOUT_RISK_WINDOW_DAYS,
+) -> dict[str, float | int | str]:
+    """Calibrate a constant hazard from completed, detectably at-risk windows.
+
+    With terminal inactivity defined as at least 14 days inside an 84-day
+    study, dropout is observable only through day 71. A detected event
+    contributes ``dropout_day - 1`` person-days; every other completed window
+    contributes all 71 days.
+    """
+    required = {"window_complete", "dropout_day"}
+    missing = sorted(required.difference(participant_dropout.columns))
+    if missing:
+        raise KeyError(f"participant dropout table is missing columns: {missing}")
+    if risk_window_days < 1:
+        raise ValueError("risk_window_days must be positive")
+
+    complete = participant_dropout.loc[
+        participant_dropout["window_complete"].astype(bool)
+    ].copy()
+    dropout_day = pd.to_numeric(complete["dropout_day"], errors="coerce")
+    event = dropout_day.notna() & dropout_day.le(float(risk_window_days))
+    exposure = np.where(
+        event,
+        dropout_day.to_numpy(dtype=float) - 1.0,
+        float(risk_window_days),
+    )
+    if np.any(exposure < 0) or not np.all(np.isfinite(exposure)):
+        raise ValueError("dropout exposure must be finite and nonnegative")
+
+    events = int(event.sum())
+    person_days = int(np.sum(exposure))
+    if events < 1 or person_days < 1:
+        raise ValueError("daily hazard calibration requires positive events and exposure")
+    hazard_day = float(events / person_days)
+    hazard_week = float(1.0 - (1.0 - hazard_day) ** 7)
+    return {
+        "dropout_hazard_day": hazard_day,
+        "dropout_hazard_week": hazard_week,
+        "dropout_events": events,
+        "dropout_person_days": person_days,
+        "dropout_risk_window_days": int(risk_window_days),
+        "dropout_cumulative_day84": float(1.0 - (1.0 - hazard_day) ** 84),
+        "dropout_cumulative_day252": float(1.0 - (1.0 - hazard_day) ** 252),
+        "dropout_definition": (
+            "Last active day followed by at least 14 inactive days through "
+            "the end of the completed 84-day window."
+        ),
+        "dropout_source": "participant_dropout.csv 2026-10-17",
+    }
 
 
 def longest_true_run(values: Sequence[bool]) -> int:

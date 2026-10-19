@@ -25,13 +25,12 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 
+from dropout_utils import calibrate_constant_daily_hazard
 from vani_env import (
     Env,
     EnvConfig,
     PARAMS_DIR,
     THETA_FOURSC_NAMES,
-    _foursc_lag_support_bundle_for_params_dir,
-    _foursc_proxy_bundle_for_params_dir,
     _uid_key,
 )
 
@@ -64,6 +63,13 @@ def _sigmoid(eta: float) -> float:
 
 
 def estimate_foursc_support_aware_lag(params_dir: Path) -> dict:
+    # These support bundles belong to the optional full generator-patch path.
+    # Import lazily so dropout-only calibration does not depend on them.
+    from vani_env import (  # noqa: PLC0415
+        _foursc_lag_support_bundle_for_params_dir,
+        _foursc_proxy_bundle_for_params_dir,
+    )
+
     support = _foursc_lag_support_bundle_for_params_dir(params_dir)
     proxy = _foursc_proxy_bundle_for_params_dir(params_dir)
     supported = []
@@ -287,6 +293,14 @@ def build_calibration(params_dir: Path) -> dict:
     }
 
 
+def add_dropout_calibration(payload: dict, dropout_table: Path) -> dict:
+    """Return ``payload`` with constant daily-dropout calibration fields."""
+    out = dict(payload)
+    table = pd.read_csv(dropout_table)
+    out.update(calibrate_constant_daily_hazard(table))
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -295,28 +309,60 @@ def main() -> None:
         default=Path(os.environ.get("ADAPR_PARAMS_DIR", PARAMS_DIR)),
         help="parameter folder (default: env_para_vanilla or ADAPR_PARAMS_DIR)",
     )
+    parser.add_argument(
+        "--dropout-table",
+        type=Path,
+        help="participant_dropout.csv used for constant daily-hazard calibration",
+    )
+    parser.add_argument(
+        "--dropout-only",
+        action="store_true",
+        help="preserve existing generator calibration and update only dropout fields",
+    )
     args = parser.parse_args()
     params_dir = args.params_dir.expanduser().resolve()
-    payload = build_calibration(params_dir)
     out = params_dir / "generator_calibration.json"
+    if args.dropout_only:
+        if args.dropout_table is None:
+            parser.error("--dropout-only requires --dropout-table")
+        if not out.is_file():
+            raise FileNotFoundError(f"missing existing calibration file: {out}")
+        payload = json.loads(out.read_text(encoding="utf-8"))
+    else:
+        payload = build_calibration(params_dir)
+    if args.dropout_table is not None:
+        payload = add_dropout_calibration(
+            payload, args.dropout_table.expanduser().resolve()
+        )
     out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    lag = payload["fourSC_support_aware_lag"]
-    carry = payload["activity_carryover_calibration"]
-    ipv = payload["interaction_pageview_calibration"]
     print(f"Wrote {out}")
-    print(
-        f"  FourSC lag: {lag['n_unsupported']} unsupported, "
-        f"reference lag={lag['reference_lag_coefficient']:.6g}, "
-        f"ids={list(lag['participants'])}"
-    )
-    print(
-        f"  Activity carryover: empirical r={carry['target_empirical_residual_correlation']:.3f}, "
-        f"rho={carry['coupling_rho']}, n={carry['n_pairs']}"
-    )
-    for slot, spec in ipv["parameters_by_decision_slot"].items():
+    if "fourSC_support_aware_lag" in payload:
+        lag = payload["fourSC_support_aware_lag"]
         print(
-            f"  Interaction-PV slot {slot}: a={spec['intercept_shift']:.4f}, "
-            f"b={spec['interaction_residual_coefficient']:.4f}"
+            f"  FourSC lag: {lag['n_unsupported']} unsupported, "
+            f"reference lag={lag['reference_lag_coefficient']:.6g}, "
+            f"ids={list(lag['participants'])}"
+        )
+    if "activity_carryover_calibration" in payload:
+        carry = payload["activity_carryover_calibration"]
+        print(
+            f"  Activity carryover: empirical "
+            f"r={carry['target_empirical_residual_correlation']:.3f}, "
+            f"rho={carry['coupling_rho']}, n={carry['n_pairs']}"
+        )
+    if "interaction_pageview_calibration" in payload:
+        ipv = payload["interaction_pageview_calibration"]
+        for slot, spec in ipv["parameters_by_decision_slot"].items():
+            print(
+                f"  Interaction-PV slot {slot}: "
+                f"a={spec['intercept_shift']:.4f}, "
+                f"b={spec['interaction_residual_coefficient']:.4f}"
+            )
+    if "dropout_hazard_day" in payload:
+        print(
+            f"  Dropout: {payload['dropout_events']} events / "
+            f"{payload['dropout_person_days']} person-days, "
+            f"h_day={payload['dropout_hazard_day']:.8f}"
         )
 
 

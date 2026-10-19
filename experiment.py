@@ -301,6 +301,8 @@ class EpisodeDataset:
 # ──────────────────────────────────────────────────────────────────
 
 class OnlineEnv:
+    _DROPOUT_RNG_SALT = 771337
+
     def __init__(
         self, env, nweek=None, seed=None, start_dow=1,
         df_fit_11week_csv=None, df_fit_full=None, params_dir=None,
@@ -312,6 +314,15 @@ class OnlineEnv:
         # ``initial_Ew_hat_for_user``'s default 2.0, not 0.0.
         if seed is not None:
             rd.seed(seed)
+        dropout_seed = 0 if seed is None else int(seed)
+        self._dropout_rng = np.random.default_rng(
+            np.random.SeedSequence(
+                [dropout_seed, self._DROPOUT_RNG_SALT]
+            )
+        )
+        self.dropout_day = -1
+        self._dropout_week = None
+        self._dropout_pf_processed = False
 
         self.env = env
         self.params_dir = resolve_params_dir(
@@ -336,15 +347,21 @@ class OnlineEnv:
         self.T = self.D * self.K
         self.start_dow = start_dow
 
+        # Public arrays are observations. Parallel truth arrays keep the
+        # latent process finite after app dropout.
         self.stepCountNext4HourAll = np.zeros(self.T)
+        self.stepCountNext4HourTruthAll = np.zeros(self.T)
         self.pageViewNext4HourAll = np.zeros(self.T)
+        self.pageViewNext4HourTruthAll = np.zeros(self.T)
         self.action_all = np.zeros(self.T)
         self.activitySuggestionsSentLast7DaysAll = np.full(self.T, np.nan)
         self.dailyAnticipatedAffectAll = np.zeros(self.D)            # latent draw (used by gen_CAE)
         self.dailyAnticipatedAffectObsAll = np.full(self.D, np.nan) # observed by the agent
         self.dailyAnticipatedAffectAgentAll = np.zeros(self.D)      # agent-visible (last observed if survey missed)
         self.morningFitbitWearAll = np.zeros(self.D)
+        self.morningFitbitWearTruthAll = np.zeros(self.D)
         self.dailySurveyCompleteAll = np.zeros(self.D)
+        self.dailySurveyCompleteTruthAll = np.zeros(self.D)
         # PF-side observed copy of antic: NaN on days where the daily survey was
         # not completed (``dailySurveyComplete == 0``). The PF handles NaN at the
         # mediator-likelihood level; ``get_pf_data`` also strips NaN rows from
@@ -363,12 +380,17 @@ class OnlineEnv:
         # bootstraps week 0 (no prior Sunday).
         self.wp_all = np.full(self.nweek+1, np.nan)
         self.wp_all[0] = 1.0
+        self.wp_truth_all = np.full(self.nweek+1, np.nan)
+        self.wp_truth_all[0] = 1.0
         self.CAE_short_all = np.full(self.nweek+1, np.nan)
+        self.CAE_short_truth_all = np.full(self.nweek+1, np.nan)
         # Per-week observed tool surveys on the *raw* integer 0..7 Likert
         # scale, drawn from gen_tool_U1/U2 (see ``vani_env`` docstring for
         # the norm <-> raw transform).
         self.U1_all = np.full(self.nweek+1, np.nan)
         self.U2_all = np.full(self.nweek+1, np.nan)
+        self.U1_truth_all = np.full(self.nweek+1, np.nan)
+        self.U2_truth_all = np.full(self.nweek+1, np.nan)
 
         # Per-day covariate logs for PF / RL (not read from self.s at use time).
         self.logIsWeekend = np.zeros(self.D)
@@ -426,6 +448,7 @@ class OnlineEnv:
         )
 
         self.prior2HourStepCountAll = np.full(self.T, np.nan)
+        self.prior2HourStepCountTruthAll = np.full(self.T, np.nan)
         # Agent-visible prior-2-hour values (observed or imputed), per decision slot.
         self._hist_prior2hour_by_slot: dict[int, list[float]] = {s: [] for s in range(self.K)}
         self.ws_interaction_all = np.zeros(self.T)
@@ -471,12 +494,15 @@ class OnlineEnv:
         self.s["perceivedUtilityLastWeek"] = 2.0   # keep env state consistent
         # CAE_short is not used in the baseline slot
         self.CAE_short_all[0] = 0
+        self.CAE_short_truth_all[0] = 0
         # Week-1 Exp-tool-1/2 from the first ``df_fit_11week`` row (Monday).
         # NaN if that week's Sunday survey was unanswered — do not fill from a
         # later week. ``U1_all[0]`` / ``U2_all[0]`` are snapshot-only; week-0
         # Ê_w is 2.0 unless ``df_fit_full`` is passed (no runner does).
         self.U1_all[0] = float(self.s["expTool1"])
         self.U2_all[0] = float(self.s["expTool2"])
+        self.U1_truth_all[0] = self.U1_all[0]
+        self.U2_truth_all[0] = self.U2_all[0]
 
         # First RL weekday is d_w = 0 (Monday when ``start_dow`` == 1); lag = prior civil day.
         dayOfWeekNorm_n, dayOfWeekNorm_i = self._day_of_week_norm(0)
@@ -567,11 +593,26 @@ class OnlineEnv:
         return float(norm), day_of_week
 
     def _jw_week(self, sim_w) -> int:
-        """Opening ``J_w`` (``wp_all[sim_w]``), 0/1. Not gated on ``I_w``."""
-        if not (0 <= sim_w < self.wp_all.size):
+        """Latent opening ``J_w`` used by the living participant process."""
+        if not (0 <= sim_w < self.wp_truth_all.size):
             return 0
-        v = float(self.wp_all[sim_w])
+        v = float(self.wp_truth_all[sim_w])
         return int(v > 0.5) if np.isfinite(v) else 0
+
+    @property
+    def dropped_out(self) -> bool:
+        return self.dropout_day > 0
+
+    def _maybe_dropout(self, d_global: int) -> None:
+        """Draw the absorbing app-dropout event before one simulated day."""
+        if self.dropped_out:
+            return
+        hazard = float(self.env.dropout_hazard(self.s))
+        if not 0.0 <= hazard <= 1.0:
+            raise ValueError(f"dropout hazard must be in [0, 1], got {hazard}")
+        if self._dropout_rng.random() < hazard:
+            self.dropout_day = int(d_global) + 1
+            self._dropout_week = int(d_global) // self.W_days
 
     def start_week(self, k, I_w):
         self._Iw_per_week[k] = I_w
@@ -626,6 +667,7 @@ class OnlineEnv:
         """Run morning-day setup once per simulated calendar day."""
         if (sim_w, d_w) not in self._day_started:
             self._day_started[(sim_w, d_w)] = True
+            self._maybe_dropout(d_global)
             self._start_day(sim_w, d_w, d_global)
 
     def _generate_prior2hour_for_slot(self, sim_w, d_w, t_sim, d_global, step_idx):
@@ -636,8 +678,10 @@ class OnlineEnv:
         ``step_idx`` so ``step_action`` can reuse the same draw.
         """
         step_idx = int(step_idx)
-        if np.isfinite(self.prior2HourStepCountAll[step_idx]):
-            self.s["prior2HourStepCount"] = float(self.prior2HourStepCountAll[step_idx])
+        if np.isfinite(self.prior2HourStepCountTruthAll[step_idx]):
+            self.s["prior2HourStepCount"] = float(
+                self.prior2HourStepCountTruthAll[step_idx]
+            )
             return
 
         slot = int(t_sim)
@@ -645,7 +689,10 @@ class OnlineEnv:
         self.s["prior2HourStepCountEma7d"] = self._prior2HourStepCountEma7d_for_slot(slot)
 
         prior2HourStepCount = self.env.gen_prior2hour_step_count(self.s, step_idx)
-        self.prior2HourStepCountAll[step_idx] = prior2HourStepCount
+        self.prior2HourStepCountTruthAll[step_idx] = prior2HourStepCount
+        self.prior2HourStepCountAll[step_idx] = (
+            np.nan if self.dropped_out else prior2HourStepCount
+        )
         self.s["prior2HourStepCount"] = prior2HourStepCount
 
     def _agent_antic(self, antic_latent: float, survey_present: bool):
@@ -704,6 +751,7 @@ class OnlineEnv:
             p2h0 = 0.0
         self.s["prior2HourStepCount"] = p2h0
         self.prior2HourStepCountAll[0] = p2h0
+        self.prior2HourStepCountTruthAll[0] = p2h0
         self.s["stepCountNext4HourLag1"] = float(self._initial_foursc_lag1)
 
         self.logYesterdayStepCount[0] = float(self.s["yesterdayStepCount"])
@@ -758,32 +806,78 @@ class OnlineEnv:
         self._reset_episode_state()
 
         for k in range(self.nweek):
-            packet = self.get_week_packet(k)
-            dataset.record_week_start(
-                k, make_state(self.get_context(k, QUERY_D, QUERY_T))
+            first_post_dropout_week = (
+                self.dropped_out
+                and self._dropout_week is not None
+                and k == self._dropout_week + 1
             )
-            I_w = agent.begin_week(k, packet)
-            if needs_belief:
-                pf_runtime.update_standard(k, packet, I_w)
+            agent_frozen = (
+                self.dropped_out
+                and self._dropout_week is not None
+                and k > self._dropout_week
+            )
+            if agent_frozen:
+                I_w = 0
+                dataset.I_hist[k] = 0
+                # Final PF update using the partial dropout week (I_w = 0)
+                # via get_week_packet(k). Do not call the agent or create a
+                # TD tuple for the transition into this first post-dropout state.
+                if (
+                    first_post_dropout_week
+                    and needs_belief
+                    and not self._dropout_pf_processed
+                ):
+                    packet = self.get_week_packet(k)
+                    pf_runtime.update_standard(k, packet, I_w=0)
+                    self._dropout_pf_processed = True
+            else:
+                packet = self.get_week_packet(k)
+                dataset.record_week_start(
+                    k, make_state(self.get_context(k, QUERY_D, QUERY_T))
+                )
+                I_w = agent.begin_week(k, packet)
+                if needs_belief:
+                    pf_runtime.update_standard(k, packet, I_w)
 
             self.start_week(k, I_w)
-            if needs_belief and hasattr(agent, "prepare_week"):
+            if (
+                not agent_frozen
+                and needs_belief
+                and hasattr(agent, "prepare_week")
+            ):
                 agent.prepare_week(k)
 
             for d in range(N_RL_DAYS):
+                d_global = self._day_idx(k, d)
+                self._ensure_day_started(k, d, d_global)
+                if self.dropped_out:
+                    I_w = 0
+                    dataset.I_hist[k] = 0
+                    self._Iw_per_week[k] = 0
+                    dataset.A_hist[k, d:, :] = 0
+                    dataset.pi_A_hist[k, d:, :] = np.nan
+                    if k + 1 < self.nweek:
+                        dataset.A_hist[k + 1:, :, :] = 0
+                        dataset.pi_A_hist[k + 1:, :, :] = np.nan
                 # Day 0 walks under last week's beta; refit beta_k before day 1.
-                if needs_belief and d == 1 and hasattr(agent, "update_rlsvi"):
+                if (
+                    not self.dropped_out
+                    and needs_belief
+                    and d == 1
+                    and hasattr(agent, "update_rlsvi")
+                ):
                     agent.update_rlsvi(k)
                 for t in range(self.K):
-                    d_global = self._day_idx(k, d)
                     step_idx = self._step_idx(k, d, t)
-                    self._ensure_day_started(k, d, d_global)
                     self._generate_prior2hour_for_slot(k, d, t, d_global, step_idx)
-                    context = self.get_context(k, d, t)
-                    state = make_state(context)
-                    self.myopic_cate[k, d, t] = self.myopic_cae_cate(d, t)
-                    A_wdt, pi_A = agent.act(k, d, t, state)
-                    dataset.record_walking(k, d, t, state, A_wdt, pi_A)
+                    if self.dropped_out:
+                        A_wdt, pi_A = 0, np.nan
+                    else:
+                        context = self.get_context(k, d, t)
+                        state = make_state(context)
+                        self.myopic_cate[k, d, t] = self.myopic_cae_cate(d, t)
+                        A_wdt, pi_A = agent.act(k, d, t, state)
+                        dataset.record_walking(k, d, t, state, A_wdt, pi_A)
                     self.step_action(k, d, t, A_wdt, I_w)
 
             self._finalize_week(k)
@@ -791,11 +885,11 @@ class OnlineEnv:
             # Record Mon–Sat realized mediators for reward shaping
             # (post-action, not used as decision-time state). Sunday is
             # generated for weekly CAE / E_w but is not an RL feature.
-            if needs_belief:
+            if needs_belief and not self.dropped_out:
                 full_ctx = self.get_context(k, N_RL_DAYS, 0, antic="agent")
                 dataset.record_full_week_mediators(
                     k, full_ctx["M_Y"], full_ctx["M_E"])
-            if hasattr(agent, "record_timing_probe"):
+            if not self.dropped_out and hasattr(agent, "record_timing_probe"):
                 agent.record_timing_probe(k, self.week_truth_pm_minus_am(k))
 
         return agent.results(dataset)
@@ -814,13 +908,19 @@ class OnlineEnv:
         self._ensure_day_started(sim_w, d_w, d_global)
 
         self.s["decisionTimeSlot"] = float(t_sim)
-        Ah = float(action)
+        Ah = 0.0 if self.dropped_out else float(action)
+        if self.dropped_out:
+            I_w = 0
 
-        self.activitySuggestionsSentLast7DaysAll[step_idx] = float(
-            self.s["activitySuggestionsSentLast7Days"]
+        self.activitySuggestionsSentLast7DaysAll[step_idx] = (
+            np.nan
+            if self.dropped_out
+            else float(self.s["activitySuggestionsSentLast7Days"])
         )
-        self.logActivitySuggestionInteractLast7Days[step_idx] = float(
-            self.s.get("activitySuggestionInteractLast7Days", 0.0)
+        self.logActivitySuggestionInteractLast7Days[step_idx] = (
+            np.nan
+            if self.dropped_out
+            else float(self.s.get("activitySuggestionInteractLast7Days", 0.0))
         )
         self.action_all[step_idx] = Ah
 
@@ -828,7 +928,9 @@ class OnlineEnv:
 
         # Pre-decision covariate: same slot's 2-hour window (also set before act()).
         self._generate_prior2hour_for_slot(sim_w, d_w, t_sim, d_global, step_idx)
-        prior2HourStepCount = float(self.prior2HourStepCountAll[step_idx])
+        prior2HourStepCount = float(
+            self.prior2HourStepCountTruthAll[step_idx]
+        )
 
         fourSC = self.env.gen_fourSC(self.s, Ah, step_idx)
         # Interaction first: page-view occurrence depends on interaction with
@@ -838,9 +940,17 @@ class OnlineEnv:
             self.s, Ah, self._jw_week(sim_w), step_idx, ws_interaction=ws_interaction,
         )
 
-        self.stepCountNext4HourAll[step_idx] = fourSC
-        self.pageViewNext4HourAll[step_idx] = pv
-        self.ws_interaction_all[step_idx] = ws_interaction
+        self.stepCountNext4HourTruthAll[step_idx] = fourSC
+        self.pageViewNext4HourTruthAll[step_idx] = pv
+        self.stepCountNext4HourAll[step_idx] = (
+            np.nan if self.dropped_out else fourSC
+        )
+        self.pageViewNext4HourAll[step_idx] = (
+            np.nan if self.dropped_out else pv
+        )
+        self.ws_interaction_all[step_idx] = (
+            np.nan if self.dropped_out else ws_interaction
+        )
 
         self._today_fourSC[t_sim] = fourSC
         self._today_pageview[t_sim] = pv
@@ -874,14 +984,26 @@ class OnlineEnv:
 
         active_status = self.env.gen_active_status(self.s, d_global)
         self.s["activityStatusToday"] = active_status
-        self.activityStatusTodayAll[d_global] = active_status
-
-        self.logIsWeekend[d_global] = float(self.s["isWeekend"])
-        self.logActiveDaysLast7Days[d_global] = float(
-            self.s.get("activeDaysLast7Days", 0.0)
+        self.activityStatusTodayAll[d_global] = (
+            np.nan if self.dropped_out else active_status
         )
-        self.logPageViewLast7DaysEma[d_global] = float(self.s["pageViewLast7DaysEma"])
-        self.logMorningFitbitWearLast7Days[d_global] = float(self.s["morningFitbitWearLast7Days"])
+
+        if self.dropped_out:
+            self.logIsWeekend[d_global] = np.nan
+            self.logActiveDaysLast7Days[d_global] = np.nan
+            self.logPageViewLast7DaysEma[d_global] = np.nan
+            self.logMorningFitbitWearLast7Days[d_global] = np.nan
+        else:
+            self.logIsWeekend[d_global] = float(self.s["isWeekend"])
+            self.logActiveDaysLast7Days[d_global] = float(
+                self.s.get("activeDaysLast7Days", 0.0)
+            )
+            self.logPageViewLast7DaysEma[d_global] = float(
+                self.s["pageViewLast7DaysEma"]
+            )
+            self.logMorningFitbitWearLast7Days[d_global] = float(
+                self.s["morningFitbitWearLast7Days"]
+            )
 
         raw_burden = _seeded_ewm(
             self._hist_daily_suggestions,
@@ -929,24 +1051,38 @@ class OnlineEnv:
         antic = self.env.gen_antic(self.s, ws_m, ws_a, d_global)
         self.s["dailyAnticipatedAffect"] = antic
 
-        self.morningFitbitWearAll[d_global] = fitbit
-        self.dailySurveyCompleteAll[d_global] = daily_pres
+        self.morningFitbitWearTruthAll[d_global] = fitbit
+        self.dailySurveyCompleteTruthAll[d_global] = daily_pres
+        self.morningFitbitWearAll[d_global] = (
+            np.nan if self.dropped_out else fitbit
+        )
+        self.dailySurveyCompleteAll[d_global] = (
+            np.nan if self.dropped_out else daily_pres
+        )
         self.dailyAnticipatedAffectAll[d_global] = antic                                   # latent, always finite
 
         day_base = self._step_idx(sim_w, d_w, 0)
-        daily_sum_step_agent = self._yesterday_step_z(
-            self.stepCountNext4HourAll[day_base:day_base + self.K]
+        daily_sum_step_agent = (
+            np.nan
+            if self.dropped_out
+            else self._yesterday_step_z(
+                self.stepCountNext4HourAll[day_base:day_base + self.K]
+            )
         )
         self.logTodayStepCount[d_global] = daily_sum_step_agent
 
-        survey_present = float(daily_pres) == 1.0
+        survey_present = (not self.dropped_out) and float(daily_pres) == 1.0
         antic_obs, antic_agent = self._agent_antic(antic, survey_present)
+        if self.dropped_out:
+            antic_obs = np.nan
+            antic_agent = np.nan
         self.dailyAnticipatedAffectObsAll[d_global] = antic_obs
         self.dailyAnticipatedAffectAgentAll[d_global] = antic_agent
 
         # Latent lag always advances. Agent lag is LOCF of last completed survey.
         self.s["dailyAnticipatedAffectYesterday"] = antic
-        self.s["dailyAnticipatedAffectYesterdayAgent"] = antic_agent
+        if not self.dropped_out:
+            self.s["dailyAnticipatedAffectYesterdayAgent"] = antic_agent
 
         self.s["yesterdayStepCount"] = daily_sum_step
         self.s["morningFitbitWearYesterday"] = fitbit
@@ -970,8 +1106,12 @@ class OnlineEnv:
         )
 
         if d_global + 1 < self.D:
-            self.logYesterdayStepCount[d_global + 1] = daily_sum_step_agent
-            self.logDailyAnticipatedAffectYesterday[d_global + 1] = float(antic_agent)
+            self.logYesterdayStepCount[d_global + 1] = (
+                np.nan if self.dropped_out else daily_sum_step_agent
+            )
+            self.logDailyAnticipatedAffectYesterday[d_global + 1] = (
+                np.nan if self.dropped_out else float(antic_agent)
+            )
 
         self._yesterday_morning_WS = self._today_action[0]
         self._yesterday_afternoon_WS = self._today_action[1]
@@ -998,27 +1138,40 @@ class OnlineEnv:
         # Same stretch as CAE: week ∈ {1,…,n} maps to [-1, 1]
         week_norm = study_week_norm(sim_w + 1, n_weeks=self.nweek)
 
-        if (sim_w, d_w_sun) not in self._day_started:
-            self._day_started[(sim_w, d_w_sun)] = True
-            self._start_day(sim_w, d_w_sun, d_global)
+        self._ensure_day_started(sim_w, d_w_sun, d_global)
 
         for t_sim in range(self.K):
             step_idx = self._step_idx(sim_w, d_w_sun, t_sim)
             Ah = 0.0
             self.s["decisionTimeSlot"] = float(t_sim)
-            self.activitySuggestionsSentLast7DaysAll[step_idx] = float(
-                self.s["activitySuggestionsSentLast7Days"]
+            self.activitySuggestionsSentLast7DaysAll[step_idx] = (
+                np.nan
+                if self.dropped_out
+                else float(self.s["activitySuggestionsSentLast7Days"])
             )
-            self.logActivitySuggestionInteractLast7Days[step_idx] = float(
-                self.s.get("activitySuggestionInteractLast7Days", 0.0)
+            self.logActivitySuggestionInteractLast7Days[step_idx] = (
+                np.nan
+                if self.dropped_out
+                else float(
+                    self.s.get("activitySuggestionInteractLast7Days", 0.0)
+                )
             )
             self.action_all[step_idx] = Ah
 
             fourSC = self.env.gen_fourSC(self.s, Ah, step_idx)
             pv = self.env.gen_pageview(self.s, Ah, Jw, step_idx)
 
-            self.stepCountNext4HourAll[step_idx] = fourSC
-            self.pageViewNext4HourAll[step_idx] = pv
+            self.stepCountNext4HourTruthAll[step_idx] = fourSC
+            self.pageViewNext4HourTruthAll[step_idx] = pv
+            self.stepCountNext4HourAll[step_idx] = (
+                np.nan if self.dropped_out else fourSC
+            )
+            self.pageViewNext4HourAll[step_idx] = (
+                np.nan if self.dropped_out else pv
+            )
+            self.ws_interaction_all[step_idx] = (
+                np.nan if self.dropped_out else 0.0
+            )
             self._today_fourSC[t_sim] = fourSC
             self._today_pageview[t_sim] = pv
             self._today_action[t_sim] = Ah
@@ -1064,10 +1217,16 @@ class OnlineEnv:
         self.CAE_all[weekly_idx] = cae
         self.CAE_mean_all[weekly_idx] = cae_mean
         self.pu_all[weekly_idx] = pu
-        self.wp_all[weekly_idx] = j_w
-        self.CAE_short_all[weekly_idx] = cs
-        self.U1_all[weekly_idx] = u1
-        self.U2_all[weekly_idx] = u2
+        self.wp_truth_all[weekly_idx] = j_w
+        self.CAE_short_truth_all[weekly_idx] = cs
+        self.U1_truth_all[weekly_idx] = u1
+        self.U2_truth_all[weekly_idx] = u2
+        self.wp_all[weekly_idx] = 0.0 if self.dropped_out else j_w
+        self.CAE_short_all[weekly_idx] = (
+            np.nan if self.dropped_out else cs
+        )
+        self.U1_all[weekly_idx] = np.nan if self.dropped_out else u1
+        self.U2_all[weekly_idx] = np.nan if self.dropped_out else u2
 
         self.s["caeAverageLastWeek"] = cae
         # Latent E_w driving env generative process (PV / FW / PJ / J / fourSC / antic).
@@ -1079,17 +1238,20 @@ class OnlineEnv:
         # Stored at ``weekly_idx`` so ``start_week(k)`` reads
         # ``E_known_all[k]``.
 
-        self.E_known_all[weekly_idx] = compute_Ew_hat_from_week(
-            sim_w,
-            coefs=self._ew_coefs,
-            e_lag=self.E_known_all[sim_w],
-            wp_all=self.wp_all,
-            U1_all=self.U1_all,
-            U2_all=self.U2_all,
-            pageViewNext4HourAll=self.pageViewNext4HourAll,
-            dw_wk=self._dw_wk,
-            dp_wk=self._dp_wk,
-        )
+        if self.dropped_out:
+            self.E_known_all[weekly_idx] = np.nan
+        else:
+            self.E_known_all[weekly_idx] = compute_Ew_hat_from_week(
+                sim_w,
+                coefs=self._ew_coefs,
+                e_lag=self.E_known_all[sim_w],
+                wp_all=self.wp_all,
+                U1_all=self.U1_all,
+                U2_all=self.U2_all,
+                pageViewNext4HourAll=self.pageViewNext4HourAll,
+                dw_wk=self._dw_wk,
+                dp_wk=self._dp_wk,
+            )
 
         self._week_finalized[sim_w] = True
 
@@ -2377,9 +2539,13 @@ def _episode_seed(exp_seed: int, draw_idx: int) -> int:
     return int(np.random.SeedSequence([exp_seed, draw_idx]).generate_state(1)[0])
 
 
-def _make_online_env(uid, seed=42, params_dir=None):
+def _make_online_env(
+    uid, seed=42, params_dir=None, dropout_hazard_day=None
+):
     params_dir = resolve_params_dir(params_dir)
     cfg = EnvConfig(uid, params_dir=params_dir, nweek=NWEEK)
+    if dropout_hazard_day is not None:
+        cfg.dropout_hazard_day = float(dropout_hazard_day)
     nweek = cfg.nweek
     env = Env(cfg, noise="ar1")
     oenv = OnlineEnv(env, nweek=nweek, seed=seed, params_dir=params_dir)
@@ -2405,9 +2571,20 @@ def _q_prior_for_gamma(gamma_bar):
     }
 
 
-def run_micro_query(uid, seed=42, gamma_bar=0.5, params_dir=None):
+def run_micro_query(
+    uid,
+    seed=42,
+    gamma_bar=0.5,
+    params_dir=None,
+    dropout_hazard_day=None,
+):
     _ensure_priors_configured(params_dir)
-    cfg, env, oenv = _make_online_env(uid, seed=seed, params_dir=params_dir)
+    cfg, env, oenv = _make_online_env(
+        uid,
+        seed=seed,
+        params_dir=params_dir,
+        dropout_hazard_day=dropout_hazard_day,
+    )
     nweek = cfg.nweek
 
     week0_actions, I_hist = shared_episode_exogenous(seed, nweek)
@@ -2575,10 +2752,21 @@ def _fixed_policy_rng_after_legacy_reset(seed: int):
     return rng
 
 
-def _run_fixed_policy_fast(policy: str, uid, seed=42, params_dir=None):
+def _run_fixed_policy_fast(
+    policy: str,
+    uid,
+    seed=42,
+    params_dir=None,
+    dropout_hazard_day=None,
+):
     """Run fixed baselines without PF/RLSVI/state-feature bookkeeping."""
     _ensure_priors_configured(params_dir)
-    cfg, env, oenv = _make_online_env(uid, seed=seed, params_dir=params_dir)
+    cfg, env, oenv = _make_online_env(
+        uid,
+        seed=seed,
+        params_dir=params_dir,
+        dropout_hazard_day=dropout_hazard_day,
+    )
     nweek = cfg.nweek
 
     if policy not in {"never_send", "always_send", "random_send"}:
@@ -2600,8 +2788,14 @@ def _run_fixed_policy_fast(policy: str, uid, seed=42, params_dir=None):
         oenv.start_week(k, I_w)
 
         for d in range(N_RL_DAYS):
+            d_global = oenv._day_idx(k, d)
+            oenv._ensure_day_started(k, d, d_global)
+            if oenv.dropped_out:
+                I_w = 0
+                I_hist[k] = 0
+                oenv._Iw_per_week[k] = 0
             for t in range(N_RL_SLOTS):
-                if policy == "never_send":
+                if oenv.dropped_out or policy == "never_send":
                     pi_A = 0.0
                     action = 0
                 elif policy == "always_send":
@@ -2620,6 +2814,9 @@ def _run_fixed_policy_fast(policy: str, uid, seed=42, params_dir=None):
                 oenv.step_action(k, d, t, action, I_w)
 
         oenv._finalize_week(k)
+
+        if oenv.dropped_out and k + 1 < nweek:
+            I_hist[k + 1:] = 0
 
     result = {
         "I": I_hist,
@@ -2646,19 +2843,55 @@ def _run_fixed_policy(agent_cls, uid, seed=42, params_dir=None):
     raise TypeError(f"unsupported fixed-policy class {agent_cls!r}")
 
 
-def run_never_send(uid, seed=42, params_dir=None):
+def run_never_send(
+    uid, seed=42, params_dir=None, dropout_hazard_day=None
+):
     """Baseline: never send (A=0, π_A=0). Not the RLSVI clip π_A=ε."""
-    return _run_fixed_policy(NeverSendAgent, uid, seed=seed, params_dir=params_dir)
+    if dropout_hazard_day is None:
+        return _run_fixed_policy(
+            NeverSendAgent, uid, seed=seed, params_dir=params_dir
+        )
+    return _run_fixed_policy_fast(
+        "never_send",
+        uid,
+        seed=seed,
+        params_dir=params_dir,
+        dropout_hazard_day=dropout_hazard_day,
+    )
 
 
-def run_always_send(uid, seed=42, params_dir=None):
+def run_always_send(
+    uid, seed=42, params_dir=None, dropout_hazard_day=None
+):
     """Baseline: always send (A=1, π_A=1). Not the RLSVI clip π_A=1-ε."""
-    return _run_fixed_policy(AlwaysSendAgent, uid, seed=seed, params_dir=params_dir)
+    if dropout_hazard_day is None:
+        return _run_fixed_policy(
+            AlwaysSendAgent, uid, seed=seed, params_dir=params_dir
+        )
+    return _run_fixed_policy_fast(
+        "always_send",
+        uid,
+        seed=seed,
+        params_dir=params_dir,
+        dropout_hazard_day=dropout_hazard_day,
+    )
 
 
-def run_random_send(uid, seed=42, params_dir=None):
+def run_random_send(
+    uid, seed=42, params_dir=None, dropout_hazard_day=None
+):
     """Baseline: send at random with fixed propensity pi_A = 0.5."""
-    return _run_fixed_policy(RandomSendAgent, uid, seed=seed, params_dir=params_dir)
+    if dropout_hazard_day is None:
+        return _run_fixed_policy(
+            RandomSendAgent, uid, seed=seed, params_dir=params_dir
+        )
+    return _run_fixed_policy_fast(
+        "random_send",
+        uid,
+        seed=seed,
+        params_dir=params_dir,
+        dropout_hazard_day=dropout_hazard_day,
+    )
 
 
 # Algorithm registry: same names / order as ``EXPERIMENT_ALGORITHMS``.
@@ -2791,6 +3024,16 @@ def _write_timing_probe_summary(path, stacked_by_algo, sigma2_by_algo=None):
     path.write_text("\n".join(lines) + "\n")
 
 
+def cumulative_true_cae(oenv) -> float:
+    """Sum realized latent weekly CAE over the complete simulated horizon."""
+    weekly = np.asarray(
+        oenv.CAE_all[1:oenv.nweek + 1], dtype=float
+    )
+    if weekly.size != oenv.nweek or not np.all(np.isfinite(weekly)):
+        raise ValueError("CAE_all truth must be finite for every simulated week")
+    return float(np.sum(weekly))
+
+
 def _snapshot_oenv(oenv):
     """Capture all per-episode trajectory arrays from an OnlineEnv as a dict.
 
@@ -2806,11 +3049,14 @@ def _snapshot_oenv(oenv):
     the realised trajectories + state.
     """
     return {
+        "dropout_day": np.int64(oenv.dropout_day),
+        "cumulative_true_cae": np.float64(cumulative_true_cae(oenv)),
         # ── weekly ────────────────────────────────────────────────
         "CAE_all":       oenv.CAE_all.copy(),
         "CAE_mean_all":  oenv.CAE_mean_all.copy(),   # latent (noise-free) E[CAE | history]
         "pu_all":        oenv.pu_all.copy(),         # latent E_w (env truth)
         "wp_all":        oenv.wp_all.copy(),         # J_w (week-survey present)
+        "wp_truth_all":  oenv.wp_truth_all.copy(),
         "CAE_short_all": oenv.CAE_short_all.copy(),
         "U1_all":        oenv.U1_all.copy(),
         "U2_all":        oenv.U2_all.copy(),
@@ -2820,11 +3066,15 @@ def _snapshot_oenv(oenv):
         "dailyAnticipatedAffectObsAll":          oenv.dailyAnticipatedAffectObsAll.copy(),   # NaN if survey missed
         "dailyAnticipatedAffectAgentAll":        oenv.dailyAnticipatedAffectAgentAll.copy(), # last observed if survey missed
         "morningFitbitWearAll":             oenv.morningFitbitWearAll.copy(),
+        "morningFitbitWearTruthAll":        oenv.morningFitbitWearTruthAll.copy(),
         "dailySurveyCompleteAll":              oenv.dailySurveyCompleteAll.copy(),       # daily-survey present
+        "dailySurveyCompleteTruthAll":         oenv.dailySurveyCompleteTruthAll.copy(),
         "activityStatusTodayAll":           oenv.activityStatusTodayAll.copy(),
         # ── slot-level ────────────────────────────────────────────
         "stepCountNext4HourAll":             oenv.stepCountNext4HourAll.copy(),
+        "stepCountNext4HourTruthAll":        oenv.stepCountNext4HourTruthAll.copy(),
         "pageViewNext4HourAll":           oenv.pageViewNext4HourAll.copy(),
+        "pageViewNext4HourTruthAll":      oenv.pageViewNext4HourTruthAll.copy(),
         "action_all":             oenv.action_all.copy(),
         "prior2HourStepCountAll":    oenv.prior2HourStepCountAll.copy(),
         "ws_interaction_all":     oenv.ws_interaction_all.copy(),
@@ -3038,6 +3288,7 @@ if __name__ == "__main__":
     oenv_runs  = {name: [] for name in ALGORITHMS}
     probe_runs = {name: [] for name in ALGORITHMS}
     sigma2_runs = {name: [] for name in ALGORITHMS}
+    dropout_runs = {name: [] for name in ALGORITHMS}
     cae_by_uid = {name: {} for name in ALGORITHMS}   # keyed by uid (flat across exps)
 
     for exp_idx, seed in enumerate(SEEDS):
@@ -3052,6 +3303,7 @@ if __name__ == "__main__":
             oenv_runs[name].append([])
             probe_runs[name].append([])
             sigma2_runs[name].append([])
+            dropout_runs[name].append([])
 
         for draw_idx, uid in enumerate(sampled_uids):
             uid = int(uid)
@@ -3074,6 +3326,7 @@ if __name__ == "__main__":
                 cae_runs[name][exp_idx].append(cae_full)
                 cae_mean_runs[name][exp_idx].append(snap["CAE_mean_all"])
                 piA_runs[name][exp_idx].append(res["pi_A"].copy())
+                dropout_runs[name][exp_idx].append(int(oenv.dropout_day))
                 if res.get("timing_probe") is not None:
                     probe_runs[name][exp_idx].append(res["timing_probe"])
                 if res.get("sigma2_rl_hist") is not None:
@@ -3205,6 +3458,7 @@ if __name__ == "__main__":
         cae_arr = np.stack([np.stack(per_exp) for per_exp in cae_runs[name]])
         cae_mean_arr = np.stack([np.stack(per_exp) for per_exp in cae_mean_runs[name]])
         piA_arr = np.stack([np.stack(per_exp) for per_exp in piA_runs[name]])
+        dropout_arr = np.asarray(dropout_runs[name], dtype=int)
 
         # Single compressed npz per algorithm: cae (realized), cae_mean (latent),
         # piA, run_uids; trajectory snapshot fields only when save_mode is full
@@ -3213,6 +3467,7 @@ if __name__ == "__main__":
             "cae_runs": cae_arr,
             "cae_mean_runs": cae_mean_arr,
             "piA_runs": piA_arr,
+            "dropout_day": dropout_arr,
             "run_uids": run_uids_arr,
         }
         if name in trajectories:
