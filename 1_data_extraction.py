@@ -17,17 +17,10 @@ import re
 from itertools import zip_longest
 from pathlib import Path
 
-import matplotlib.dates as mdates
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
-from matplotlib.ticker import MaxNLocator
 
 from dropout_utils import build_participant_dropout_table, max_raw_observation_timestamp
-
-
-plt.ion()
 
 _combined = os.environ.get("ADAPR_COMBINED_DIR", "").strip()
 if not _combined:
