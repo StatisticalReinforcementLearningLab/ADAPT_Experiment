@@ -3,10 +3,10 @@
 Reads the daily activity table, fits the active-to-inactive logistic hazard and
 the promotion-time cure model for gap length, and writes the report, figures,
 and ``activity_process`` block of ``generator_calibration.json``. Does not
-refit scripts 1-5.
+refit scripts 01–03 or 06–07.
 
 Run from the repository root, with ``ADAPR_COMBINED_DIR`` set to the folder
-that holds the script-1 tables::
+that holds the tables written by ``01_extract_data.py``::
 
     python 04_fit_activity_process.py
     python 04_fit_activity_process.py --out docs/activity_process_20261021
@@ -1045,7 +1045,7 @@ def write_report(payload: dict) -> None:
     cohort = payload["cohort"]
     a("Two transition models on daily activity for the 47 modelled participants.")
     a("The process is exogenous: no latent perceived utility and no action terms.")
-    a("Scripts 1–5 were not rerun. The simulator and the 4b likelihood filter are not in this fit.")
+    a("Scripts 01–03 and 06–07 were not rerun. The simulator and the script-06 likelihood are not in this fit.")
     a("")
     a("## Data")
     a("")
@@ -1315,7 +1315,7 @@ def write_report(payload: dict) -> None:
     a("`env_para_vanilla/generator_calibration.json`, key `activity_process`. Existing `dropout_*` keys are unchanged.")
     a("Model 1 coefficients are intercept, week, act7, prior_gap. Model 2 stores c0, c1, c2, μ, α.")
     a("")
-    a("The local 4b run on 2026-10-19 (`python 06_fit_pu.py --chains 4 --cores 4 --tune 2000 --draws 3000 --target-accept 0.95`, finished 21:12) predates the active-day filter and is not used. `env_para_vanilla/` was restored to commit `65a9fed`, plus the `activity_process` block.")
+    a("The local `06_fit_pu.py` run on 2026-10-19 (`python 06_fit_pu.py --chains 4 --cores 4 --tune 2000 --draws 3000 --target-accept 0.95`, finished 21:12) predates the active-day filter and is not used. `env_para_vanilla/` was restored to commit `65a9fed`, plus the `activity_process` block.")
     a("")
     lines.extend(simulator_check_lines())
     OUT_DIR.mkdir(parents=True, exist_ok=True)
