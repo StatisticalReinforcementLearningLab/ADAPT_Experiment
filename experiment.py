@@ -19,6 +19,7 @@ from pathlib import Path
 from functools import partial
 
 
+from activity_process import coefficients_from_record, simulate_activity_paths
 from ewm_utils import ewma_gamma, gamma_from_n
 import derived_covariates as dc
 
@@ -303,6 +304,14 @@ class EpisodeDataset:
 class OnlineEnv:
     _DROPOUT_RNG_SALT = 771337
 
+    @staticmethod
+    def _dropout_seed_sequence(seed, uid) -> np.random.SeedSequence:
+        """Dropout-stream seed. Includes the participant; the main episode RNG does not."""
+        dropout_seed = 0 if seed is None else int(seed)
+        return np.random.SeedSequence(
+            [dropout_seed, int(uid), OnlineEnv._DROPOUT_RNG_SALT]
+        )
+
     def __init__(
         self, env, nweek=None, seed=None, start_dow=1,
         df_fit_11week_csv=None, df_fit_full=None, params_dir=None,
@@ -314,11 +323,10 @@ class OnlineEnv:
         # ``initial_Ew_hat_for_user``'s default 2.0, not 0.0.
         if seed is not None:
             rd.seed(seed)
-        dropout_seed = 0 if seed is None else int(seed)
+        # Activity path and the legacy constant-hazard draw. The main episode
+        # RNG above is ``rd.seed(seed)`` and does not include the participant.
         self._dropout_rng = np.random.default_rng(
-            np.random.SeedSequence(
-                [dropout_seed, self._DROPOUT_RNG_SALT]
-            )
+            self._dropout_seed_sequence(seed, env.cfg.userid)
         )
         self.dropout_day = -1
         self._dropout_week = None
@@ -346,6 +354,8 @@ class OnlineEnv:
         self.D = self.nweek * self.W_days
         self.T = self.D * self.K
         self.start_dow = start_dow
+        self._pv_absent = float(self.env.pageview_absent_z())
+        self._install_activity_path()
 
         # Public arrays are observations. Parallel truth arrays keep the
         # latent process finite after app dropout.
@@ -603,9 +613,83 @@ class OnlineEnv:
     def dropped_out(self) -> bool:
         return self.dropout_day > 0
 
+    def _install_activity_path(self) -> None:
+        """Draw the episode's activity path from the dropout RNG stream.
+
+        ``lambda = 0`` is all active and does not touch that stream, so the
+        rest of the episode matches the hazard-zero simulator. ``lambda = 1``
+        and ``pi = 1`` drops every episode on day 2.
+        """
+        cfg = self.env.cfg
+        record = getattr(cfg, "activity_process", None)
+        lam = getattr(cfg, "activity_lambda", None)
+        pi = getattr(cfg, "activity_pi", None)
+        use_model = record is not None or lam is not None
+        if not use_model:
+            self._activity_status = None
+            self._dropout_day_planned = -1
+            self.n_gaps = 0
+            self.inactive_days = 0
+            self.learned_weeks = int(self.nweek)
+            return
+        if lam is not None and float(lam) <= 0.0:
+            sim = simulate_activity_paths(
+                1, self.D, np.zeros(4), {}, self.nweek, self._dropout_rng,
+                lambda_p=0.0,
+            )
+        elif (
+            lam is not None
+            and float(lam) >= 1.0
+            and pi is not None
+            and float(pi) >= 1.0
+        ):
+            sim = simulate_activity_paths(
+                1, self.D, np.zeros(4), {}, self.nweek, self._dropout_rng,
+                lambda_p=1.0, pi=1.0,
+            )
+        else:
+            coef, fit = coefficients_from_record(record)
+            sim = simulate_activity_paths(
+                1, self.D, coef, fit, self.nweek, self._dropout_rng,
+                lambda_p=None if lam is None else float(lam),
+                pi=None if pi is None else float(pi),
+            )
+        self._activity_status = np.asarray(sim["status"][0], dtype=np.int8)
+        self._activity_b = np.asarray(sim["b"][0], dtype=float)
+        self._dropout_day_planned = int(sim["dropout_day"][0])
+        self.n_gaps = int(sim["n_gaps"][0])
+        self.inactive_days = int(sim["inactive_days"][0])
+        if self._dropout_day_planned > 0:
+            self.learned_weeks = (self._dropout_day_planned - 1) // self.W_days + 1
+        else:
+            self.learned_weeks = int(self.nweek)
+
+    def _day_is_active(self, d_global: int) -> bool:
+        status = self._activity_status
+        if status is None:
+            return True
+        idx = int(d_global)
+        if idx < 0 or idx >= status.size:
+            return False
+        return int(status[idx]) == 0
+
+    def _content_unobserved(self, d_global: int) -> bool:
+        return self.dropped_out or not self._day_is_active(d_global)
+
     def _maybe_dropout(self, d_global: int) -> None:
-        """Draw the absorbing app-dropout event before one simulated day."""
+        """Book a precomputed permanent gap, or the legacy constant hazard.
+
+        The two do not combine. A loaded activity path returns before the
+        constant-hazard draw, including when ``dropout_*`` is also in the
+        calibration file.
+        """
         if self.dropped_out:
+            return
+        if self._activity_status is not None:
+            day = int(d_global) + 1
+            if int(self._dropout_day_planned) == day:
+                self.dropout_day = day
+                self._dropout_week = int(d_global) // self.W_days
             return
         hazard = float(self.env.dropout_hazard(self.s))
         if not 0.0 <= hazard <= 1.0:
@@ -691,7 +775,7 @@ class OnlineEnv:
         prior2HourStepCount = self.env.gen_prior2hour_step_count(self.s, step_idx)
         self.prior2HourStepCountTruthAll[step_idx] = prior2HourStepCount
         self.prior2HourStepCountAll[step_idx] = (
-            np.nan if self.dropped_out else prior2HourStepCount
+            np.nan if self._content_unobserved(d_global) else prior2HourStepCount
         )
         self.s["prior2HourStepCount"] = prior2HourStepCount
 
@@ -934,22 +1018,25 @@ class OnlineEnv:
 
         fourSC = self.env.gen_fourSC(self.s, Ah, step_idx)
         # Interaction first: page-view occurrence depends on interaction with
-        # a delivered suggestion.
+        # a delivered suggestion. Inactive days still draw, then store a real zero.
         ws_interaction = self.env.gen_ws_interaction(self.s, step_idx, Ah)
         pv = self.env.gen_pageview(
             self.s, Ah, self._jw_week(sim_w), step_idx, ws_interaction=ws_interaction,
         )
+        if not self._day_is_active(d_global):
+            pv = self._pv_absent
+            ws_interaction = 0.0
 
         self.stepCountNext4HourTruthAll[step_idx] = fourSC
         self.pageViewNext4HourTruthAll[step_idx] = pv
+        self.ws_interaction_all[step_idx] = (
+            np.nan if self.dropped_out else ws_interaction
+        )
         self.stepCountNext4HourAll[step_idx] = (
-            np.nan if self.dropped_out else fourSC
+            np.nan if self._content_unobserved(d_global) else fourSC
         )
         self.pageViewNext4HourAll[step_idx] = (
             np.nan if self.dropped_out else pv
-        )
-        self.ws_interaction_all[step_idx] = (
-            np.nan if self.dropped_out else ws_interaction
         )
 
         self._today_fourSC[t_sim] = fourSC
@@ -985,10 +1072,10 @@ class OnlineEnv:
         active_status = self.env.gen_active_status(self.s, d_global)
         self.s["activityStatusToday"] = active_status
         self.activityStatusTodayAll[d_global] = (
-            np.nan if self.dropped_out else active_status
+            np.nan if self._content_unobserved(d_global) else active_status
         )
 
-        if self.dropped_out:
+        if self._content_unobserved(d_global):
             self.logIsWeekend[d_global] = np.nan
             self.logActiveDaysLast7Days[d_global] = np.nan
             self.logPageViewLast7DaysEma[d_global] = np.nan
@@ -1042,8 +1129,13 @@ class OnlineEnv:
         self.s["pageViewAfternoonToday"] = float(self._today_pageview[1])
 
         fitbit = self.env.gen_fitbitwearing(self.s, ws_m, ws_a, Jw, d_global)
-        self.s["morningFitbitWear"] = fitbit
         daily_pres = self.env.gen_dailysurvey(self.s, ws_m, ws_a, Jw, d_global)
+        # This row's wear is tomorrow morning. An inactive tomorrow is a real zero.
+        if not self._day_is_active(d_global + 1):
+            fitbit = 0.0
+        if not self._day_is_active(d_global):
+            daily_pres = 0.0
+        self.s["morningFitbitWear"] = fitbit
         self.s["dailySurveyComplete"] = daily_pres
         # Latent anticipated affect — always drawn. Tomorrow's gen_fourSC_mean /
         # gen_antic_mean read s["dailyAnticipatedAffectYesterday"], which is
@@ -1064,7 +1156,7 @@ class OnlineEnv:
         day_base = self._step_idx(sim_w, d_w, 0)
         daily_sum_step_agent = (
             np.nan
-            if self.dropped_out
+            if self._content_unobserved(d_global)
             else self._yesterday_step_z(
                 self.stepCountNext4HourAll[day_base:day_base + self.K]
             )
@@ -1160,11 +1252,13 @@ class OnlineEnv:
 
             fourSC = self.env.gen_fourSC(self.s, Ah, step_idx)
             pv = self.env.gen_pageview(self.s, Ah, Jw, step_idx)
+            if not self._day_is_active(d_global):
+                pv = self._pv_absent
 
             self.stepCountNext4HourTruthAll[step_idx] = fourSC
             self.pageViewNext4HourTruthAll[step_idx] = pv
             self.stepCountNext4HourAll[step_idx] = (
-                np.nan if self.dropped_out else fourSC
+                np.nan if self._content_unobserved(d_global) else fourSC
             )
             self.pageViewNext4HourAll[step_idx] = (
                 np.nan if self.dropped_out else pv
@@ -1212,7 +1306,13 @@ class OnlineEnv:
         )
         u1 = self.env.gen_tool_U1(pu, sim_w)
         u2 = self.env.gen_tool_U2(pu, sim_w)
-        j_w = self.env.gen_week_present(pu, weekly_idx)
+        j_draw = self.env.gen_week_present(pu, weekly_idx)
+        # Sunday slot plus Monday and Tuesday. The last week reads the 2-day extension.
+        forced_j = all(
+            not self._day_is_active(d_global + offset) for offset in (0, 1, 2)
+        )
+        j_w = 0.0 if forced_j else j_draw
+        hide_weekly = self.dropped_out or forced_j
 
         self.CAE_all[weekly_idx] = cae
         self.CAE_mean_all[weekly_idx] = cae_mean
@@ -1221,12 +1321,12 @@ class OnlineEnv:
         self.CAE_short_truth_all[weekly_idx] = cs
         self.U1_truth_all[weekly_idx] = u1
         self.U2_truth_all[weekly_idx] = u2
-        self.wp_all[weekly_idx] = 0.0 if self.dropped_out else j_w
+        self.wp_all[weekly_idx] = 0.0 if hide_weekly else j_w
         self.CAE_short_all[weekly_idx] = (
-            np.nan if self.dropped_out else cs
+            np.nan if hide_weekly else cs
         )
-        self.U1_all[weekly_idx] = np.nan if self.dropped_out else u1
-        self.U2_all[weekly_idx] = np.nan if self.dropped_out else u2
+        self.U1_all[weekly_idx] = np.nan if hide_weekly else u1
+        self.U2_all[weekly_idx] = np.nan if hide_weekly else u2
 
         self.s["caeAverageLastWeek"] = cae
         # Latent E_w driving env generative process (PV / FW / PJ / J / fourSC / antic).
@@ -2540,12 +2640,24 @@ def _episode_seed(exp_seed: int, draw_idx: int) -> int:
 
 
 def _make_online_env(
-    uid, seed=42, params_dir=None, dropout_hazard_day=None
+    uid, seed=42, params_dir=None, dropout_hazard_day=None,
+    activity_lambda=None, activity_pi=None,
 ):
     params_dir = resolve_params_dir(params_dir)
     cfg = EnvConfig(uid, params_dir=params_dir, nweek=NWEEK)
     if dropout_hazard_day is not None:
         cfg.dropout_hazard_day = float(dropout_hazard_day)
+        # Hazard 0 is the bit-for-bit all-active episode. Hazard 1 is the
+        # lambda = 1, pi = 1 dropout-on-day-2 episode.
+        if activity_lambda is None and float(dropout_hazard_day) == 0.0:
+            cfg.activity_lambda = 0.0
+        elif activity_lambda is None and float(dropout_hazard_day) == 1.0:
+            cfg.activity_lambda = 1.0
+            cfg.activity_pi = 1.0
+    if activity_lambda is not None:
+        cfg.activity_lambda = float(activity_lambda)
+    if activity_pi is not None:
+        cfg.activity_pi = float(activity_pi)
     nweek = cfg.nweek
     env = Env(cfg, noise="ar1")
     oenv = OnlineEnv(env, nweek=nweek, seed=seed, params_dir=params_dir)
@@ -3050,6 +3162,9 @@ def _snapshot_oenv(oenv):
     """
     return {
         "dropout_day": np.int64(oenv.dropout_day),
+        "n_gaps": np.int64(oenv.n_gaps),
+        "inactive_days": np.int64(oenv.inactive_days),
+        "learned_weeks": np.int64(oenv.learned_weeks),
         "cumulative_true_cae": np.float64(cumulative_true_cae(oenv)),
         # ── weekly ────────────────────────────────────────────────
         "CAE_all":       oenv.CAE_all.copy(),

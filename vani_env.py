@@ -611,6 +611,33 @@ def cae_mediator_ewma_rows(foursc_weeks, antic_weeks) -> tuple[np.ndarray, np.nd
     return foursc_e, antic_e
 
 
+def week1_cae_drift(theta_CAE, foursc_wk, antic_wk) -> float:
+    """Week-1 CAE intercept from study-week-1 mediator rows.
+
+    ``c_1 = intercept + beta_wk*week_norm(1) + beta_SC*fourSC_ewma_1
+    + beta_AA*antic_ewma_1``, using :func:`cae_mediator_ewma_rows` and
+    :func:`study_week_norm` as for weeks 2-12. Returns NaN if either
+    mediator is entirely missing so :func:`impute_baseline_cae` can fall
+    back to ``c_2``.
+    """
+    theta_CAE = np.asarray(theta_CAE, dtype=float).ravel()
+    if theta_CAE.size < 5:
+        raise ValueError("theta_CAE must contain intercept, AR(1), week, fourSC, antic")
+    foursc = np.asarray(foursc_wk, dtype=float).ravel()
+    antic = np.asarray(antic_wk, dtype=float).ravel()
+    if foursc.size == 0 or antic.size == 0:
+        return float("nan")
+    if not np.any(np.isfinite(foursc)) or not np.any(np.isfinite(antic)):
+        return float("nan")
+    foursc_e, antic_e = cae_mediator_ewma_rows(foursc, antic)
+    return float(
+        theta_CAE[0]
+        + theta_CAE[2] * study_week_norm(1)
+        + theta_CAE[3] * float(foursc_e[0])
+        + theta_CAE[4] * float(antic_e[0])
+    )
+
+
 def impute_baseline_cae(
     theta_CAE,
     c_panel,
@@ -619,13 +646,15 @@ def impute_baseline_cae(
     """Backcast study-week-1 CAE from the first observed full CAE.
 
     For study weeks ``w=2..12``, the fitted transition is
-    ``y_w = c_w + a1*y_{w-1} + eps_w``. ``c_panel`` contains the actual
-    weekly intercepts ``c_2,...,c_12`` and
-    ``a1 = clip(theta_CAE[1], -0.95, 0.95)``. Because week-1 covariates are
-    outside the fitting panel, initialize at ``m_1 = c_2/(1-a1)``.
+    ``y_w = c_w + a1*y_{w-1} + eps_w``. ``c_panel`` is
+    ``[c_1, c_2, ..., c_12]`` and ``a1 = clip(theta_CAE[1], -0.95, 0.95)``.
+    Initialize at the week-1 stationary mean ``m_1 = c_1/(1-a1)``. If
+    ``c_1`` is non-finite (a week-1 mediator was entirely missing), fall
+    back to ``m_1 = c_2/(1-a1)`` and suffix the source with ``_c2``.
 
-    If the first observed full CAE is ``y_k``, propagate the mean to week k,
-    ``M_k = a1**(k-1)*m_1 + sum_{j=2..k} a1**(k-j)*c_j``, then return
+    If the first observed full CAE is ``y_k``, propagate the mean to week k
+    starting from ``m_1`` and using ``c_2..c_k``
+    (``M_k = a1**(k-1)*m_1 + sum_{j=2..k} a1**(k-j)*c_j``), then return
     ``m_1 + a1**(k-1)*(y_k-M_k)``. Later observations add no information
     given ``y_k`` under the Markov model. An observed ``y_1`` is returned
     verbatim; no observations returns ``m_1``.
@@ -636,28 +665,30 @@ def impute_baseline_cae(
 
     if theta_CAE.size < 2:
         raise ValueError("theta_CAE must contain at least intercept and AR(1) slope")
-    if c_panel.size != 11 or y_obs.size != 12:
-        raise ValueError("c_panel must contain weeks 2..12 and y_obs weeks 1..12")
-    if not np.all(np.isfinite(c_panel)):
+    if c_panel.size != 12 or y_obs.size != 12:
+        raise ValueError("c_panel must contain weeks 1..12 and y_obs weeks 1..12")
+    if not np.all(np.isfinite(c_panel[1:])):
         raise ValueError("all transition intercepts c_2..c_12 must be finite")
 
     a1 = float(np.clip(theta_CAE[1], -0.95, 0.95))
-    m1 = float(c_panel[0] / (1.0 - a1))
+    used_c2 = not np.isfinite(c_panel[0])
+    m1 = float((c_panel[1] if used_c2 else c_panel[0]) / (1.0 - a1))
+    src_suffix = "_c2" if used_c2 else ""
 
     if np.isfinite(y_obs[0]):
         return float(y_obs[0]), "observed"
 
     future_obs = np.flatnonzero(np.isfinite(y_obs[1:]))
     if future_obs.size == 0:
-        return m1, "model_mean"
+        return m1, "model_mean" + src_suffix
 
     k = int(future_obs[0]) + 2
     mean_k = m1
     for study_week in range(2, k + 1):
-        mean_k = float(c_panel[study_week - 2] + a1 * mean_k)
+        mean_k = float(c_panel[study_week - 1] + a1 * mean_k)
 
     y1_hat = m1 + a1 ** (k - 1) * (float(y_obs[k - 1]) - mean_k)
-    return float(y1_hat), f"backcast_{k - 1}w"
+    return float(y1_hat), f"backcast_{k - 1}w{src_suffix}"
 
 
 def build_CAE_features(CAE_lastweek, week_norm, foursc_wk, antic_wk) -> np.ndarray:
@@ -1120,23 +1151,40 @@ class EnvConfig:
             not in {"0", "false", "no", "off"}
         )
         self.dropout_hazard_day = 0.0
+        self.activity_process = None
+        self.activity_lambda = None
+        self.activity_pi = None
+        # ``activity`` and ``constant`` are exclusive. ``none`` is the
+        # missing-calibration default (legacy hazard 0, with a warning).
+        self.dropout_mechanism = "none"
         if calibration_enabled:
             calibration_path = params_path / "generator_calibration.json"
             calibration = (
                 _load_json(calibration_path) if calibration_path.is_file() else {}
             )
-            if "dropout_hazard_day" not in calibration:
-                warnings.warn(
-                    f"{calibration_path} has no dropout_hazard_day; "
-                    "defaulting to 0.0",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-            else:
+            has_activity = isinstance(calibration.get("activity_process"), dict)
+            has_hazard = "dropout_hazard_day" in calibration
+            if has_activity:
+                # dropout_* in the same file are comparison records, not a
+                # second daily draw.
+                self.activity_process = calibration["activity_process"]
+                self.dropout_mechanism = "activity"
+            elif has_hazard:
                 self.dropout_hazard_day = float(
                     calibration["dropout_hazard_day"]
                 )
-        if not 0.0 <= self.dropout_hazard_day <= 1.0:
+                self.dropout_mechanism = "constant"
+            else:
+                warnings.warn(
+                    f"{calibration_path} has neither activity_process nor "
+                    "dropout_hazard_day; defaulting the legacy hazard to 0.0",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+        if (
+            self.dropout_mechanism == "constant"
+            and not 0.0 <= self.dropout_hazard_day <= 1.0
+        ):
             raise ValueError(
                 "dropout_hazard_day must be between 0 and 1, got "
                 f"{self.dropout_hazard_day}"
@@ -1499,14 +1547,24 @@ class Env:
         self._resid_models: dict = {}
 
     def dropout_hazard(self, state) -> float:
-        """Daily app-dropout hazard.
+        """Legacy constant daily hazard.
 
-        The calibrated implementation is constant. ``state`` is accepted so
-        a future extension can make dropout state-dependent without changing
-        the simulator hook.
+        Used only when ``cfg.dropout_mechanism`` is ``constant``. An
+        ``activity_process`` record does not consult this value. ``state``
+        is accepted so the hook stays in place.
         """
         del state
         return float(self.cfg.dropout_hazard_day)
+
+    def pageview_absent_z(self) -> float:
+        """Standardized page-view value of a zero count."""
+        z = _standardize_pageview_count(
+            0.0,
+            self.cfg.pageview_log_shift,
+            self.cfg.pageview_log_scale,
+            zero_count=self.cfg.pageview_zero_count,
+        )
+        return float(np.clip(z, *self.cfg.limits_pageview))
 
     def _sim_week_norm(self, study_week):
         """Stretch ``week_norm`` onto ``[-1, 1]`` over ``cfg.nweek``, like CAE."""

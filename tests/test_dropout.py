@@ -180,3 +180,79 @@ def test_pu_transition_denominator_excludes_post_dropout_days():
     np.testing.assert_allclose(block["PV_sum"], 0.5)
     np.testing.assert_allclose(block["FW_sum"], 0.75)
     np.testing.assert_allclose(block["PJ_sum"], 0.75)
+
+
+def test_activity_filter_keeps_weekly_means_and_drops_inactive_emissions():
+    path = Path(__file__).resolve().parents[1] / "4b_perceived_utility_bayes.py"
+    spec = importlib.util.spec_from_file_location("pu_bayes_activity_test", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    dates = np.repeat(pd.date_range("2025-01-06", periods=7), 2)
+    dat = pd.DataFrame(
+        {
+            "ParticipantIdentifier": 1,
+            "week": 1,
+            "Date": dates,
+            "DecisionTime": np.tile([0, 1], 7),
+            "study_day": np.repeat(np.arange(1, 8), 2),
+            "dropout_day": np.nan,
+            "week_present": 1.0,
+            "week_present_lastweek": 1.0,
+            "Exp-tool-1_norm": 0.2,
+            "Exp-tool-2_norm": 0.3,
+            "HourlyPageviewCount_norm": 1.0,
+            "HourlyPageviewCount": 1.0,
+            "hourly_pageview_count_lag1": 0.0,
+            "nextday_wearing": 1.0,
+            "morning_wearing": 0.0,
+            "daily_present": 1.0,
+            "daily_present_yesterday": 0.0,
+            "WalkingSuggestion": 0.0,
+            "Interacted_walk": 0.0,
+            "is_weekend": 0.0,
+            "recent_burden_norm": 0.0,
+        }
+    )
+    plain = module.build_user_blocks(dat, full_weeks=[1])
+    lookup = {
+        ("1", day.strftime("%Y-%m-%d")): 1.0
+        for day in pd.date_range("2025-01-05", "2025-01-14")
+    }
+    lookup[("1", "2025-01-05")] = 0.0  # opening Sunday inactive; Mon and Tue are active
+    lookup[("1", "2025-01-08")] = 0.0  # Wednesday inactive
+    del lookup[("1", "2025-01-09")]  # Thursday outside the activity window
+    filtered = module.build_user_blocks(
+        dat, full_weeks=[1], activity_lookup=lookup, completion_days=2
+    )
+    for key in ("PV_sum", "FW_sum", "PJ_sum", "PV_sum_trans", "FW_sum_trans", "PJ_sum_trans"):
+        np.testing.assert_allclose(filtered[0][key], plain[0][key])
+
+    data = module.flatten_blocks({1: filtered})
+    # PV/PJ drop Wednesday (inactive) and Thursday (outside): 14-4 and 7-2.
+    # FW on day d uses active(d+1): Tuesday points at Wednesday, Wednesday at Thursday.
+    assert len(data["pv"]) == 10
+    assert len(data["fw"]) == 5
+    assert len(data["pj"]) == 5
+    # Opening window Sun-Tue is not entirely inactive, so both check-ins stay.
+    assert len(data["ju"]) == 2
+    filt = data["activity_filter"]
+    assert filt["person_days_inactive"] == 1
+    assert filt["person_days_outside_window"] == 1
+    assert filt["person_weeks_inactive"] == 0
+    assert filt["person_weeks_outside_window"] == 0
+
+    closed = dict(lookup)
+    closed[("1", "2025-01-06")] = 0.0
+    closed[("1", "2025-01-07")] = 0.0
+    window_off = module.build_user_blocks(
+        dat, full_weeks=[1], activity_lookup=closed, completion_days=2
+    )
+    closed_data = module.flatten_blocks({1: window_off})
+    assert len(closed_data["ju"]) == 1
+    assert closed_data["activity_filter"]["person_weeks_inactive"] == 1
+    plain_data = module.flatten_blocks({1: plain})
+    assert len(plain_data["pv"]) == 14
+    assert len(plain_data["ju"]) == 2
+    assert plain_data["activity_filter"]["person_days_inactive"] == 0

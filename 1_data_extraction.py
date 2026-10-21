@@ -20,7 +20,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from dropout_utils import build_participant_dropout_table, max_raw_observation_timestamp
+from dropout_utils import (
+    build_participant_dropout_table,
+    max_raw_observation_timestamp,
+    weekly_checkin_completion_lag,
+)
 
 _combined = os.environ.get("ADAPR_COMBINED_DIR", "").strip()
 if not _combined:
@@ -2229,15 +2233,40 @@ _pageview_dropout["ParticipantIdentifier"] = _pageview_dropout[
     "ParticipantIdentifier"
 ].astype(str)
 _pageview_dropout["Date"] = _as_calendar_dates(_pageview_dropout["Timestamp"])
+# Local calendar day of the submission (InsertedDate already converted).
+_survey_activity_names = (
+    "MRT - Daily End of day survey and Planning Exercise",
+    "MRT - Weekly Check-in survey",
+)
+_survey_complete = surveyquestionresults.loc[
+    surveyquestionresults["SurveyName"].isin(_survey_activity_names),
+    ["ParticipantIdentifier", "date"],
+].rename(columns={"date": "Date"})
+_survey_complete["ParticipantIdentifier"] = _survey_complete[
+    "ParticipantIdentifier"
+].astype(str)
+_checkin_lag = weekly_checkin_completion_lag(df_weekly_filled)
+_completion_days = int(_checkin_lag.max())
+print(
+    "weekly check-in lag (observed_date - Sunday slot): "
+    f"{_checkin_lag.value_counts().sort_index().to_dict()} max={_completion_days}"
+)
 participant_dropout, _participant_dropout_daily = build_participant_dropout_table(
     summary_surveytask,
     _pageview_dropout,
     heartratebymin_all_starters,
     stepcountbymin_all_starters,
+    survey_local=_survey_complete,
+    completion_days=_completion_days,
     observation_end=DATA_EXTRACT_DATE,
 )
 participant_dropout.to_csv(folder / "participant_dropout.csv", index=False)
+_participant_dropout_daily.to_csv(folder / "participant_dropout_daily.csv", index=False)
 print(f"Wrote {folder / 'participant_dropout.csv'} ({len(participant_dropout)} starters)")
+print(
+    f"Wrote {folder / 'participant_dropout_daily.csv'} "
+    f"({len(_participant_dropout_daily)} person-days)"
+)
 
 summary = (
     stepcountbymin.dropna(subset=["Date"])

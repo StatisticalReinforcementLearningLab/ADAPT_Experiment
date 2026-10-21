@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import warnings
 from pathlib import Path
 
@@ -59,13 +60,6 @@ class _FreezeAgent:
         }
 
 
-def _truncated_geometric_mean(hazard: float, horizon: int) -> float:
-    q = 1.0 - hazard
-    probs = hazard * q ** np.arange(horizon)
-    mass = float(probs.sum())
-    return float(np.dot(np.arange(1, horizon + 1), probs) / mass)
-
-
 def test_calibration_formula_matches_hand_count():
     table = pd.read_csv(DROPOUT_TABLE)
     complete = table.loc[table["window_complete"].astype(bool)]
@@ -96,7 +90,45 @@ def test_envconfig_defaults_to_zero_when_calibration_missing(tmp_path):
         warnings.simplefilter("always")
         cfg = EnvConfig(13, params_dir=dest, nweek=2)
     assert cfg.dropout_hazard_day == 0.0
-    assert any("dropout_hazard_day" in str(w.message) for w in caught)
+    assert cfg.dropout_mechanism == "none"
+    assert any("neither activity_process nor dropout_hazard_day" in str(w.message) for w in caught)
+
+
+def test_activity_process_and_constant_hazard_do_not_stack(tmp_path):
+    dest = tmp_path / "params"
+    dest.mkdir()
+    for name in (
+        "std_params.json",
+        "params_env_13.json",
+        "Ew_pooled_linear_coefs.json",
+    ):
+        (dest / name).write_bytes((PARAMS / name).read_bytes())
+    df_fit = PARAMS / "df_fit_11week.csv"
+    if df_fit.is_file():
+        (dest / df_fit.name).write_bytes(df_fit.read_bytes())
+    calibration = json.loads((PARAMS / "generator_calibration.json").read_text())
+    calibration["dropout_hazard_day"] = 1.0
+    (dest / "generator_calibration.json").write_text(json.dumps(calibration))
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        cfg, env, oenv = experiment._make_online_env(13, seed=1, params_dir=dest)
+    assert cfg.dropout_mechanism == "activity"
+    assert cfg.activity_process is not None
+    assert cfg.dropout_hazard_day == 0.0
+    assert not any(
+        "neither activity_process nor dropout_hazard_day" in str(w.message)
+        for w in caught
+    )
+
+    def _forbid_constant_hazard(state):
+        raise AssertionError("constant hazard was drawn on top of the activity path")
+
+    env.dropout_hazard = _forbid_constant_hazard
+    for d_global in range(oenv.D):
+        oenv._maybe_dropout(d_global)
+    assert oenv._activity_status is not None
+    assert oenv.dropout_day == oenv._dropout_day_planned
 
 
 def test_hazard_zero_matches_golden_random_send():
@@ -109,6 +141,8 @@ def test_hazard_zero_matches_golden_random_send():
         )
         prefix = f"uid{uid}_"
         assert int(oenv.dropout_day) == int(gold[prefix + "dropout_day"])
+        assert np.all(np.asarray(oenv._activity_status)[: oenv.D] == 0)
+        assert oenv.n_gaps == 0
         for name in (
             "CAE_all",
             "pu_all",
@@ -124,90 +158,99 @@ def test_hazard_zero_matches_golden_random_send():
             )
 
 
-def test_hazard_one_matches_never_send_latent_and_masks_observations():
+def test_lambda_one_pi_one_drops_on_day_2_and_zeros_presence():
     seed = 11
     uid = 13
-    _never, never_env = experiment.run_never_send(
+    _base, base_env = experiment.run_random_send(
         uid, seed=seed, params_dir=PARAMS, dropout_hazard_day=0.0
     )
     _drop, drop_env = experiment.run_random_send(
         uid, seed=seed, params_dir=PARAMS, dropout_hazard_day=1.0
     )
-    assert drop_env.dropout_day == 1
-    np.testing.assert_allclose(drop_env.CAE_all, never_env.CAE_all)
-    np.testing.assert_allclose(
-        experiment.cumulative_true_cae(drop_env),
-        experiment.cumulative_true_cae(never_env),
+    assert drop_env.dropout_day == 2
+    assert drop_env.n_gaps == 1
+    assert int(np.asarray(drop_env._activity_status)[0]) == 0
+    assert np.all(np.asarray(drop_env._activity_status)[1:drop_env.D] == 2)
+    # Day 1 is active, so its page views and steps match the all-active episode.
+    # Its stored wear is tomorrow morning and is forced to 0.
+    np.testing.assert_array_equal(
+        drop_env.pageViewNext4HourTruthAll[:2],
+        base_env.pageViewNext4HourTruthAll[:2],
     )
-    assert np.isnan(drop_env.stepCountNext4HourAll).all()
-    assert np.isnan(drop_env.pageViewNext4HourAll).all()
-    assert np.isnan(drop_env.morningFitbitWearAll).all()
-    assert np.isnan(drop_env.dailySurveyCompleteAll).all()
-    assert np.isnan(drop_env.dailyAnticipatedAffectObsAll).all()
+    np.testing.assert_array_equal(
+        drop_env.stepCountNext4HourTruthAll[:2],
+        base_env.stepCountNext4HourTruthAll[:2],
+    )
+    assert drop_env.morningFitbitWearTruthAll[0] == 0.0
+    assert drop_env.dailySurveyCompleteTruthAll[0] == base_env.dailySurveyCompleteTruthAll[0]
+    assert np.isnan(drop_env.stepCountNext4HourAll[2:]).all()
+    assert np.isnan(drop_env.pageViewNext4HourAll[2:]).all()
+    assert np.all(drop_env.pageViewNext4HourTruthAll[2:] == drop_env._pv_absent)
+    assert np.all(drop_env.dailySurveyCompleteTruthAll[1:] == 0.0)
+    assert np.isnan(drop_env.dailySurveyCompleteAll[1:]).all()
+    assert np.isnan(drop_env.morningFitbitWearAll[1:]).all()
+    assert np.all(drop_env.morningFitbitWearTruthAll[1:] == 0.0)
+    assert np.isnan(drop_env.dailyAnticipatedAffectObsAll[1:]).all()
+    assert np.all(np.isfinite(drop_env.dailyAnticipatedAffectAll))
     assert np.isnan(drop_env.U1_all[1:]).all()
     assert np.isnan(drop_env.U2_all[1:]).all()
+    assert np.all(np.isfinite(drop_env.U1_truth_all[1:]))
     assert np.isnan(drop_env.CAE_short_all[1:]).all()
     assert np.all(drop_env.wp_all[1:] == 0.0)
-    assert np.all(drop_env.action_all == 0.0)
     assert np.all(np.isfinite(drop_env.CAE_all[1:]))
     assert np.all(np.isfinite(drop_env.stepCountNext4HourTruthAll))
-    assert np.all(np.isfinite(drop_env.morningFitbitWearTruthAll))
 
 
-def test_calibrated_hazard_dropout_days_are_geometric():
-    hazard = float(calibrate_constant_daily_hazard(pd.read_csv(DROPOUT_TABLE))[
-        "dropout_hazard_day"
-    ])
-    n_episodes = 2000
-    days84 = np.empty(n_episodes, dtype=int)
-    days252 = np.empty(n_episodes, dtype=int)
-    for i in range(n_episodes):
-        rng = np.random.default_rng(
-            np.random.SeedSequence([i, experiment.OnlineEnv._DROPOUT_RNG_SALT])
-        )
-        d84 = d252 = -1
-        for d in range(252):
-            if rng.random() < hazard:
-                if d < 84:
-                    d84 = d + 1
-                d252 = d + 1
-                break
-        days84[i] = d84
-        days252[i] = d252
-    empirical84 = float(np.mean(days84 > 0))
-    empirical252 = float(np.mean(days252 > 0))
-    expected84 = 1.0 - (1.0 - hazard) ** 84
-    expected252 = 1.0 - (1.0 - hazard) ** 252
-    se84 = np.sqrt(expected84 * (1.0 - expected84) / n_episodes)
-    se252 = np.sqrt(expected252 * (1.0 - expected252) / n_episodes)
-    assert abs(empirical84 - expected84) < 3.0 * se84
-    assert abs(empirical252 - expected252) < 3.0 * se252
-    dropped = days84 > 0
-    mean_day = float(np.mean(days84[dropped]))
-    expected_mean = _truncated_geometric_mean(hazard, 84)
-    assert abs(mean_day - expected_mean) / expected_mean < 0.05
-    # Recorded in report.md section (C): n=2000, 8.60% by day 84, 24.35% by day 252.
-    assert empirical84 == pytest.approx(0.0860, abs=1e-4)
-    assert empirical252 == pytest.approx(0.2435, abs=1e-4)
+def test_activity_path_matches_the_dropout_rng_stream():
+    from activity_process import coefficients_from_record, simulate_activity_paths
 
-    # One live OnlineEnv draw sequence uses the same RNG contract.
-    cfg, _env, oenv = experiment._make_online_env(
-        13, seed=7, params_dir=PARAMS, dropout_hazard_day=hazard
-    )
-    assert cfg.nweek >= 12
-    for d_global in range(84):
-        oenv._maybe_dropout(d_global)
-        if oenv.dropped_out:
-            break
+    cfg, _env, oenv = experiment._make_online_env(13, seed=7, params_dir=PARAMS)
+    coef, fit = coefficients_from_record(cfg.activity_process)
     rng = np.random.default_rng(
-        np.random.SeedSequence([7, experiment.OnlineEnv._DROPOUT_RNG_SALT])
+        experiment.OnlineEnv._dropout_seed_sequence(7, 13)
     )
-    expected_day = -1
-    for d in range(84):
-        if rng.random() < hazard:
-            expected_day = d + 1
-            break
-    assert oenv.dropout_day == expected_day
+    sim = simulate_activity_paths(1, oenv.D, coef, fit, oenv.nweek, rng)
+    assert oenv._dropout_day_planned == int(sim["dropout_day"][0])
+    assert oenv.n_gaps == int(sim["n_gaps"][0])
+    assert oenv.inactive_days == int(sim["inactive_days"][0])
+    np.testing.assert_array_equal(oenv._activity_status, sim["status"][0])
+
+
+def test_inactive_day_zeros_presence_and_checkin_window():
+    _cfg, _env, oenv = experiment._make_online_env(
+        13, seed=3, params_dir=PARAMS, dropout_hazard_day=0.0
+    )
+    # Saturday inactive; Sunday–Tuesday inactive so that check-in is forced off.
+    oenv._activity_status[:] = 0
+    oenv._activity_status[5:9] = 1
+    oenv._dropout_day_planned = -1
+    oenv._reset_episode_state()
+    oenv.start_week(0, 1)
+    for d in range(experiment.N_RL_DAYS):
+        for t in range(oenv.K):
+            oenv.step_action(0, d, t, 1, 1)
+    oenv._finalize_week(0)
+
+    absent = oenv._pv_absent
+    sat = slice(5 * oenv.K, 6 * oenv.K)
+    assert np.all(oenv.pageViewNext4HourTruthAll[sat] == absent)
+    assert np.all(oenv.pageViewNext4HourAll[sat] == absent)
+    assert np.all(oenv.ws_interaction_all[sat] == 0.0)
+    assert np.all(np.isnan(oenv.stepCountNext4HourAll[sat]))
+    assert np.all(np.isfinite(oenv.stepCountNext4HourTruthAll[sat]))
+    assert oenv.dailySurveyCompleteTruthAll[5] == 0.0
+    assert oenv.dailySurveyCompleteAll[5] == 0.0
+    assert np.isnan(oenv.dailyAnticipatedAffectObsAll[5])
+    assert np.isfinite(oenv.dailyAnticipatedAffectAll[5])
+    # Friday's row holds Saturday morning's wear.
+    assert oenv.morningFitbitWearTruthAll[4] == 0.0
+    assert oenv.morningFitbitWearAll[4] == 0.0
+    assert oenv.wp_all[1] == 0.0
+    assert oenv.wp_truth_all[1] == 0.0
+    assert np.isnan(oenv.U1_all[1])
+    assert np.isnan(oenv.U2_all[1])
+    assert np.isfinite(oenv.U1_truth_all[1])
+    assert np.isfinite(oenv.U2_truth_all[1])
 
 
 def test_agent_freezes_after_dropout_week_and_omits_td():
@@ -218,11 +261,13 @@ def test_agent_freezes_after_dropout_week_and_omits_td():
     dataset = experiment.EpisodeDataset(cfg.nweek)
     week0, i_hist = experiment.shared_episode_exogenous(5, cfg.nweek)
     result = oenv.run_episode(agent, dataset, week0_actions=week0, I_hist=i_hist)
-    assert oenv.dropout_day == 1
+    assert oenv.dropout_day == 2
     assert agent.begin_weeks == [0]
     assert agent.rlsvi_weeks == []
-    assert agent.acts == []
-    assert np.all(result["A"] == 0)
+    assert agent.acts == [(0, 0, 0), (0, 0, 1)]
+    assert np.all(result["A"][0, 0] == 1)
+    assert np.all(result["A"][0, 1:] == 0)
+    assert np.all(result["A"][1:] == 0)
     assert np.all(result["I"][1:] == 0)
     assert 0 not in dataset.med_full_hist
     packet = oenv.get_week_packet(1)

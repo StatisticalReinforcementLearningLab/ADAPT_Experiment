@@ -10,9 +10,16 @@ import numpy as np
 import pandas as pd
 
 from dropout_utils import (
+    STUDY_DAYS,
     build_participant_dropout_table,
     max_raw_observation_timestamp,
     summarize_activity,
+    weekly_checkin_completion_lag,
+)
+
+SURVEY_ACTIVITY_NAMES = (
+    "MRT - Daily End of day survey and Planning Exercise",
+    "MRT - Weekly Check-in survey",
 )
 
 
@@ -204,11 +211,37 @@ def main() -> None:
         zones=zones,
         value_col="Value",
     )
+    surveys = pd.read_csv(
+        folder / "SurveyResults.csv",
+        usecols=["ParticipantIdentifier", "SurveyName", "InsertedDate"],
+    )
+    surveys["ParticipantIdentifier"] = surveys["ParticipantIdentifier"].astype(str)
+    surveys = surveys.loc[
+        surveys["ParticipantIdentifier"].isin(starter_ids)
+        & surveys["SurveyName"].isin(SURVEY_ACTIVITY_NAMES)
+    ].copy()
+    surveys["Date"] = _local_dates(
+        surveys["InsertedDate"], surveys["ParticipantIdentifier"], zones
+    )
+    survey_local = surveys.loc[surveys["Date"].notna(), ["ParticipantIdentifier", "Date"]]
+    checkin_lag = weekly_checkin_completion_lag(
+        pd.read_csv(
+            folder / "df_weekly_filled.csv",
+            usecols=["date", "observed_date", "week_present"],
+        )
+    )
+    completion_days = int(checkin_lag.max())
+    print(
+        "weekly check-in lag (observed_date - Sunday slot): "
+        f"{checkin_lag.value_counts().sort_index().to_dict()} max={completion_days}"
+    )
     table, daily = build_participant_dropout_table(
         anchors,
         page,
         heart,
         steps,
+        survey_local=survey_local,
+        completion_days=completion_days,
         gap_days=args.gap_days,
         observation_end=extract_date,
     )
@@ -232,11 +265,12 @@ def main() -> None:
 
     table.to_csv(folder / "participant_dropout.csv", index=False)
     table.to_csv(out_dir / "participant_dropout.csv", index=False)
+    daily.to_csv(folder / "participant_dropout_daily.csv", index=False)
     daily.to_csv(out_dir / "participant_dropout_daily.csv", index=False)
 
     sensitivity = {}
     active_by_uid = {
-        uid: g.loc[g["observed"].eq(1)]
+        uid: g.loc[g["observed"].eq(1) & g["study_day"].le(STUDY_DAYS)]
         .sort_values("study_day")["active_any"]
         .to_numpy(dtype=bool)
         for uid, g in daily.groupby("ParticipantIdentifier")

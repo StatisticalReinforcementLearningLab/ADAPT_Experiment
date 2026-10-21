@@ -52,6 +52,15 @@ check-in day is 0, missing burden is the participant mean; a week without
 engagement data uses the participant's mean weekly summary in the transition
 and contributes no emissions.
 
+Activity filter: page-view, wear, and daily check-in emissions are kept only
+on days with ``active_any = 1`` in the daily activity table. The weekly
+check-in (and the tool ratings on that same Sunday) is kept only when that
+survey day is active. A date absent from the 84-day table is not treated as
+active. Weekly transition means are unchanged. The table is
+``participant_dropout_daily.csv`` written by script 1 next to
+``df_fit.csv``. ``ADAPR_ACTIVITY_DAILY`` overrides that path. A missing
+table is an error.
+
 Outputs (in ``env_para_vanilla/``)
 * ``params_env_<uid>.json``: ``theta_penalized_{Ew,J,U1,U2,PV,FW,PJ}`` (+
   ``_names``; key names kept for the downstream readers) at the posterior mean,
@@ -83,7 +92,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from dropout_utils import in_study_mask
+from dropout_utils import in_study_mask, weekly_checkin_completion_lag
 from vani_env import mask_dropout_fit_outcomes
 
 logger = logging.getLogger("pu_hier")
@@ -92,6 +101,104 @@ PROJECT_ROOT = Path(
     os.environ.get("ADAPR_PROJECT_ROOT", Path(__file__).resolve().parent)
 ).expanduser().resolve()
 WORK_DIR = PROJECT_ROOT / "env_para_vanilla"
+ACTIVITY_DAILY_NAME = "participant_dropout_daily.csv"
+
+
+def resolve_activity_daily_path(combined_dir: Path) -> Path:
+    """Daily activity table used to drop inactive-day emissions."""
+    env = os.environ.get("ADAPR_ACTIVITY_DAILY", "").strip()
+    if env:
+        path = Path(env).expanduser().resolve()
+        if not path.is_file():
+            raise SystemExit(f"ADAPR_ACTIVITY_DAILY does not exist: {path}")
+        return path
+    path = combined_dir / ACTIVITY_DAILY_NAME
+    if not path.is_file():
+        raise SystemExit(
+            f"Missing {path}. Script 1 writes {ACTIVITY_DAILY_NAME} next to "
+            "participant_dropout.csv. Set ADAPR_ACTIVITY_DAILY to override."
+        )
+    return path
+
+
+def load_activity_lookup(path: Path) -> dict:
+    """Map (participant id, YYYY-MM-DD) to active_any in {0, 1}."""
+    daily = pd.read_csv(path)
+    need = {"ParticipantIdentifier", "Date", "active_any"}
+    missing = need.difference(daily.columns)
+    if missing:
+        raise SystemExit(f"{path} is missing {sorted(missing)}")
+    # Unobserved days are censoring, not inactivity, and have no active_any.
+    if "observed" in daily.columns:
+        observed = pd.to_numeric(daily["observed"], errors="coerce").fillna(0).eq(1)
+        daily = daily.loc[observed].copy()
+    uid = daily["ParticipantIdentifier"].astype(str)
+    date = pd.to_datetime(daily["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    flag = pd.to_numeric(daily["active_any"], errors="coerce")
+    if date.isna().any() or flag.isna().any():
+        raise SystemExit(f"{path} has observed rows without a date or active_any")
+    keys = list(zip(uid.tolist(), date.tolist()))
+    if len(keys) != len(set(keys)):
+        raise SystemExit(f"{path} has duplicate participant-dates")
+    return {key: float(value) for key, value in zip(keys, flag.tolist())}
+
+
+def _activity_bucket(flag):
+    """``None`` keeps the emission. Otherwise ``inactive`` or ``outside``."""
+    if flag is None:
+        return None
+    try:
+        value = float(flag)
+    except (TypeError, ValueError):
+        return "outside"
+    if not np.isfinite(value):
+        return "outside"
+    if value == 1.0:
+        return None
+    return "inactive"
+
+
+def assert_activity_covers_fit(df_fit: pd.DataFrame, activity_lookup: dict) -> None:
+    """Every df_fit calendar day must be in the activity table."""
+    days = df_fit.loc[:, ["ParticipantIdentifier", "Date"]].drop_duplicates()
+    uid = days["ParticipantIdentifier"].astype(str)
+    date = pd.to_datetime(days["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    missing = [key for key in zip(uid.tolist(), date.tolist()) if key not in activity_lookup]
+    if missing:
+        sample = ", ".join(f"{u} {d}" for u, d in missing[:8])
+        raise SystemExit(
+            f"{len(missing)} df_fit days are absent from the activity table "
+            f"(for example {sample})."
+        )
+
+
+def _lookup_active(activity_lookup, uid, day) -> float:
+    if activity_lookup is None:
+        return 1.0
+    key = (str(uid), pd.Timestamp(day).strftime("%Y-%m-%d"))
+    return activity_lookup.get(key, np.nan)
+
+
+def _window_active(activity_lookup, uid, anchor, completion_days: int) -> float:
+    """1 if any day in the check-in window is active, else 0 or missing.
+
+    The window is the Sunday slot through ``completion_days`` later. A
+    forced zero requires every one of those days to be inactive. One active
+    day keeps the check-in. Incomplete coverage with no active day is NaN.
+    """
+    if activity_lookup is None:
+        return 1.0
+    flags = [
+        _lookup_active(
+            activity_lookup, uid, pd.Timestamp(anchor) + pd.Timedelta(days=k)
+        )
+        for k in range(int(completion_days) + 1)
+    ]
+    if any(np.isfinite(flag) and float(flag) == 1.0 for flag in flags):
+        return 1.0
+    if flags and all(np.isfinite(flag) and float(flag) == 0.0 for flag in flags):
+        return 0.0
+    return np.nan
 
 E1_FIXED = 2.0
 # Scale normalization of the latent state (location: E_1 = E1_FIXED).
@@ -218,6 +325,8 @@ def build_user_blocks(
     hourly_pv=True,
     full_weeks=None,   # e.g. range(1, 13)
     missing_week_mode="mean_impute_transition",  # or "error"
+    activity_lookup=None,
+    completion_days=2,
 ):
     """
     Build one block per study week ``w`` (default ``full_weeks=range(1, 13)`` →
@@ -252,7 +361,16 @@ def build_user_blocks(
         participant is enrolled: a missing PV slot counts as standardized
         zero and missing FW/PJ as 0. Post-dropout slots are excluded from both
         numerator and denominator. Missing PV lags are ``z0``; missing recent
-        burden is the participant mean.
+        burden is the participant mean. These summaries are not restricted
+        to active days.
+
+      - When ``activity_lookup`` is set, each emission is gated on the date
+        it refers to. PV and PJ use the row's calendar day. FW is
+        ``nextday_wearing``: the row for day d is the morning of day d+1, so
+        it uses ``active(d+1)``. ``J_w`` (and U1/U2 on that check-in) is
+        dropped only when every day from the Sunday slot through
+        ``completion_days`` later is inactive. A date missing from the
+        lookup is outside the activity window.
 
       - The state transition uses separate weekly summaries:
             PV_sum_trans, FW_sum_trans, PJ_sum_trans
@@ -325,6 +443,10 @@ def build_user_blocks(
         slot_eligible_list, day_eligible_list = [], []
         day_is_weekend_list, day_burden_list = [], []
         day_fw_lag_list, day_pj_lag_list = [], []
+        slot_active_list, day_active_list = [], []
+        slot_date_list, day_date_list = [], []
+        fw_active_list, fw_date_list = [], []
+        uid = str(g_week["ParticipantIdentifier"].iloc[0])
 
         for _d, g_day in g_week.groupby(date_col, sort=True):
             g_day = g_day.sort_values(decision_col, na_position="last")
@@ -364,6 +486,18 @@ def build_user_blocks(
                 rb_k = float(burden[k]) if not np.isnan(burden[k]) else burden_mean
                 dt_k = float(dtv[k]) if (hourly_pv and not np.isnan(dtv[k])) else 0.0
                 pv_ctx_rows.append([weekend_k, dt_k, rb_k])
+
+            day_key = pd.Timestamp(_d).strftime("%Y-%m-%d")
+            day_flag = _lookup_active(activity_lookup, uid, _d)
+            next_day = pd.Timestamp(_d).normalize() + pd.Timedelta(days=1)
+            for _k in range(len(g_day)):
+                slot_active_list.append(day_flag)
+                slot_date_list.append(day_key)
+            day_active_list.append(day_flag)
+            day_date_list.append(day_key)
+            # nextday_wearing on this row is the morning of the next calendar day.
+            fw_active_list.append(_lookup_active(activity_lookup, uid, next_day))
+            fw_date_list.append(next_day.strftime("%Y-%m-%d"))
 
             row_morning = g_day.loc[g_day[decision_col] == 0].iloc[0]
             row_afternoon = g_day.loc[g_day[decision_col] == 1].iloc[0]
@@ -438,11 +572,26 @@ def build_user_blocks(
             if n_day_eligible and np.any(np.isfinite(PJ_daily[day_eligible]))
             else np.nan
         )
+        week_dates = pd.to_datetime(g_week[date_col])
+        # Opening J is the Sunday before this Monday. Closing J is this Sunday.
+        # Kept unless every day in the completion window is inactive.
+        open_sunday = week_dates.min() - pd.Timedelta(days=1)
+        close_sunday = week_dates.max()
+        j_lag_active = _window_active(
+            activity_lookup, uid, open_sunday, completion_days
+        )
+        j_week_active = _window_active(
+            activity_lookup, uid, close_sunday, completion_days
+        )
         return {
             "week": int(week),
             "is_missing_week": False,
             "J_week": J_week,
             "J_lag": J_lag,
+            "J_week_active": j_week_active,
+            "J_lag_active": j_lag_active,
+            "J_week_date": pd.Timestamp(close_sunday).strftime("%Y-%m-%d"),
+            "J_lag_date": pd.Timestamp(open_sunday).strftime("%Y-%m-%d"),
             "U1": U1,
             "U2": U2,
             "pv_y": pv_y,
@@ -459,6 +608,12 @@ def build_user_blocks(
             "day_PJ_lag": day_PJ_lag,
             "FW_daily": FW_daily,
             "PJ_daily": PJ_daily,
+            "slot_active": np.asarray(slot_active_list, dtype=float),
+            "slot_date": slot_date_list,
+            "day_active": np.asarray(day_active_list, dtype=float),
+            "day_date": day_date_list,
+            "fw_active": np.asarray(fw_active_list, dtype=float),
+            "fw_date": fw_date_list,
             "PV_sum": PV_sum,
             "FW_sum": FW_sum,
             "PJ_sum": PJ_sum,
@@ -503,6 +658,8 @@ def build_user_blocks(
                 "is_missing_week": True,
                 "J_week": np.nan,
                 "J_lag": np.nan,
+                "J_week_active": np.nan,
+                "J_lag_active": np.nan,
                 "U1": np.nan,
                 "U2": np.nan,
                 "U1_open": np.nan,
@@ -537,13 +694,15 @@ def build_user_blocks(
             b["PJ_sum_trans"] = b["PJ_sum"] if not np.isnan(b["PJ_sum"]) else pj_mean
             blocks.append(b)
 
-    j_week_by_w = {int(b["week"]): b["J_week"] for b in blocks}
+    by_week = {int(b["week"]): b for b in blocks}
     for b in blocks:
         if np.isfinite(b.get("J_lag", np.nan)):
             continue
-        prev = j_week_by_w.get(int(b["week"]) - 1, np.nan)
-        if np.isfinite(prev):
-            b["J_lag"] = float(prev)
+        prev = by_week.get(int(b["week"]) - 1)
+        if prev is not None and np.isfinite(prev.get("J_week", np.nan)):
+            b["J_lag"] = float(prev["J_week"])
+            b["J_lag_active"] = prev.get("J_week_active", np.nan)
+            b["J_lag_date"] = prev.get("J_week_date")
         # else leave NaN: no fabricated J=0 Bernoulli at study entry.
 
     prev_u1, prev_u2 = np.nan, np.nan
@@ -587,6 +746,8 @@ def prepare_all_user_blocks(
     FW_lag_col="morning_wearing",
     PJ_lag_col="daily_present_yesterday",
     hourly_pv=True,
+    activity_lookup=None,
+    completion_days=2,
 ):
     user_blocks = {}
     for uid, g in df_fit.groupby("ParticipantIdentifier"):
@@ -611,6 +772,8 @@ def prepare_all_user_blocks(
             hourly_pv=hourly_pv,
             full_weeks=range(1, int(df_fit["week"].max()) + 1),
             missing_week_mode="mean_impute_transition",
+            activity_lookup=activity_lookup,
+            completion_days=completion_days,
         )
         user_blocks[uid] = blocks
     return user_blocks
@@ -634,20 +797,47 @@ def flatten_blocks(user_blocks: dict):
 
     trans = np.zeros((len(uids), T, 3))  # PV/FW/PJ summaries of block t-1 -> E_t
     ju_rows, pv_rows, day_rows = [], [], {"FW": [], "PJ": []}
+    excl_days = {"inactive": set(), "outside": set()}
+    excl_weeks = {"inactive": 0, "outside": 0}
+    nonzero = {"pv": [], "fw": [], "pj": [], "j": []}
+
+    def _dropped(flag, kind, key=None) -> bool:
+        bucket = _activity_bucket(flag)
+        if bucket is None:
+            return False
+        if kind == "day":
+            excl_days[bucket].add(key)
+        else:
+            excl_weeks[bucket] += 1
+        return True
+
+    def _note(kind, uid, date, y) -> None:
+        if np.isfinite(y) and float(y) > 0:
+            nonzero[kind].append((str(uid), None if date is None else str(date), float(y)))
+
     for u, uid in enumerate(uids):
         blocks = user_blocks[uid]
         for t, b in enumerate(blocks):
             trans[u, t] = [b["PV_sum_trans"], b["FW_sum_trans"], b["PJ_sum_trans"]]
             jw = _block_jw(b)
             j_open = b.get("J_lag", np.nan)
-            if np.isfinite(j_open):
+            if np.isfinite(j_open) and not _dropped(b.get("J_lag_active", None), "week"):
                 ju_rows.append((u, t, j_open, b.get("U1_open", np.nan), b.get("U2_open", np.nan)))
+            elif np.isfinite(j_open):
+                _note("j", uid, b.get("J_lag_date"), j_open)
             if b.get("is_missing_week"):
                 continue
             pv_y, pv_z = b["pv_y"], b.get("pv_z")
+            slot_active = b.get("slot_active")
+            slot_date = b.get("slot_date")
             for j in range(len(pv_y)):
                 y = pv_y[j]
                 if not np.isfinite(y):
+                    continue
+                flag = None if slot_active is None else slot_active[j]
+                date = None if slot_date is None else slot_date[j]
+                if _dropped(flag, "day", (uid, date)):
+                    _note("pv", uid, date, y)
                     continue
                 row = np.where(np.isnan(b["pv_c_ctx"][j]), 0.0, b["pv_c_ctx"][j])
                 a = b["pv_a"][j]
@@ -660,10 +850,20 @@ def flatten_blocks(user_blocks: dict):
                     0.0 if not np.isfinite(lag) else lag, jw,
                     a * float(b["pv_i"][j]),  # interaction with a delivered suggestion
                 ))
-            for key, ykey, lagkey in (("FW", "FW_daily", "day_FW_lag"), ("PJ", "PJ_daily", "day_PJ_lag")):
+            for key, ykey, lagkey, active_key, date_key in (
+                ("FW", "FW_daily", "day_FW_lag", "fw_active", "fw_date"),
+                ("PJ", "PJ_daily", "day_PJ_lag", "day_active", "day_date"),
+            ):
+                active = b.get(active_key)
+                dates = b.get(date_key)
                 for d in range(len(b[ykey])):
                     y = b[ykey][d]
                     if not np.isfinite(y):
+                        continue
+                    flag = None if active is None else active[d]
+                    date = None if dates is None else dates[d]
+                    if _dropped(flag, "day", (uid, date)):
+                        _note(key.lower(), uid, date, y)
                         continue
                     a0, a1 = b["day_A0"][d], b["day_A1"][d]
                     we = b["day_is_weekend"][d] if len(b["day_is_weekend"]) > d else np.nan
@@ -679,8 +879,10 @@ def flatten_blocks(user_blocks: dict):
                     ))
         last = blocks[-1]
         j_close = last.get("J_week", np.nan)
-        if np.isfinite(j_close):
+        if np.isfinite(j_close) and not _dropped(last.get("J_week_active", None), "week"):
             ju_rows.append((u, T, j_close, last.get("U1", np.nan), last.get("U2", np.nan)))
+        elif np.isfinite(j_close):
+            _note("j", uid, last.get("J_week_date"), j_close)
 
     def arr(rows, ncol):
         return np.asarray(rows, dtype=float).reshape(-1, ncol)
@@ -689,6 +891,14 @@ def flatten_blocks(user_blocks: dict):
         "uids": uids, "T": T, "trans": trans,
         "ju": arr(ju_rows, 5), "pv": arr(pv_rows, 11),
         "fw": arr(day_rows["FW"], 9), "pj": arr(day_rows["PJ"], 9),
+        "activity_filter": {
+            "person_days_inactive": len(excl_days["inactive"]),
+            "person_days_outside_window": len(excl_days["outside"]),
+            "person_weeks_inactive": excl_weeks["inactive"],
+            "person_weeks_outside_window": excl_weeks["outside"],
+            "nonzero_excluded": {kind: len(rows) for kind, rows in nonzero.items()},
+            "nonzero_excluded_rows": {kind: rows[:12] for kind, rows in nonzero.items()},
+        },
     }
 
 
@@ -994,8 +1204,45 @@ def main(argv=None):
     if args.users:
         keep = {int(x) for x in args.users.split(",") if x.strip()}
         df_fit = df_all[df_all["ParticipantIdentifier"].astype(int).isin(keep)]
-    user_blocks = prepare_all_user_blocks(df_fit)
+    activity_path = resolve_activity_daily_path(combined_dir)
+    activity_lookup = load_activity_lookup(activity_path)
+    assert_activity_covers_fit(df_fit, activity_lookup)
+    weekly_path = combined_dir / "df_weekly_filled.csv"
+    if not weekly_path.is_file():
+        raise SystemExit(
+            f"Missing {weekly_path}. The J_w completion window is the max of "
+            "observed_date minus the Sunday slot in this file."
+        )
+    completion_lag = weekly_checkin_completion_lag(
+        pd.read_csv(weekly_path, usecols=["date", "observed_date", "week_present"])
+    )
+    completion_days = int(completion_lag.max())
+    logger.info(
+        "weekly check-in lag (observed_date - Sunday slot) max=%d counts=%s",
+        completion_days,
+        completion_lag.value_counts().sort_index().to_dict(),
+    )
+    user_blocks = prepare_all_user_blocks(
+        df_fit, activity_lookup=activity_lookup, completion_days=completion_days
+    )
     data = flatten_blocks(user_blocks)
+    filt = data["activity_filter"]
+    logger.info(
+        "activity table %s; excluded person-days inactive=%d outside_window=%d; "
+        "excluded person-weeks inactive=%d outside_window=%d; "
+        "nonzero excluded PV/FW/PJ/J=%s",
+        activity_path,
+        filt["person_days_inactive"],
+        filt["person_days_outside_window"],
+        filt["person_weeks_inactive"],
+        filt["person_weeks_outside_window"],
+        filt["nonzero_excluded"],
+    )
+    if any(filt["nonzero_excluded"].values()):
+        raise SystemExit(
+            "Excluded emissions are not forced zeros: "
+            f"{filt['nonzero_excluded']} examples {filt['nonzero_excluded_rows']}"
+        )
     logger.info("participants=%d weeks=%d PV rows=%d FW rows=%d PJ rows=%d J/U rows=%d",
                 len(data["uids"]), data["T"], len(data["pv"]), len(data["fw"]),
                 len(data["pj"]), len(data["ju"]))

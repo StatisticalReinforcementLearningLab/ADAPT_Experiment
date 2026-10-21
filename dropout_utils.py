@@ -10,6 +10,12 @@ import pandas as pd
 
 
 STUDY_DAYS = 84
+# Day 85 is the week-12 Sunday for a Sunday starter. Weekly check-ins are
+# filled onto that Sunday from a completion up to this many days later
+# (measured max of observed_date - Sunday slot; fill_weekly_12 tolerance).
+# The activity table runs through that window. Dropout metrics stay on days 1-84.
+DEFAULT_WEEKLY_COMPLETION_DAYS = 2
+ACTIVITY_TABLE_DAYS = STUDY_DAYS + 1 + DEFAULT_WEEKLY_COMPLETION_DAYS
 DEFAULT_DROPOUT_GAP_DAYS = 14
 DEFAULT_DROPOUT_RISK_WINDOW_DAYS = STUDY_DAYS - DEFAULT_DROPOUT_GAP_DAYS + 1
 RAW_OBSERVATION_TIMESTAMP_SPECS = (
@@ -148,12 +154,31 @@ def summarize_activity(
     }
 
 
+def weekly_checkin_completion_lag(weekly: pd.DataFrame) -> pd.Series:
+    """Signed days from the Sunday slot to ``observed_date``, per completed check-in."""
+    need = {"date", "observed_date", "week_present"}
+    missing = need.difference(weekly.columns)
+    if missing:
+        raise KeyError(f"weekly check-ins are missing {sorted(missing)}")
+    done = weekly.loc[pd.to_numeric(weekly["week_present"], errors="coerce").eq(1)].copy()
+    lag = (
+        pd.to_datetime(done["observed_date"], errors="coerce")
+        - pd.to_datetime(done["date"], errors="coerce")
+    ).dt.days
+    lag = lag.dropna().astype(int)
+    if lag.empty:
+        raise ValueError("no completed weekly check-ins")
+    return lag
+
+
 def build_participant_dropout_table(
     anchors: pd.DataFrame,
     pageview_local: pd.DataFrame,
     heart_local: pd.DataFrame,
     steps_local: pd.DataFrame,
     *,
+    survey_local: pd.DataFrame | None = None,
+    completion_days: int = DEFAULT_WEEKLY_COMPLETION_DAYS,
     gap_days: int = DEFAULT_DROPOUT_GAP_DAYS,
     observation_end=None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -162,8 +187,13 @@ def build_participant_dropout_table(
     ``anchors`` must contain one row per participant with ``date_min``.
     Event tables must have local ``Date`` values. Wear is any positive
     ``Value`` in heart or steps; page-view activity is any event row.
-    Participants whose 84-day window extends beyond ``observation_end`` are
-    right-censored as ``still_enrolled`` and never classified as dropout.
+    ``survey_local`` is any daily end-of-day or weekly check-in submission,
+    already converted to the participant's local calendar date. A day is
+    active if it has a page view, wear, or one of those submissions.
+    The daily table includes day 85 and ``completion_days`` after it so a
+    week-12 Sunday's completion window is covered. Dropout metrics use only
+    days 1–84. Participants whose 84-day window extends beyond
+    ``observation_end`` are right-censored as ``still_enrolled``.
     """
     anchor = anchors[["ParticipantIdentifier", "date_min"]].copy()
     anchor["ParticipantIdentifier"] = anchor["ParticipantIdentifier"].astype(str)
@@ -189,21 +219,30 @@ def build_participant_dropout_table(
             keep &= pd.to_numeric(dat["Value"], errors="coerce").gt(0)
         return set(zip(dat.loc[keep, "ParticipantIdentifier"], dat.loc[keep, "Date"]))
 
+    if completion_days < 0:
+        raise ValueError("completion_days must be non-negative")
     page_dates = _active_dates(pageview_local, positive_value=False)
     heart_dates = _active_dates(heart_local, positive_value=True)
     step_dates = _active_dates(steps_local, positive_value=True)
+    survey_frame = survey_local if survey_local is not None else pd.DataFrame(
+        columns=["ParticipantIdentifier", "Date"]
+    )
+    survey_dates = _active_dates(survey_frame, positive_value=False)
+    table_days = STUDY_DAYS + 1 + int(completion_days)
 
     daily_rows: list[dict[str, object]] = []
     summary_rows: list[dict[str, object]] = []
     for row in anchor.itertuples(index=False):
         uid = str(row.ParticipantIdentifier)
-        dates = pd.date_range(row.date_min, periods=STUDY_DAYS, freq="D")
+        dates = pd.date_range(row.date_min, periods=table_days, freq="D")
         page = np.array([(uid, date) in page_dates for date in dates], dtype=bool)
         heart = np.array([(uid, date) in heart_dates for date in dates], dtype=bool)
         steps = np.array([(uid, date) in step_dates for date in dates], dtype=bool)
+        survey = np.array([(uid, date) in survey_dates for date in dates], dtype=bool)
         wear = heart | steps
-        active = page | wear
-        window_end = dates[-1]
+        active = page | wear | survey
+        # Dropout status uses the original 84-day window, not day 85.
+        window_end = dates[STUDY_DAYS - 1]
         window_complete = observation_end is None or window_end <= observation_end
         followup_days = (
             STUDY_DAYS
@@ -212,7 +251,7 @@ def build_participant_dropout_table(
         )
         observed_active = active[:followup_days]
         if window_complete:
-            metrics = summarize_activity(active, gap_days=gap_days)
+            metrics = summarize_activity(active[:STUDY_DAYS], gap_days=gap_days)
             status = "dropout" if np.isfinite(metrics["dropout_day"]) else "completed_non_dropout"
         else:
             active_days = np.flatnonzero(observed_active) + 1
@@ -236,17 +275,26 @@ def build_participant_dropout_table(
                 "n_active_days": int(active[:followup_days].sum()),
                 "n_pageview_days": int(page[:followup_days].sum()),
                 "n_wear_days": int(wear[:followup_days].sum()),
+                "n_survey_days": int(survey[:followup_days].sum()),
             }
         )
+        def _day_observed(day: int, date) -> bool:
+            if day <= STUDY_DAYS:
+                return day <= followup_days
+            if observation_end is None:
+                return True
+            return pd.Timestamp(date).normalize() <= pd.Timestamp(observation_end).normalize()
+
         daily_rows.extend(
             {
                 "ParticipantIdentifier": uid,
                 "study_day": day,
                 "Date": date,
-                "observed": int(day <= followup_days),
-                "pageview_any": int(page[day - 1]) if day <= followup_days else np.nan,
-                "wear_any": int(wear[day - 1]) if day <= followup_days else np.nan,
-                "active_any": int(active[day - 1]) if day <= followup_days else np.nan,
+                "observed": int(_day_observed(day, date)),
+                "pageview_any": int(page[day - 1]) if _day_observed(day, date) else np.nan,
+                "wear_any": int(wear[day - 1]) if _day_observed(day, date) else np.nan,
+                "survey_any": int(survey[day - 1]) if _day_observed(day, date) else np.nan,
+                "active_any": int(active[day - 1]) if _day_observed(day, date) else np.nan,
             }
             for day, date in enumerate(dates, start=1)
         )
