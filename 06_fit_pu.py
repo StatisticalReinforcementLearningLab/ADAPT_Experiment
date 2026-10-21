@@ -30,7 +30,7 @@ Each engagement linear predictor contains an intercept, ``E_w``, weekend,
 (slot), burden, its own lag, suggestion(s) ``x (1, E_w)``, and the carry-over
 ``J_w (q0 + qE E_w + qrb burden)``.
 
-Priors (same principles as the CAE models of script 5)
+Priors (same principles as the CAE models of ``07_fit_testbed.py``)
 * participant coefficient = population mean + random effect,
   ``psi_ik = mu_k + tau_k z_ik``, ``z_ik ~ N(0, 1)``,
   ``tau_k ~ Gamma(shape=2, mode=RE_SD_MODE)`` for every coefficient
@@ -43,7 +43,7 @@ Priors (same principles as the CAE models of script 5)
   participants, ``s^2 ~ InverseGamma(2, 0.5 Var(y))`` (for a standardized
   outcome this is the CAE prior ``InverseGamma(2, 0.5)``).
 
-Panel: the fitting panel of script 3 (MRT weeks 2-12, renumbered 1-11; week 1
+Panel: the fitting panel of ``03_standardize.py`` (MRT weeks 2-12, renumbered 1-11; week 1
 supplies only lags). ``E_1 = 2`` is the state of the first fitted week.
 
 Missing data (handled when the weekly blocks are built): a missing page-view
@@ -57,7 +57,7 @@ on days with ``active_any = 1`` in the daily activity table. The weekly
 check-in (and the tool ratings on that same Sunday) is kept only when that
 survey day is active. A date absent from the 84-day table is not treated as
 active. Weekly transition means are unchanged. The table is
-``participant_dropout_daily.csv`` written by script 1 next to
+``participant_dropout_daily.csv`` written by ``01_extract_data.py`` next to
 ``df_fit.csv``. ``ADAPR_ACTIVITY_DAILY`` overrides that path. A missing
 table is an error.
 
