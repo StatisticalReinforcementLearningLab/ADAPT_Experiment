@@ -1,7 +1,7 @@
 """Diagnostic: step-count suggestion effect averaged over the fitted data (main effect + interactions x covariates),
 compared between env_para_vanilla and the 20261005 backup. Usage: python diag_sc_suggestion_effect.py"""
 import json,glob,numpy as np,pandas as pd,re,ast,sys
-src=open('5_fit_vanilla_testbed.py').read()
+src=open('07_fit_testbed.py').read()
 ns={'np':np,'pd':pd}
 def grab(fn):
     m=re.search(rf"^def {fn}\(.*?(?=^def |\Z)",src,re.S|re.M); return m.group(0)

@@ -15,8 +15,14 @@ import numpy as np
 import pandas as pd
 
 LABEL = {"old": "Old: PL with parameter draws",
-         "rbpl": "New: RBPL",
-         "rbpl_obsEB": "New: RBPL + observed-pair EB"}
+         "rbpl": "RBPL (theta integrated out)",
+         "rbpl_obsEB": "RBPL + observed-pair EB (theta integrated out)",
+         "rbpl_move": "RBPL + collapsed DA move after collapse",
+         "theta": "Theta particles + Kalman (CAE integrated out), 1 DA move",
+         "theta_move3": "Theta particles + Kalman, 3 DA moves",
+         "theta_nomove": "Theta particles + Kalman, no rejuvenation"}
+COL = {"old": "#c0392b", "rbpl": "#2471a3", "rbpl_obsEB": "#1e8449",
+       "theta": "#8e44ad", "rbpl_move": "#17a589", "theta_move3": "#d35400", "theta_nomove": "#7f8c8d"}
 PHASES = [0, 5, 12, 24, 36]
 PHASE_LAB = ["2-5", "6-12", "13-24", "25-36"]
 RUNS = [-1, 0, 2, 5, 10, 40]
@@ -64,7 +70,8 @@ def tables(W, R):
     Y = W[W.obs == "Y"]
     out["collapse_run"] = 100 * Y.groupby(["method", "J", "runbin"], observed=True).ess.apply(
         lambda x: (x < 2).mean()).unstack()
-    out["n_run"] = Y[(Y.method == "rbpl") & (Y.J == 200) & (Y.fs == 1)].groupby("runbin", observed=True).size()
+    m0 = "rbpl_obsEB" if "rbpl_obsEB" in set(W.method) else W.method.iloc[0]
+    out["n_run"] = Y[(Y.method == m0) & (Y.J == 200) & (Y.fs == 1)].groupby("runbin", observed=True).size()
     L = W[W.obs != "Y"]
     gl = L.groupby(["method", "J"])
     out["accuracy"] = pd.DataFrame({
@@ -86,10 +93,13 @@ def tables(W, R):
     out["sec"] = R.groupby(["method", "J"]).sec.median()
     # Per-participant collapse frequency (J=200).
     pp = W[W.J == 200].groupby(["uid", "method"]).ess.apply(lambda x: 100 * (x < 2).mean()).unstack()
-    out["per_participant"] = pp.sort_values("old", ascending=False)
+    out["per_participant"] = pp.sort_values(pp.columns[0], ascending=False)
+    # Distinct particles after the week (ancestors kept / J), by phase: the honest
+    # degeneracy measure when particles are copies (ESS is then misleadingly high).
+    out["distinct_phase"] = W.groupby(["method", "J", "phase"], observed=True).anc.median().unstack()
     # True transition noise of the simulated CAE (AR(1) residual variance).
     tv = []
-    for (u, s), d in W[(W.method == "rbpl") & (W.J == 200) & (W.fs == 1)].groupby(["uid", "seed"]):
+    for (u, s), d in W[(W.method == m0) & (W.J == 200) & (W.fs == 1)].groupby(["uid", "seed"]):
         y = d.sort_values("k").truth.to_numpy()
         b = np.polyfit(y[:-1], y[1:], 1)
         tv.append(np.var(y[1:] - np.polyval(b, y[:-1])))
@@ -101,9 +111,10 @@ def figures(W, outdir):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    col = {"old": "#c0392b", "rbpl": "#2471a3", "rbpl_obsEB": "#1e8449"}
+    col = COL
+    meths = [m for m in LABEL if m in set(W.method)]
     fig, ax = plt.subplots(1, 2, figsize=(11, 3.8))
-    for m in ["old", "rbpl"]:
+    for m in meths:
         d = W[(W.method == m) & (W.J == 200)].groupby("k").essr
         q = d.quantile([0.25, 0.5, 0.75]).unstack()
         ax[0].plot(q.index + 1, q[0.5], color=col[m], label=LABEL[m])
@@ -121,9 +132,10 @@ def figures(W, outdir):
     fig, ax = plt.subplots(figsize=(5.5, 3.6))
     labs = RUN_LAB
     x = np.arange(len(labs))
-    for i, m in enumerate(["old", "rbpl", "rbpl_obsEB"]):
+    nm = len(meths); wd = 0.8 / nm
+    for i, m in enumerate(meths):
         v = Y[Y.method == m].groupby("runbin", observed=False).ess.apply(lambda s: 100 * (s < 2).mean())
-        ax.bar(x + (i - 1) * 0.27, v.reindex(labs).to_numpy(), width=0.27, color=col[m], label=LABEL[m])
+        ax.bar(x + (i - (nm - 1) / 2) * wd, v.reindex(labs).to_numpy(), width=wd, color=col[m], label=LABEL[m])
     ax.set_xticks(x, labs)
     ax.set(xlabel="unobserved weeks before a full-survey week", ylabel="% with ESS < 2",
            title="Collapse when Y_w is observed, J = 200")

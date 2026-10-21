@@ -5,7 +5,7 @@ walking suggestions are delivered independently with probability 0.5 at each
 controlled decision slot.
 
 Outputs:
-  check_trend_outputs/
+  analysis/figures/out/check_trend/
     random_policy_trajectories.npz
     summary.json
     plots/user_<id>.png
@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -28,11 +29,15 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import experiment
 from vani_env import denormalize_CAE
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = ROOT
 PARAMS_DIR = PROJECT_ROOT / "env_para_vanilla"
 
 CAE_FIELDS = frozenset({"CAE_all", "CAE_mean_all", "CAE_short_all"})
@@ -178,7 +183,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--out-dir",
         type=Path,
-        default=Path("check_trend_outputs"),
+        default=Path(__file__).resolve().parent / "figures" / "out" / "check_trend",
         help="Output directory for arrays, summary, and plots.",
     )
     parser.add_argument(

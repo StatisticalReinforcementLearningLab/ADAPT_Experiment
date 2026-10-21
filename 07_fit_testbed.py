@@ -16,7 +16,7 @@ Writes ``params_env_<uid>.json`` (mediator/outcome blocks and residuals),
 Bayesian (one NUTS schedule, NUTS_TUNE / NUTS_DRAWS / NUTS_TARGET_ACCEPT).
 Does not overwrite the E_w / PV / FW / PJ blocks from script 4 (including
 the ``J_w`` ``query_Jw_*`` suffix on PV/FW/PJ).
-Next: ``6_est_Ew_weights.py``.
+Next: ``08_est_ew_weights.py``.
 """
 import json
 import os
@@ -77,7 +77,7 @@ file_pred_prefix = str(work_folder / 'pred_')
 file_user_ids = str(work_folder / 'user_ids.txt')
 
 # The fitting panel (MRT weeks 2-12 renumbered 1-11; week 1 only supplies
-# lags) is built in 3_standardization.py and shared with 4b.
+# lags) is built in 03_standardize.py and shared with 4b.
 df_fit["Date"] = pd.to_datetime(df_fit["Date"], errors="coerce")
 assert_complete_week_slots(df_fit)
 
@@ -212,7 +212,7 @@ RE_SD_MODE_LOGIT = 0.5
 #   "direction" (default): beta_j = sign_j * |N(0, 1)|. Only the direction comes
 #       from the working causal model; the magnitude is left to the data
 #       (outcomes are z-scored, so SD 1 is weakly informative). Same rule as
-#       the perceived-utility model (4b_perceived_utility_bayes.py).
+#       the perceived-utility model (06_fit_pu.py).
 #   "magnitude" (legacy, up to 2026-10): HalfNormal scaled so its prior mean
 #       equals beta_prior_mu_j (prior SD ~= 0.60 |mu_j|), i.e. the magnitude
 #       is constrained as well.
@@ -436,7 +436,7 @@ def build_cae_mixedlm_data(df, userid_all, K=14):
 
     The two EWMA terms use :func:`vani_env.cae_mediator_ewmas` (week-local
     NaN fill, then the same normalized discount as
-    ``1_data_extraction._ewm_prior_rows``; most recent observation last).
+    ``01_extract_data._ewm_prior_rows``; most recent observation last).
 
     Output columns:
         ParticipantIdentifier
@@ -1180,7 +1180,7 @@ theta_fitbitwearing_list = []
 theta_eodcomplete_list = []
 cae_baseline_rows = []
 
-# Week-1 mediator EWMAs are written by 3_standardization.py. A missing file
+# Week-1 mediator EWMAs are written by 03_standardize.py. A missing file
 # is an error. An irregular or all-missing user falls back to c_2 and is logged.
 _week1_path = folder / "week1_cae_inputs.csv"
 try:

@@ -286,6 +286,11 @@ def main():
     out = Path(a.out)
     out.mkdir(exist_ok=True)
     cls = {"old": OldRuntime, "rbpl": RBPLRuntime, "rbpl_obsEB": RBPLObservedEBRuntime}
+    try:  # parameter-particle (Kalman-over-CAE) filters, see diag_pf_theta.py
+        from diag_pf_theta import THETA_METHODS
+        cls.update(THETA_METHODS)
+    except ImportError:
+        pass
     for uid in [int(u) for u in a.uids.split(",")]:
         for seed in [int(s) for s in a.seeds.split(",")]:
             if all((out / f"{m}_J{J}_u{uid}_s{seed}_f{fs}.json").exists()

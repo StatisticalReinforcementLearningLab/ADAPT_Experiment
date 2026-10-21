@@ -31,6 +31,10 @@ d3rlpy_logs/
 tensorboard_logs/
 .ste_*/
 .pycache-check/
+.pytensor_compiledir/
+.pytest_cache/
+.pipeline_*.log
+pf_cmp2_log_*.txt
 
 # Generated figures and binary artifacts
 *.npz
@@ -47,6 +51,13 @@ df_fit_11week.csv
 **/df_fit_11week.csv
 df_fit.csv
 df_merged.csv
+week1_cae_inputs.csv
+docs/**/*.csv
+env_para_*/df_*.csv
+results*/
+archive/results/
+archive/backups/
+analysis/figures/out/
 
 # Local notes and exploratory notebooks (kept on disk, not published)
 CODE_REVIEW*.md

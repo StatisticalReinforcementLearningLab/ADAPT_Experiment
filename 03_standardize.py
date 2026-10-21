@@ -13,7 +13,7 @@
 # key as log1p.
 # Also writes ``week1_cae_inputs.csv`` (week-1 fourSC and anticipated-affect
 # EWMAs on this same scale) next to ``df_fit.csv``, for the CAE baseline in
-# script 5. Next: ``4b_perceived_utility_bayes.py``.
+# script 5. Next: ``06_fit_pu.py``.
 
 # 0. Setup
 

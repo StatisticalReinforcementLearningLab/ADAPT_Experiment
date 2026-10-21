@@ -26,7 +26,7 @@ import numpy as np
 
 
 PROJECT_ROOT = Path(
-    os.getenv("ADAPR_PROJECT_ROOT", str(Path(__file__).resolve().parent))
+    os.getenv("ADAPR_PROJECT_ROOT", str(Path(__file__).resolve().parents[1]))
 ).expanduser().resolve()
 
 DEFAULT_PARAMS_DIR = PROJECT_ROOT / "env_para_vanilla"

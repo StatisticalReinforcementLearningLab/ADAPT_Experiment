@@ -5,8 +5,8 @@
 # Cohort rules (83-day completers, minus the high-CAE ceiling) are the
 # constants in the setup cell below. Low wear, low FourSC, missing weekly or
 # daily surveys, and zero CAE weeks are all retained (no-CAE users get a
-# model-imputed baseline CAE in 5_fit_vanilla_testbed.py).
-# Next: `2_combine_data_frame.py`.
+# model-imputed baseline CAE in 07_fit_testbed.py).
+# Next: `02_combine.py`.
 
 # 0. Setup
 
@@ -1006,7 +1006,7 @@ def _weekly_cae_ceiling_stats(df_weekly_filled):
     """Per-user min and week-1 ``CAE_avg`` on the 12 filled weekly slots.
 
     ``CAE_avg`` is the row mean of CAE-1..12, after recoding invalid 0s to 1
-    (same as ``2_combine_data_frame._correct_one_to_seven_zeros``). NaN weeks
+    (same as ``02_combine._correct_one_to_seven_zeros``). NaN weeks
     are ignored, so a missing week 1 still flags the user if every observed
     week is ≥ ``MIN_WEEKLY_CAE_THRESHOLD``.
     """
@@ -1194,7 +1194,7 @@ audit_wearable_step_quality = audit_analysis_sample_exclusions
 
 
 # History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
-# derived_covariates.py and added in 2_combine_data_frame.py.
+# derived_covariates.py and added in 02_combine.py.
 
 
 # add day numbers as well:
@@ -1775,7 +1775,7 @@ df_daily_pageview['YesterdayPageviewCount'] = (
 )
 
 # History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
-# derived_covariates.py and added in 2_combine_data_frame.py.
+# derived_covariates.py and added in 02_combine.py.
 
 # get tomorrow's pageview count
 # df_daily_pageview['TomorrowPageviewCount'] = (
@@ -1857,7 +1857,7 @@ df_hourly_pageview = df_hourly_pageview.sort_values(
     kind='mergesort',
 )
 # History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
-# derived_covariates.py and added in 2_combine_data_frame.py.
+# derived_covariates.py and added in 02_combine.py.
 
 # save the dataframe
 df_hourly_pageview.to_csv(folder / 'hourly_pageview.csv', index=False)
@@ -2135,7 +2135,7 @@ for n in range(len(complete_participant_ids)):
 df_gif_all = pd.DataFrame(df_gif_all)
 
 # History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
-# derived_covariates.py and added in 2_combine_data_frame.py.
+# derived_covariates.py and added in 02_combine.py.
 df_gif_all = df_gif_all.sort_values(['ParticipantIdentifier', 'Date', 'DecisionTime'], kind='mergesort')
 
 print(df_gif_all)
@@ -2426,7 +2426,7 @@ for participant_id in complete_participant_ids:
 df_missing_days = pd.DataFrame(missing_days_list)
 
 # History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
-# derived_covariates.py and added in 2_combine_data_frame.py.
+# derived_covariates.py and added in 02_combine.py.
 
 # add a column of next day wearing
 # df_missing_days['nextday_wearing'] = df_missing_days['DayWearing'].shift(-1)
@@ -2803,7 +2803,7 @@ wear_day = wear_day.merge(
 )
 
 # History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
-# derived_covariates.py and added in 2_combine_data_frame.py.
+# derived_covariates.py and added in 02_combine.py.
 
 # save the next morning wearing data
 wear_day.to_csv(folder/ 'wear_day.csv', index=False)
@@ -2907,7 +2907,7 @@ for participant_id in complete_participant_ids:
 df_hourly_step_counts = pd.DataFrame(hourly_step_counts)
 
 # History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
-# derived_covariates.py and added in 2_combine_data_frame.py.
+# derived_covariates.py and added in 02_combine.py.
 df_hourly_step_counts = df_hourly_step_counts.sort_values(
     ["ParticipantIdentifier", "DecisionTime", "Date"],
     kind="mergesort",
@@ -2987,7 +2987,7 @@ for participant_id in complete_participant_ids:
 df_today_step_counts = pd.DataFrame(today_step_counts)
 
 # History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
-# derived_covariates.py and added in 2_combine_data_frame.py.
+# derived_covariates.py and added in 02_combine.py.
 
 #print ratio of wearing == 1 but valid_sc !=0
 print(len(df_today_step_counts[df_today_step_counts['TodayStepCount'] > 0]) / len(df_today_step_counts))
@@ -3047,7 +3047,7 @@ for participant_id in complete_participant_ids:
 df_prior_2hours_step_counts = pd.DataFrame(prior_2hours_step_counts)
 
 # History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
-# derived_covariates.py and added in 2_combine_data_frame.py.
+# derived_covariates.py and added in 02_combine.py.
 df_prior_2hours_step_counts = df_prior_2hours_step_counts.sort_values(
     ["ParticipantIdentifier", "DecisionTime", "Date"],
     kind="mergesort",

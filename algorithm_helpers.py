@@ -871,7 +871,7 @@ def clip_prob(pi_hat, epsilon_0):
 def weekly_pv_sum_for_ew(slot_pv, *, shift=None, scale=None, zero_count=None):
     """Weekly pageview summary for E_w.
 
-    Matches ``4_perceived_utility.build_user_blocks``:
+    Matches ``06_fit_pu.build_user_blocks``:
 
     1. Each of the 14 decision slots (7 days × 2 times) has a 4-hour-window
        pageview count. Script 3 keeps the raw count in
@@ -914,7 +914,7 @@ def apply_pooled_coefs(coefs, E_lag, PV_sum, FW_sum, PJ_sum, J_close, half_J_clo
     if "E_lag" not in coefs:
         raise KeyError(
             "Ew_pooled_linear_coefs.json is missing E_lag (pre-filter formula). "
-            "Re-run 6_est_Ew_weights.py."
+            "Re-run 08_est_ew_weights.py."
         )
     return float(
         float(coefs.get("intercept", 0.0))
@@ -2115,7 +2115,7 @@ def _mask_mediators_for_slot(M_Y, M_E, d, t):
 def _within_week_ewma(values, gamma=None):
     """Normalized discounted average over a chronological within-week sequence.
 
-    Same formula as ``1_data_extraction._ewm_prior_rows``. ``gamma=None``
+    Same formula as ``01_extract_data._ewm_prior_rows``. ``gamma=None``
     (default) derives the decay from the calendar length of ``values``
     (:func:`ewm_utils.gamma_from_n`) — e.g. the 12-slot fourSC stream and the
     6-day antic stream get different-but-comparable decay envelopes. NaNs

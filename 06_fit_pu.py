@@ -2,7 +2,7 @@
 
 Fits the perceived-utility (PU) process of the testbed jointly across MRT
 participants by NUTS and writes the same output files as the earlier
-penalized-likelihood script ``4_perceived_utility.py``, so the downstream
+penalized-likelihood script ``archive/superseded/4_perceived_utility.py``, so the downstream
 scripts (5, 5b, 6, ``vani_env``) are unchanged. This script does not import
 script 4.
 
@@ -75,11 +75,11 @@ Outputs (in ``env_para_vanilla/``)
 
 Usage::
 
-    ADAPR_COMBINED_DIR=... python 4b_perceived_utility_bayes.py \
+    ADAPR_COMBINED_DIR=... python 06_fit_pu.py \
         [--chains 4 --cores 4 --tune 2000 --draws 1000 --target-accept 0.95 --max-treedepth 12] \
         [--users 13,18,22] [--no-write] [--diag-dir DIR]
 
-Next: ``5_fit_vanilla_testbed.py``.
+Next: ``07_fit_testbed.py``.
 """
 from __future__ import annotations
 

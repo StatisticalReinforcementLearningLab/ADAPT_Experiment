@@ -1,7 +1,7 @@
 """Derived covariates shared by the data pipeline and the simulator.
 
 Every history summary used by the testbed models is defined here once:
-``2_combine_data_frame.py`` calls :func:`add_derived_covariates` on the MRT
+``02_combine.py`` calls :func:`add_derived_covariates` on the MRT
 panel, and the simulator computes the same quantities from its generated
 series with the same primitives (:func:`prior_ewma`, :func:`prior_ewma_masked`).
 A fitted coefficient therefore always multiplies a covariate that the

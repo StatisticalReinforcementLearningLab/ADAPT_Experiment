@@ -923,7 +923,7 @@ def scale_params(
             if key not in out:
                 raise KeyError(
                     f"{key!r} missing from participant params -- run "
-                    f"5_fit_vanilla_testbed.py before tuning."
+                    f"07_fit_testbed.py before tuning."
                 )
             values = np.asarray(out[key], dtype=float).ravel().copy()
             names = _names_for(key, out)
@@ -1669,7 +1669,7 @@ def load_user_ids(params_dir: Path) -> list[int]:
 
 
 def require_fitted_blocks(params_dir: Path, user_ids: Sequence[int]) -> None:
-    """Fail early (and legibly) if 5_fit_vanilla_testbed.py has not been re-run."""
+    """Fail early (and legibly) if 07_fit_testbed.py has not been re-run."""
     needed = ("theta_CAE", "theta_fourSC", "theta_antic", "theta_ws_interaction")
     uid = user_ids[0]
     with open(params_dir / f"params_env_{uid}.json", encoding="utf-8") as f:
@@ -1678,8 +1678,8 @@ def require_fitted_blocks(params_dir: Path, user_ids: Sequence[int]) -> None:
     if missing:
         raise SystemExit(
             f"{params_dir}/params_env_{uid}.json is missing {missing}.\n"
-            "These blocks come from 5_fit_vanilla_testbed.py; run scripts 5 and 6 "
-            "after 4_perceived_utility.py before tuning."
+            "These blocks come from 07_fit_testbed.py; run scripts 5 and 6 "
+            "after 06_fit_pu.py before tuning."
         )
 
 

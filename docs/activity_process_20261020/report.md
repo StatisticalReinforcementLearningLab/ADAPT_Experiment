@@ -270,7 +270,7 @@ the normalized covariate stays in [−1, 1].
 `env_para_vanilla/generator_calibration.json`, key `activity_process`. Existing `dropout_*` keys are unchanged.
 Model 1 coefficients are intercept, week, act7, prior_gap. Model 2 stores c0, c1, c2, μ, α.
 
-The local 4b run on 2026-10-19 (`python 4b_perceived_utility_bayes.py --chains 4 --cores 4 --tune 2000 --draws 3000 --target-accept 0.95`, finished 21:12) predates the active-day filter and is not used. `env_para_vanilla/` was restored to commit `65a9fed`, plus the `activity_process` block.
+The local 4b run on 2026-10-19 (`python 06_fit_pu.py --chains 4 --cores 4 --tune 2000 --draws 3000 --target-accept 0.95`, finished 21:12) predates the active-day filter and is not used. `env_para_vanilla/` was restored to commit `65a9fed`, plus the `activity_process` block.
 
 ## Simulator check
 

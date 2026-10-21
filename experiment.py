@@ -50,7 +50,7 @@ def _ewm_prior_gamma_last(
 ):
     """EWM over prior ≤window values (excludes current).
 
-    Same normalized discount as ``1_data_extraction._ewm_prior_rows``.
+    Same normalized discount as ``01_extract_data._ewm_prior_rows``.
     ``gamma=None`` (default) derives the decay from the window length
     (:func:`ewm_utils.gamma_from_n`), so an early partial window (e.g. 4 of
     7 days) decays differently than a full one. Non-finite entries are
@@ -538,12 +538,12 @@ class OnlineEnv:
         self._Iw_per_week = np.zeros(self.nweek, dtype=int)
 
         # Pooled linear coefficients for the agent-visible E_w_hat approximation
-        # (fitted offline by ``6_est_Ew_weights.py``).
+        # (fitted offline by ``08_est_ew_weights.py``).
         try:
             self._ew_coefs = load_pooled_coefs(work_dir=self.params_dir)
         except FileNotFoundError as exc:
             raise RuntimeError(
-                "Ew_pooled_linear_coefs.json missing; run 6_est_Ew_weights.py first."
+                "Ew_pooled_linear_coefs.json missing; run 08_est_ew_weights.py first."
             ) from exc
 
         # Approximated E_w available to the agent at the start of each week.

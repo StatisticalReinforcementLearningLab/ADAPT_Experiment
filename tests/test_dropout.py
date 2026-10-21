@@ -136,7 +136,7 @@ def test_simulator_inactivity_uses_standardized_pageview_zero():
 
 
 def test_pu_transition_denominator_excludes_post_dropout_days():
-    path = Path(__file__).resolve().parents[1] / "4b_perceived_utility_bayes.py"
+    path = Path(__file__).resolve().parents[1] / "06_fit_pu.py"
     spec = importlib.util.spec_from_file_location("pu_bayes_dropout_test", path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -183,7 +183,7 @@ def test_pu_transition_denominator_excludes_post_dropout_days():
 
 
 def test_activity_filter_keeps_weekly_means_and_drops_inactive_emissions():
-    path = Path(__file__).resolve().parents[1] / "4b_perceived_utility_bayes.py"
+    path = Path(__file__).resolve().parents[1] / "06_fit_pu.py"
     spec = importlib.util.spec_from_file_location("pu_bayes_activity_test", path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None

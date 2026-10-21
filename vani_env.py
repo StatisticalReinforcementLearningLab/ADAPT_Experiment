@@ -124,7 +124,7 @@ PARAMS_DIR = (
 ).expanduser().resolve()
 
 # Latent E_w support: script-4 quadrature and the simulator clip share this
-# interval. Change it here only (``4_perceived_utility`` imports these names).
+# interval. Change it here only (``06_fit_pu`` imports these names).
 E_QUAD_LO = -4.0
 E_QUAD_HI = 4.0
 # Fit uses n_weeks=11 so weeks 1..11 map to [-1, 1]. Generation uses the
@@ -167,7 +167,7 @@ def _load_json(path: Path):
 def load_CAE_norm_params(params_dir=PARAMS_DIR):
     """Return ``(shift, scale)`` used to z-score raw weekly CAE into ``CAE_avg_norm``.
 
-    Standardization (``3_standardization.py``):
+    Standardization (``03_standardize.py``):
         ``CAE_avg_norm = (CAE_avg - shift) / scale``.
     Inverse (raw level): ``CAE_avg = shift + scale * CAE_avg_norm``.
     """
@@ -322,7 +322,7 @@ THETA_CAE_SHORT_AVG_NAMES = [
     "CAE_avg",
 ]
 
-# Design sizes (``5_fit_vanilla_testbed.py``); no 7-day salience-interaction covariate.
+# Design sizes (``07_fit_testbed.py``); no 7-day salience-interaction covariate.
 # The environment uses the full fitted fourSC model, including the
 # ``seven_day_pageview_count`` and ``anticipated_affect_yesterday`` predictors
 # (and their WalkingSuggestion interactions) — these are NOT trimmed away.
@@ -410,7 +410,7 @@ def _validate_json_names(
     if len(got) in legacy_lengths:
         return
     raise ValueError(
-        f"{key}: fitted coefficient names do not match 5_fit_vanilla_testbed.py. "
+        f"{key}: fitted coefficient names do not match 07_fit_testbed.py. "
         f"Expected {list(expected)!r}, got {got!r}."
     )
 
@@ -498,7 +498,7 @@ def assert_complete_week_slots(
 def within_week_ewma(values, gamma=None) -> float:
     """Normalized discounted average over a chronological sequence.
 
-    Same formula as ``1_data_extraction._ewm_prior_rows`` / ``ewm_utils.ewma_gamma``.
+    Same formula as ``01_extract_data._ewm_prior_rows`` / ``ewm_utils.ewma_gamma``.
     ``gamma=None`` (default) derives the decay from the calendar length of
     ``values`` (:func:`ewm_utils.gamma_from_n`), so a 14-slot fourSC week and a
     7-day antic week get different-but-comparable decay envelopes. NaNs keep
@@ -727,7 +727,7 @@ def load_week1_cae_inputs(path) -> dict:
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(
-            f"Missing {path}. 3_standardization.py writes week1_cae_inputs.csv "
+            f"Missing {path}. 03_standardize.py writes week1_cae_inputs.csv "
             "next to df_fit.csv."
         )
     frame = pd.read_csv(path)
@@ -2006,7 +2006,7 @@ class Env:
     def gen_antic_mean(self, s, ws_morning, ws_afternoon):
         """
         Daily ridge design (morning row): ``P_ANTIC`` columns — matches
-        ``5_fit_vanilla_testbed`` ``anticipated_affect_cond_day``
+        ``07_fit_testbed`` ``anticipated_affect_cond_day``
         (no ``today_step_count`` / ``planning_prompt``; includes
         ``perceivedUtilityLastWeek`` and ``recent_burden`` mains and
         AM/PM interactions). Uses the prior 7-day active fraction, not
@@ -2155,7 +2155,7 @@ class Env:
         """Weekly PV/FW/PJ averages for the E_w transition.
 
         Fixed denominators: ``nansum(pv)/14``, ``nansum(FW|PJ)/7``. NaN
-        slots contribute 0, matching ``4_perceived_utility.build_user_blocks``.
+        slots contribute 0, matching ``06_fit_pu.build_user_blocks``.
         For FW that means a missing wear flag is treated as not wearing.
         """
         pw = np.asarray(pw_wk, dtype=float).ravel()
@@ -2228,7 +2228,7 @@ class Env:
     #
     # ``theta_ml_U1`` / ``theta_ml_U2`` were fit on the *normalized* scale
     #   Exp-tool-i_norm = 2 * (Exp-tool-i - 1) / 6 - 1
-    # (see ``3_standardization.py``)
+    # (see ``03_standardize.py``)
     # so we sample + clip in normalized space (``limits_exp{1,2}``) and then
     # transform back to the original integer 1..7 Likert scale via
     #   raw = round(3 * norm + 4), clipped to [1, 7].
@@ -2583,7 +2583,7 @@ def make_initial_state(df_fit_11week_csv=None, participant_id=None):
         s["expTool2"] = _float_csv_cell(row, "Exp-tool-2", default=float("nan"))
     # Baseline CAE (study week 1). Observed -> the panel value. Missing (15 of
     # 42 users in the 2026-10-14 extract, plus the no-CAE users) -> the value
-    # imputed from the fitted CAE model by 5_fit_vanilla_testbed.py and stored
+    # imputed from the fitted CAE model by 07_fit_testbed.py and stored
     # as ``cae_baseline_norm`` in params_env_{uid}.json next to the panel.
     # Before 2026-10-17 a missing baseline silently became 0.0.
     _obs_cae = _float_csv_cell(
@@ -2597,7 +2597,7 @@ def make_initial_state(df_fit_11week_csv=None, participant_id=None):
             warnings.warn(
                 f"Participant {participant_id}: no week-1 CAE in {df_path} and no "
                 "'cae_baseline_norm' in its params_env json (rerun "
-                "5_fit_vanilla_testbed.py); using 0.0 (population mean) as before.",
+                "07_fit_testbed.py); using 0.0 (population mean) as before.",
                 RuntimeWarning, stacklevel=2,
             )
             s["caeAverageLastWeek"], s["caeBaselineSource"] = 0.0, "fallback_zero"

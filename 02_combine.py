@@ -1,9 +1,9 @@
 # Merge extraction CSVs into one decision-time panel
 #
-# Reads the tables from `1_data_extraction.py`, builds two rows per day
+# Reads the tables from `01_extract_data.py`, builds two rows per day
 # (morning / afternoon), merges surveys, wear, page views, and interventions,
 # drops burn-in and weeks 0/13, and writes `df_merged.csv`.
-# Next: `3_standardization.py`.
+# Next: `03_standardize.py`.
 
 # 0. Setup
 

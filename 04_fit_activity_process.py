@@ -8,8 +8,8 @@ refit scripts 1-5.
 Run from the repository root, with ``ADAPR_COMBINED_DIR`` set to the folder
 that holds the script-1 tables::
 
-    python scripts/fit_activity_process.py
-    python scripts/fit_activity_process.py --out docs/activity_process_20261021
+    python 04_fit_activity_process.py
+    python 04_fit_activity_process.py --out docs/activity_process_20261021
 
 ``ADAPR_ACTIVITY_DAILY`` overrides the daily csv. ``participant_dropout.csv``
 is read from the same directory. Both must exist. Figures and ``report.md``
@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib_adapr")
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -122,7 +122,7 @@ def week_number(day: int) -> int:
 
 
 def protocol_week(study_day: int, start_dow: int) -> int:
-    """Mon–Sun study week, matching ``2_combine_data_frame.py``.
+    """Mon–Sun study week, matching ``02_combine.py``.
 
     ``start_dow`` is the weekday of study day 1 (Monday 0, Sunday 6). A Sunday
     start is week 0; week 1 begins the next Monday.
@@ -1353,7 +1353,7 @@ def write_report(payload: dict) -> None:
     a("`env_para_vanilla/generator_calibration.json`, key `activity_process`. Existing `dropout_*` keys are unchanged.")
     a("Model 1 coefficients are intercept, week, act7, prior_gap. Model 2 stores c0, c1, c2, μ, α.")
     a("")
-    a("The local 4b run on 2026-10-19 (`python 4b_perceived_utility_bayes.py --chains 4 --cores 4 --tune 2000 --draws 3000 --target-accept 0.95`, finished 21:12) predates the active-day filter and is not used. `env_para_vanilla/` was restored to commit `65a9fed`, plus the `activity_process` block.")
+    a("The local 4b run on 2026-10-19 (`python 06_fit_pu.py --chains 4 --cores 4 --tune 2000 --draws 3000 --target-accept 0.95`, finished 21:12) predates the active-day filter and is not used. `env_para_vanilla/` was restored to commit `65a9fed`, plus the `activity_process` block.")
     a("")
     lines.extend(simulator_check_lines())
     OUT_DIR.mkdir(parents=True, exist_ok=True)

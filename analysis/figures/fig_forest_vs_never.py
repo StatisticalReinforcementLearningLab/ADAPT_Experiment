@@ -6,11 +6,11 @@ Three environments as small multiples (dot + 95% CI). Does not modify
 
 Outputs
 -------
-figures/forest_delta_vs_never.pdf
-figures/forest_delta_vs_never.png
-figures/forest_delta_vs_never_no_always.pdf
-figures/forest_delta_vs_never_no_always.png
-figures/fig_forest_vs_never.csv
+analysis/figures/out/forest_delta_vs_never.pdf
+analysis/figures/out/forest_delta_vs_never.png
+analysis/figures/out/forest_delta_vs_never_no_always.pdf
+analysis/figures/out/forest_delta_vs_never_no_always.png
+analysis/figures/out/fig_forest_vs_never.csv
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(
-    os.environ.get("ADAPR_PROJECT_ROOT", Path(__file__).resolve().parents[1])
+    os.environ.get("ADAPR_PROJECT_ROOT", Path(__file__).resolve().parents[2])
 ).expanduser().resolve()
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -75,7 +75,7 @@ BASELINE_ARMS = frozenset({"random_send", "always_send"})
 FIGURE_SIZE = (7.0, 3.4)
 FONT_SIZE = 8
 PANEL_LABEL_SIZE = 7
-OUT_DIR = ROOT / "figures"
+OUT_DIR = ROOT / "analysis" / "figures" / "out"
 FIG_STEM = "forest_delta_vs_never"
 CSV_NAME = "fig_forest_vs_never.csv"
 
