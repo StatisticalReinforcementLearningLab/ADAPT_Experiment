@@ -98,7 +98,7 @@ EXCLUDE_IF_INSUFFICIENT_FOURSC = False
 # ---------------------------------------------------------------------------
 # No weekly check-in, no daily survey, and zero CAE weeks are all retained
 # (2026-10-17: no-CAE users 112, 251, 257, 388 added back; their baseline
-# CAE is imputed from the fitted CAE model in script 5). High-CAE ceiling
+# CAE is imputed from the fitted CAE model in `07_fit_testbed.py`). High-CAE ceiling
 # below still removes people.
 EXCLUDE_IF_ALL_WEEKLY_SURVEYS_MISSING = False
 EXCLUDE_IF_ALL_DAILY_SURVEYS_MISSING = False
@@ -185,28 +185,6 @@ for _off in tz_lookup["utcOffset"].dropna().astype(str).unique():
     _td = _offset_to_timedelta(_off)
     if not pd.isna(_td):
         _offset_cache[_off] = _td
-
-
-def _convert_one_utc_to_local(ts_utc, tz_name, utc_offset):
-    if pd.isna(ts_utc):
-        return pd.NaT
-
-    ts_utc = pd.to_datetime(ts_utc, errors="coerce", utc=True)
-    if pd.isna(ts_utc):
-        return pd.NaT
-
-    # Preferred: IANA timezone (handles DST correctly)
-    if pd.notna(tz_name) and str(tz_name).strip() != "":
-        try:
-            return ts_utc.tz_convert(str(tz_name)).tz_localize(None)
-        except Exception:
-            pass
-
-    # Fallback: static UTC offset (no DST logic)
-    delta = _offset_cache.get(str(utc_offset), _offset_to_timedelta(utc_offset))
-    if pd.isna(delta):
-        return ts_utc.tz_convert(DEFAULT_IANA_TIMEZONE).tz_localize(None)
-    return (ts_utc + delta).tz_localize(None)
 
 
 def _as_calendar_dates(s):
@@ -459,7 +437,6 @@ surveyquestionresults = surveyquestionresults[~surveyquestionresults.Participant
 print(surveyquestionresults.head())
 # 1c. Active-phase span (daily EOD survey tasks)
 
-# survey_task_active = surveytask[surveytask.surveyname == 'MRT - Salience - Message Display']
 survey_task_active = surveytask[
     (surveytask.SurveyName == 'MRT - Daily End of day survey and Planning Exercise')
     & surveytask['date'].notna()
@@ -477,10 +454,6 @@ summary_surveytask = (
 summary_surveytask.reset_index(inplace=True)
 summary_surveytask.rename(columns={'ParticipantIdentifier': 'ParticipantIdentifier'}, inplace=True)
 
-
-# correct for missing day 0 for participant 22
-# summary_surveytask.loc[summary_surveytask['ParticipantIdentifier'] == 22, 'date_min'] = pd.to_datetime('2025-06-29').date()
-# summary_surveytask['date_min'] = pd.to_datetime(summary_surveytask['date_min']).dt.normalize()
 
 print(summary_surveytask)
 
@@ -921,14 +894,6 @@ def fill_daily_84(
     df1 = df1.copy()
     df1[date_col] = pd.to_datetime(df1[date_col]).dt.normalize()
 
-    # df2 = df2.copy()
-    # df2[date_col] = pd.to_datetime(df2[date_col]).dt.normalize()
-
-    # anchor_lookup = (
-    #     df2.groupby(id_col)[date_col]
-    #        .min()  # earliest task date per participant
-    # )
-
     # value columns to carry through
     value_cols = [c for c in df1.columns if c not in [id_col, date_col]]
 
@@ -1190,12 +1155,6 @@ def audit_analysis_sample_exclusions(
     return audit_df, exclude_df
 
 
-# Backward-compatible alias
-audit_wearable_step_quality = audit_analysis_sample_exclusions
-
-
-
-
 # History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
 # derived_covariates.py and added in 02_combine.py.
 
@@ -1223,8 +1182,6 @@ df_daily_filled.to_csv(folder / "df_daily_filled.csv", index=False)
 # - this is useful for filling in the walking suggestions delivery time!
 
 # get baseline surveykey
-# survey_key_baseline = surveytask[surveytask.surveyname == 'MRT - Personalize HeartSteps'].surveykey.values[0]
-
 # get wakeup and bedtime for each user
 # key fields: resultidentifier: Wakeday Wakeup, Wakeday Bedtime, Weekend Wakeup, Weekend Bedtime
 weekday_wakeup_all = []
@@ -1780,12 +1737,6 @@ df_daily_pageview['YesterdayPageviewCount'] = (
 # History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
 # derived_covariates.py and added in 02_combine.py.
 
-# get tomorrow's pageview count
-# df_daily_pageview['TomorrowPageviewCount'] = (
-#     df_daily_pageview['DailyPageviewCount'].shift(-1)
-# )
-
-
 df_daily_pageview.to_csv(os.path.join(folder, 'df_daily_pageview.csv'), index=False)
 
 
@@ -1912,9 +1863,6 @@ end_rows      = push_sent.loc[push_sent['Properties.NotificationIdentifier'].str
 # delete repeated rows
 gif_rows = gif_rows.drop_duplicates()
 end_rows = end_rows.drop_duplicates()
-
-
-gif_rows_open      = push_open.loc[push_open['Properties.NotificationIdentifier'].str.startswith('gif', na=False)].copy()
 
 
 # check the date range of the end of day survey for each participant
@@ -2051,23 +1999,16 @@ for n in range(len(complete_participant_ids)):
     participant_id = complete_participant_ids[n]
     gif_rows_participant = gif_rows.loc[gif_rows['ParticipantIdentifier'] == participant_id].copy()
     print(len(gif_rows_participant))
-    gif_rows_participant['Timestamp'] = pd.to_datetime(gif_rows_participant['Timestamp'])    
-    # gif_rows_open_participant = gif_rows_open.loc[gif_rows_open['ParticipantIdentifier'] == participant_id].copy()
-    # gif_rows_open_participant['Timestamp'] = pd.to_datetime(gif_rows_open_participant['Timestamp'])
+    gif_rows_participant['Timestamp'] = pd.to_datetime(gif_rows_participant['Timestamp'])
     tmp_participant = tmp.loc[tmp['ParticipantIdentifier'] == participant_id].copy()
 
     # extract the date and time from the timestamp
     gif_rows_participant['date'] = gif_rows_participant['Timestamp'].dt.date
     gif_rows_participant['time'] = gif_rows_participant['Timestamp'].dt.time
-    # gif_rows_open_participant['date'] = gif_rows_open_participant['Timestamp'].dt.date
-    # gif_rows_open_participant['time'] = gif_rows_open_participant['Timestamp'].dt.time
 
     min_date = summary_surveytask.loc[summary_surveytask['ParticipantIdentifier'] == participant_id, 'date_min'].iloc[0]
     min_date = pd.to_datetime(min_date).date()
-    
-    # max_date = max_date_list[n].date()
     date_range_length = 85
-    # date_range_length_list[n]
 
     # read wakeup and bedtime data for the participant
     df_wakeup_bedtime_participant = df_wakeup_bedtime.loc[df_wakeup_bedtime['ParticipantIdentifier'] == participant_id].copy()
@@ -2083,17 +2024,7 @@ for n in range(len(complete_participant_ids)):
 
         # search for date and time in gif_rows_participant
         gif_row = gif_rows_participant.loc[(gif_rows_participant['date'] == date)].copy()
-        # gif_row_open = gif_rows_open_participant.loc[(gif_rows_open_participant['date'] == date)]
         tmp_par_date = tmp_participant.loc[(tmp_participant['date'] == date)].copy()
-
-        
-        # valid_count = [
-        #     df_hourly_pageview.loc[(df_hourly_pageview['participantidentifier'] == participant_id) &
-        #                         (df_hourly_pageview['date'] == date) &
-        #                         (df_hourly_pageview['decision_time'] == dt),
-        #                         'valid_count'].iloc[0]
-        #     for dt in (0, 1)
-        # ]
 
         displays = tmp_par_date["datetime_local"].values
         gif_row = gif_row.sort_values("Timestamp")
@@ -2431,9 +2362,6 @@ df_missing_days = pd.DataFrame(missing_days_list)
 # History summaries (7-day EWMAs, lags, yesterday proxies) are defined in
 # derived_covariates.py and added in 02_combine.py.
 
-# add a column of next day wearing
-# df_missing_days['nextday_wearing'] = df_missing_days['DayWearing'].shift(-1)
-
 df_missing_days.to_csv(os.path.join(folder, 'missing_days.csv'), index=False)
 
 
@@ -2578,17 +2506,6 @@ df_2hours.to_csv(os.path.join(folder, 'missing_2hours.csv'), index=False)
 
 # generate a 2x2 table of wearing in the morning (wakeup-1 hour to wakeup+1 hour)
 # vs wearing in the rest of that day (after wakeup+1 hour to bedtime)
-
-def _to_time(x):
-    if pd.isna(x):
-        return None
-    if isinstance(x, pd.Timestamp):
-        return x.time()
-    if hasattr(x, 'hour') and hasattr(x, 'minute'):
-        return x
-    t = pd.to_datetime(str(x), errors='coerce')
-    return None if pd.isna(t) else t.time()
-
 
 def _participant_mask(series, participant_id):
     """Match participant IDs across int/float/str storage."""
@@ -2828,22 +2745,6 @@ for participant_id in complete_participant_ids:
         date = min_date + pd.Timedelta(days=i)
         
         wakeup_time, bedtime_time = resolve_schedule_for_date(df_wakeup_bedtime_participant, date)
-
-
-        # wake up set to floor
-        # anchor_date = pd.Timestamp('2000-01-01')  
-        # wakeup_floor = (
-        # pd.Timestamp.combine(anchor_date, wakeup_time)
-        # .floor('h')                       
-        # .time()
-        # )
-
-        # bedtime set to ceil
-        # bedtime_ceil = (
-        # pd.Timestamp.combine(anchor_date, bedtime_time)
-        # .ceil('h')                       
-        # .time()
-        # )
 
         wakeup_datetime, bedtime_datetime = _wake_bed_interval(
             date, wakeup_time, bedtime_time
@@ -3094,7 +2995,7 @@ else:
         f"participants "
         f"(keep wear<{MIN_DECISION_WINDOW_WEAR_SUM}, "
         f"FourSC<{MIN_FOURSC_NON_NAN}, and missing weekly or daily; "
-        f"drop CAE weeks<{MIN_CAE_WEEKS_PRESENT}; "
+        f"keep zero-CAE weeks; "
         f"drop min CAE≥{MIN_WEEKLY_CAE_THRESHOLD:g} or "
         f"week-1 CAE={WEEK1_CAE_CEILING:g}):"
     )
