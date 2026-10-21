@@ -616,7 +616,9 @@ def c1_from_week1_ewma(theta_CAE, foursc_ewma, antic_ewma) -> float:
 
     ``c_1 = intercept + beta_wk*week_norm(1) + beta_SC*fourSC_ewma
     + beta_AA*antic_ewma``. A non-finite EWMA returns NaN so
-    :func:`impute_baseline_cae` falls back to ``c_2``.
+    :func:`impute_baseline_cae` falls back to ``c_2``. That happens only
+    when week 1 has no rows, or a length :func:`cae_mediator_ewmas` rejects.
+    An all-missing mediator is already filled inside that function.
     """
     theta_CAE = np.asarray(theta_CAE, dtype=float).ravel()
     if theta_CAE.size < 5:
@@ -664,9 +666,11 @@ def week1_mediator_slots(dat_week1, std_params) -> tuple[np.ndarray, np.ndarray]
 def week1_cae_input_record(foursc, antic) -> dict:
     """One user's week-1 EWMA row.
 
-    A wrong slot or affect count is ``irregular=1`` and both EWMAs are NaN.
-    An all-missing mediator is not irregular; its EWMAs are NaN as well.
-    Neither case raises.
+    Calls :func:`cae_mediator_ewmas`, the same week-local mean fill used for
+    ``c_2``..``c_12``. An all-missing mediator is filled with 0, the
+    standardized centre, and both EWMAs stay finite. No week-1 rows leaves
+    both EWMAs NaN (``reason="no_rows"``). A length that function rejects is
+    ``irregular=1`` and also NaN. Neither case raises.
     """
     foursc = np.asarray(foursc, dtype=float).ravel()
     antic = np.asarray(antic, dtype=float).ravel()
@@ -679,13 +683,8 @@ def week1_cae_input_record(foursc, antic) -> dict:
         "n_antic": int(antic.size),
         "reason": "",
     }
-    if (
-        foursc.size == 0
-        or antic.size == 0
-        or not np.any(np.isfinite(foursc))
-        or not np.any(np.isfinite(antic))
-    ):
-        record["reason"] = "all_missing"
+    if foursc.size == 0 or antic.size == 0:
+        record["reason"] = "no_rows"
         return record
     try:
         foursc_e, antic_e = cae_mediator_ewmas(foursc, antic)
@@ -751,8 +750,8 @@ def week1_cae_drift(theta_CAE, foursc_wk, antic_wk) -> float:
     """Week-1 CAE intercept from study-week-1 mediator rows.
 
     Same value as :func:`c1_from_week1_ewma` on the EWMAs of those rows.
-    Returns NaN if a mediator is entirely missing or the slot count is not
-    one the EWMA accepts, so the caller can fall back to ``c_2``.
+    Returns NaN only when there are no rows, or the slot count is not one
+    :func:`cae_mediator_ewmas` accepts, so the caller can fall back to ``c_2``.
     """
     rec = week1_cae_input_record(foursc_wk, antic_wk)
     return c1_from_week1_ewma(theta_CAE, rec["foursc_ewma"], rec["antic_ewma"])
@@ -769,8 +768,8 @@ def impute_baseline_cae(
     ``y_w = c_w + a1*y_{w-1} + eps_w``. ``c_panel`` is
     ``[c_1, c_2, ..., c_12]`` and ``a1 = clip(theta_CAE[1], -0.95, 0.95)``.
     Initialize at the week-1 stationary mean ``m_1 = c_1/(1-a1)``. If
-    ``c_1`` is non-finite (a week-1 mediator was entirely missing), fall
-    back to ``m_1 = c_2/(1-a1)`` and suffix the source with ``_c2``.
+    ``c_1`` is non-finite (no week-1 rows), fall back to
+    ``m_1 = c_2/(1-a1)`` and suffix the source with ``_c2``.
 
     If the first observed full CAE is ``y_k``, propagate the mean to week k
     starting from ``m_1`` and using ``c_2..c_k``

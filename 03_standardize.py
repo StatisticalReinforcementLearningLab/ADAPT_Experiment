@@ -337,15 +337,17 @@ df_fit.to_csv(df_fit_path, index=False)
 print(f"Wrote {df_fit_path} ({len(df_fit)} rows)")
 
 # 7. Week-1 mediator EWMAs for the CAE baseline. Scales are the weeks 2-12
-# fit above. An irregular week is recorded and does not stop the script.
+# fit above. The EWMAs use cae_mediator_ewmas, including its week-mean fill
+# for an all-missing mediator. Only a user with no week-1 rows falls back
+# to c_2. An irregular length is recorded and does not stop the script.
 _week1 = df_merged.loc[pd.to_numeric(df_merged["week"], errors="coerce").eq(1)].copy()
 _week1 = mask_dropout_fit_outcomes(_week1)
 _week1_inputs = week1_cae_input_table(_week1, std_params)
 _week1_path = folder / "week1_cae_inputs.csv"
 _week1_inputs.to_csv(_week1_path, index=False)
 _irregular = _week1_inputs.loc[_week1_inputs["irregular"].eq(1), "ParticipantIdentifier"]
-_missing = _week1_inputs.loc[
-    _week1_inputs["reason"].eq("all_missing"), "ParticipantIdentifier"
+_no_rows = _week1_inputs.loc[
+    _week1_inputs["reason"].eq("no_rows"), "ParticipantIdentifier"
 ]
 print(f"Wrote {_week1_path} ({len(_week1_inputs)} users)")
 if len(_irregular):
@@ -353,8 +355,8 @@ if len(_irregular):
         "Week-1 CAE inputs irregular (c_2 fallback in script 5): "
         + ", ".join(str(int(u)) for u in _irregular)
     )
-if len(_missing):
+if len(_no_rows):
     print(
-        "Week-1 CAE inputs all-missing (c_2 fallback in script 5): "
-        + ", ".join(str(int(u)) for u in _missing)
+        "Week-1 CAE inputs have no rows (c_2 fallback in script 5): "
+        + ", ".join(str(int(u)) for u in _no_rows)
     )

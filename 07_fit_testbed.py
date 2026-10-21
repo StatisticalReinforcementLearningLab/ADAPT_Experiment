@@ -1194,8 +1194,9 @@ theta_fitbitwearing_list = []
 theta_eodcomplete_list = []
 cae_baseline_rows = []
 
-# Week-1 mediator EWMAs are written by 03_standardize.py. A missing file
-# is an error. An irregular or all-missing user falls back to c_2 and is logged.
+# Week-1 mediator EWMAs are written by 03_standardize.py with the same
+# cae_mediator_ewmas fill as c_2..c_12. A missing file is an error. A user
+# with no week-1 rows falls back to c_2 and is logged.
 _week1_path = folder / "week1_cae_inputs.csv"
 try:
     _week1_inputs = load_week1_cae_inputs(_week1_path)
@@ -1551,7 +1552,8 @@ for i, userid in enumerate(userid_all):
 
     # Exact baseline backcast from the first observed full CAE. c_2..c_12
     # are the week-varying panel intercepts. c_1 uses the week-1 EWMAs in
-    # week1_cae_inputs.csv. A missing or irregular row falls back to c_2.
+    # week1_cae_inputs.csv, from the same mediator function as c_2..c_12.
+    # No week-1 row falls back to c_2.
     _c_2_12 = (
         theta_CAE_mean[0]
         + theta_CAE_mean[2] * week_sw

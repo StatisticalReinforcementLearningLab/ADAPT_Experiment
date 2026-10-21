@@ -118,12 +118,35 @@ def test_week1_drift_uses_study_week_norm_and_ewma():
     np.testing.assert_allclose(got, expected, rtol=0.0, atol=1e-12)
 
 
-def test_week1_drift_nan_when_a_mediator_is_all_missing():
-    theta = np.array([0.0, 0.5, 0.1, 0.2, 0.3])
+def test_week1_drift_fills_an_all_missing_mediator_like_later_weeks():
+    theta = np.array([0.1, 0.5, 0.2, 0.3, 0.4])
     foursc = np.arange(14, dtype=float)
     antic_missing = np.full(14, np.nan)
-    assert np.isnan(week1_cae_drift(theta, foursc, antic_missing))
-    assert np.isnan(week1_cae_drift(theta, np.full(14, np.nan), foursc))
+    foursc_e, antic_e = cae_mediator_ewma_rows(foursc, antic_missing)
+    np.testing.assert_allclose(antic_e[0], 0.0, rtol=0.0, atol=0.0)
+    got = week1_cae_drift(theta, foursc, antic_missing)
+    expected = (
+        theta[0]
+        + theta[2] * study_week_norm(1)
+        + theta[3] * float(foursc_e[0])
+        + theta[4] * float(antic_e[0])
+    )
+    assert np.isfinite(got)
+    np.testing.assert_allclose(got, expected, rtol=0.0, atol=1e-12)
+    both_missing = week1_cae_input_record(np.full(14, np.nan), np.full(14, np.nan))
+    assert both_missing["irregular"] == 0
+    assert both_missing["reason"] == ""
+    assert np.isfinite(both_missing["foursc_ewma"])
+    assert np.isfinite(both_missing["antic_ewma"])
+
+
+def test_no_week1_rows_is_the_c2_fallback():
+    rec = week1_cae_input_record(np.array([]), np.array([]))
+    assert rec["reason"] == "no_rows"
+    assert rec["irregular"] == 0
+    assert np.isnan(rec["foursc_ewma"]) and np.isnan(rec["antic_ewma"])
+    theta = np.array([0.1, 0.5, 0.2, 0.3, 0.4])
+    assert np.isnan(c1_from_week1_ewma(theta, rec["foursc_ewma"], rec["antic_ewma"]))
 
 
 def test_missing_week1_inputs_file_is_an_error(tmp_path):
