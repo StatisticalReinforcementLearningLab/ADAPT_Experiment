@@ -12,8 +12,8 @@
 # convention; consumers treat a missing ``HourlyPageviewCount_zero_count``
 # key as log1p.
 # Also writes ``week1_cae_inputs.csv`` (week-1 fourSC and anticipated-affect
-# EWMAs on this same scale) next to ``df_fit.csv``, for the CAE baseline in
-# script 5. Next: ``06_fit_pu.py``.
+# EWMAs on this same scale) next to ``df_fit.csv``, for the CAE baseline
+# for ``07_fit_testbed.py``. Next: ``06_fit_pu.py``.
 
 # 0. Setup
 
@@ -41,8 +41,8 @@ work_folder = WORK_DIR
 DIGITS = 3
 
 # Fitting panel: MRT study weeks 2-12, renumbered 1-11 (77 days). Week 1 is
-# used only for lags and history summaries, which script 2 has already
-# computed on the full grid. Shared by scripts 4b and 5.
+# used only for lags and history summaries, which script 02 has already
+# computed on the full grid. Shared by scripts 06 and 07.
 FIRST_FIT_WEEK = 2
 DAY_RANGE = 77
 WEEK_RANGE = 11
@@ -327,7 +327,7 @@ df_fit = df_fit.sort_values(
     kind="mergesort",
 ).reset_index(drop=True)
 
-# Previous-slot lags were computed on the full grid in script 2
+# Previous-slot lags were computed on the full grid in ``02_combine.py``
 # (derived_covariates.py) and standardized above.
 
 df_fit_path = folder / "df_fit.csv"
@@ -350,11 +350,11 @@ _no_rows = _week1_inputs.loc[
 print(f"Wrote {_week1_path} ({len(_week1_inputs)} users)")
 if len(_irregular):
     print(
-        "Week-1 CAE inputs irregular (c_2 fallback in script 5): "
+        "Week-1 CAE inputs irregular (c_2 fallback in ``07_fit_testbed.py``): "
         + ", ".join(str(int(u)) for u in _irregular)
     )
 if len(_no_rows):
     print(
-        "Week-1 CAE inputs have no rows (c_2 fallback in script 5): "
+        "Week-1 CAE inputs have no rows (c_2 fallback in ``07_fit_testbed.py``): "
         + ", ".join(str(int(u)) for u in _no_rows)
     )
