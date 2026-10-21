@@ -12,7 +12,16 @@ from dropout_utils import (
     simulated_daily_inactivity,
     summarize_activity,
 )
-from scripts.dropout_check import _local_dates
+_dropout_check_path = (
+    Path(__file__).resolve().parents[1] / "archive" / "analyses" / "dropout_check.py"
+)
+_dropout_check = importlib.util.spec_from_file_location(
+    "dropout_check", _dropout_check_path
+)
+assert _dropout_check is not None and _dropout_check.loader is not None
+_dropout_check_mod = importlib.util.module_from_spec(_dropout_check)
+_dropout_check.loader.exec_module(_dropout_check_mod)
+_local_dates = _dropout_check_mod._local_dates
 from vani_env import mask_dropout_fit_outcomes
 
 

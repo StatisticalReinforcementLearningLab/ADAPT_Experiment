@@ -19,7 +19,11 @@ from pathlib import Path
 from functools import partial
 
 
-from activity_process import coefficients_from_record, simulate_activity_paths
+from activity_process import (
+    coefficients_from_record,
+    dropout_seed_sequence,
+    simulate_activity_paths,
+)
 from ewm_utils import ewma_gamma, gamma_from_n
 import derived_covariates as dc
 
@@ -302,15 +306,10 @@ class EpisodeDataset:
 # ──────────────────────────────────────────────────────────────────
 
 class OnlineEnv:
-    _DROPOUT_RNG_SALT = 771337
-
     @staticmethod
     def _dropout_seed_sequence(seed, uid) -> np.random.SeedSequence:
         """Dropout-stream seed. Includes the participant; the main episode RNG does not."""
-        dropout_seed = 0 if seed is None else int(seed)
-        return np.random.SeedSequence(
-            [dropout_seed, int(uid), OnlineEnv._DROPOUT_RNG_SALT]
-        )
+        return dropout_seed_sequence(seed, uid)
 
     def __init__(
         self, env, nweek=None, seed=None, start_dow=1,

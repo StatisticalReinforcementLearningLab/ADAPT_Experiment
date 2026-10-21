@@ -25,7 +25,16 @@ def week_norm_of(day: int, n_weeks: int) -> float:
     return float(study_week_norm(week_number(day), n_weeks=n_weeks))
 
 
-def _expit(eta: np.ndarray) -> np.ndarray:
+DROPOUT_RNG_SALT = 771337
+
+
+def dropout_seed_sequence(seed, uid) -> np.random.SeedSequence:
+    """Activity-path RNG. The main episode seed does not include the participant."""
+    dropout_seed = 0 if seed is None else int(seed)
+    return np.random.SeedSequence([dropout_seed, int(uid), DROPOUT_RNG_SALT])
+
+
+def expit(eta: np.ndarray) -> np.ndarray:
     eta = np.asarray(eta, dtype=float)
     out = np.empty(eta.shape, dtype=float)
     pos = eta >= 0
@@ -35,7 +44,7 @@ def _expit(eta: np.ndarray) -> np.ndarray:
     return out
 
 
-def _weibull_F(d: np.ndarray, mu: float, alpha: float) -> np.ndarray:
+def weibull_F(d: np.ndarray, mu: float, alpha: float) -> np.ndarray:
     d = np.asarray(d, dtype=float)
     out = np.zeros(d.shape, dtype=float)
     pos = d > 0
@@ -46,7 +55,7 @@ def _weibull_F(d: np.ndarray, mu: float, alpha: float) -> np.ndarray:
 def survival_uncured(d: np.ndarray, theta: np.ndarray, mu: float, alpha: float) -> np.ndarray:
     """S_u(d) = (exp(-theta F(d)) - exp(-theta)) / (1 - exp(-theta))."""
     pi = np.exp(-theta)
-    numer = np.exp(-theta * _weibull_F(d, mu, alpha)) - pi
+    numer = np.exp(-theta * weibull_F(d, mu, alpha)) - pi
     denom = np.maximum(1.0 - pi, 1e-15)
     return np.clip(numer / denom, 0.0, 1.0)
 
@@ -184,7 +193,7 @@ def simulate_activity_paths(
                     + coef[2] * act7
                     + coef[3] * prior[active_idx]
                 )
-                p_start = _expit(eta)
+                p_start = expit(eta)
             else:
                 p_start = np.full(len(active_idx), float(lambda_p))
             starters = active_idx[rng.random(len(active_idx)) < p_start]

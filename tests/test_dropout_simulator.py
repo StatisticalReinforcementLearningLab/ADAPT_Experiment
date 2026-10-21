@@ -15,7 +15,6 @@ import experiment
 
 ROOT = Path(__file__).resolve().parents[1]
 PARAMS = ROOT / "env_para_vanilla"
-DROPOUT_TABLE = ROOT / "docs" / "dropout_check_20261017" / "participant_dropout.csv"
 GOLDEN = ROOT / "tests" / "fixtures" / "dropout_hazard_zero_random_send.npz"
 
 
@@ -61,7 +60,16 @@ class _FreezeAgent:
 
 
 def test_calibration_formula_matches_hand_count():
-    table = pd.read_csv(DROPOUT_TABLE)
+    # 4 events at the observed days and 51 completed non-events:
+    # (8+57+61+62) + 51*71 = 3809. Incomplete windows are ignored.
+    # The participant extract is not in git.
+    dropout_days = [9, 58, 62, 63] + [np.nan] * 51
+    table = pd.DataFrame(
+        {
+            "window_complete": [True] * 55 + [False] * 9,
+            "dropout_day": dropout_days + [3] * 9,
+        }
+    )
     complete = table.loc[table["window_complete"].astype(bool)]
     dropout_day = pd.to_numeric(complete["dropout_day"], errors="coerce")
     event = dropout_day.notna() & dropout_day.le(71)

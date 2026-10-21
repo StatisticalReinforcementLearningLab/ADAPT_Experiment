@@ -31,6 +31,15 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from activity_process import (
+    dropout_seed_sequence,
+    expit,
+    hazard_uncured,
+    survival_uncured,
+    week_norm_of,
+    weibull_F,
+)
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -116,11 +125,6 @@ def configure_paths(out: str | None) -> None:
     OUT_DIR = resolve_output_dir(out)
 
 
-def week_number(day: int) -> int:
-    """Protocol week of a Monday-start episode. Day 1 is Monday of week 1."""
-    return int(math.ceil(day / 7.0))
-
-
 def protocol_week(study_day: int, start_dow: int) -> int:
     """Mon–Sun study week, matching ``02_combine.py``.
 
@@ -144,20 +148,6 @@ def window_bounds(start_dow: int) -> tuple[int, int]:
     )
 
 
-def week_norm_of(day: int, n_weeks: int) -> float:
-    return float(study_week_norm(week_number(day), n_weeks=n_weeks))
-
-
-def expit(eta: np.ndarray) -> np.ndarray:
-    eta = np.asarray(eta, dtype=float)
-    out = np.empty(eta.shape, dtype=float)
-    pos = eta >= 0
-    out[pos] = 1.0 / (1.0 + np.exp(-eta[pos]))
-    ez = np.exp(eta[~pos])
-    out[~pos] = ez / (1.0 + ez)
-    return out
-
-
 def log1mexp(a: np.ndarray) -> np.ndarray:
     """log(1 - exp(-a)) for a > 0."""
     a = np.asarray(a, dtype=float)
@@ -168,37 +158,9 @@ def log1mexp(a: np.ndarray) -> np.ndarray:
     return out
 
 
-def weibull_F(d: np.ndarray, mu: float, alpha: float) -> np.ndarray:
-    d = np.asarray(d, dtype=float)
-    out = np.zeros(d.shape, dtype=float)
-    pos = d > 0
-    out[pos] = 1.0 - np.exp(-np.power(d[pos] / mu, alpha))
-    return out
-
-
 def gap_survival(d: np.ndarray, theta: np.ndarray, mu: float, alpha: float) -> np.ndarray:
     """S(d) = exp(-theta F(d)). ``d`` broadcasts against ``theta``."""
     return np.exp(-theta * weibull_F(d, mu, alpha))
-
-
-def survival_uncured(d: np.ndarray, theta: np.ndarray, mu: float, alpha: float) -> np.ndarray:
-    """S_u(d) = (exp(-theta F(d)) - exp(-theta)) / (1 - exp(-theta))."""
-    pi = np.exp(-theta)
-    numer = gap_survival(d, theta, mu, alpha) - pi
-    denom = np.maximum(1.0 - pi, 1e-15)
-    return np.clip(numer / denom, 0.0, 1.0)
-
-
-def hazard_uncured(k: np.ndarray, theta: np.ndarray, mu: float, alpha: float) -> np.ndarray:
-    """h_u(k) = 1 - S_u(k) / S_u(k-1)."""
-    k = np.asarray(k, dtype=float)
-    s_prev = np.ones(k.shape, dtype=float)
-    prev = k - 1.0
-    has_prev = prev > 0
-    if np.any(has_prev):
-        s_prev[has_prev] = survival_uncured(prev[has_prev], theta[has_prev], mu, alpha)
-    s_cur = survival_uncured(k, theta, mu, alpha)
-    return 1.0 - s_cur / np.maximum(s_prev, 1e-15)
 
 
 def load_panel() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -995,7 +957,7 @@ def _uid_paths(n_paths, n_days, n_weeks, coef, fit, uids, base_seed) -> dict:
     for i in range(int(n_paths)):
         uid = uids[i % len(uids)]
         seed = int(base_seed) + i // len(uids)
-        rng = np.random.default_rng(np.random.SeedSequence([seed, uid, 771337]))
+        rng = np.random.default_rng(dropout_seed_sequence(seed, uid))
         parts.append(simulate_activity_paths(1, n_days, coef, fit, n_weeks, rng))
     return _stack_paths(parts)
 
@@ -1014,7 +976,7 @@ def simulator_check_lines() -> list[str]:
     sim252 = summarize_paths(_uid_paths(2000, 252, N_WEEKS_LONG, coef, fit, uids, 20261023))
     examples = []
     for uid in (13, 22, 18):
-        rng = np.random.default_rng(np.random.SeedSequence([1, uid, 771337]))
+        rng = np.random.default_rng(dropout_seed_sequence(1, uid))
         sim = simulate_activity_paths(1, 252, coef, fit, N_WEEKS_LONG, rng)
         n_gaps = int(sim["n_gaps"][0])
         gap_word = "gap" if n_gaps == 1 else "gaps"
