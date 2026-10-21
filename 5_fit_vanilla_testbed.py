@@ -33,8 +33,10 @@ from pathlib import Path
 
 from vani_env import (
     assert_complete_week_slots,
+    c1_from_week1_ewma,
     cae_mediator_ewma_rows,
     impute_baseline_cae,
+    load_week1_cae_inputs,
     mask_dropout_fit_outcomes,
 )
 
@@ -1178,6 +1180,16 @@ theta_fitbitwearing_list = []
 theta_eodcomplete_list = []
 cae_baseline_rows = []
 
+# Week-1 mediator EWMAs are written by 3_standardization.py. A missing file
+# is an error. An irregular or all-missing user falls back to c_2 and is logged.
+_week1_path = folder / "week1_cae_inputs.csv"
+try:
+    _week1_inputs = load_week1_cae_inputs(_week1_path)
+except FileNotFoundError as exc:
+    raise SystemExit(str(exc)) from exc
+print(f"Loaded week-1 CAE inputs for {len(_week1_inputs)} users from {_week1_path}")
+_week1_c2_users = []
+
 for i, userid in enumerate(userid_all):
     dat_user = df_fit[df_fit['ParticipantIdentifier'] == userid].copy()
     dat_user = dat_user.sort_values(['Date', 'DecisionTime'], na_position='last').reset_index(drop=True)
@@ -1463,27 +1475,7 @@ for i, userid in enumerate(userid_all):
 
     idx_obs_CAE = ~np.isnan(CAE_avg_sw)
 
-    # Preserve the previous baseline formula for the requested comparison
-    # table. This is not used by the simulator.
     _cae_lw_raw_first = float(dat_user['CAE_avg_lastweek_norm'].to_numpy(dtype=float)[0])
-    if np.isfinite(_cae_lw_raw_first):
-        cae_baseline_old = _cae_lw_raw_first
-    else:
-        _a1 = float(np.clip(theta_CAE_mean[1], -0.95, 0.95))
-        _mu_u = (
-            theta_CAE_mean[0]
-            + theta_CAE_mean[2] * float(week_sw[0])
-            + theta_CAE_mean[3] * float(np.nanmean(foursc_e))
-            + theta_CAE_mean[4] * float(np.nanmean(antic_e))
-        ) / (1.0 - _a1)
-        if np.any(idx_obs_CAE):
-            _k0 = int(np.flatnonzero(idx_obs_CAE)[0])      # panel week index of first CAE
-            _steps = _k0 + 1                                # panel week k0 = study week k0 + 2
-            cae_baseline_old = float(
-                _mu_u + _a1 ** _steps * (CAE_avg_sw[_k0] - _mu_u)
-            )
-        else:
-            cae_baseline_old = float(_mu_u)
     resid_CAE = np.full_like(CAE_avg_sw, np.nan, dtype=float)
 
     if np.any(idx_obs_CAE):
@@ -1543,16 +1535,37 @@ for i, userid in enumerate(userid_all):
 
     alpha_CAE_short_avg_l2 = None
 
-    # Exact baseline backcast from the first observed full CAE using the
-    # actual week-varying panel intercepts c_2,...,c_12. Week-1 covariates
-    # are outside the panel, so c_2 initializes m_1 = c_2 / (1 - a1).
-    _c_panel = (
+    # Exact baseline backcast from the first observed full CAE. c_2..c_12
+    # are the week-varying panel intercepts. c_1 uses the week-1 EWMAs in
+    # week1_cae_inputs.csv. A missing or irregular row falls back to c_2.
+    _c_2_12 = (
         theta_CAE_mean[0]
         + theta_CAE_mean[2] * week_sw
         + theta_CAE_mean[3] * foursc_e
         + theta_CAE_mean[4] * antic_e
     )
+    _w1 = _week1_inputs.get(int(userid))
+    if _w1 is None:
+        _c1 = np.nan
+        _week1_reason = "no week1_cae_inputs row"
+    else:
+        _c1 = c1_from_week1_ewma(
+            theta_CAE_mean, _w1["foursc_ewma"], _w1["antic_ewma"]
+        )
+        _week1_reason = _w1["reason"] or ("irregular" if _w1["irregular"] else "")
+    if not np.isfinite(_c1):
+        _week1_c2_users.append(int(userid))
+        print(
+            f"User {userid}: week-1 CAE drift unavailable ({_week1_reason or 'non-finite EWMA'}); "
+            "baseline uses c_2"
+        )
+    _c_panel = np.concatenate(([_c1], np.asarray(_c_2_12, dtype=float).ravel()))
     _y_all = np.concatenate(([_cae_lw_raw_first], CAE_avg_sw))
+    cae_baseline_old, _ = impute_baseline_cae(
+        theta_CAE=theta_CAE_mean,
+        c_panel=np.concatenate(([np.nan], np.asarray(_c_2_12, dtype=float).ravel())),
+        y_obs=_y_all,
+    )
     cae_baseline_norm, cae_baseline_source = impute_baseline_cae(
         theta_CAE=theta_CAE_mean,
         c_panel=_c_panel,
@@ -1660,6 +1673,13 @@ for i, userid in enumerate(userid_all):
     merge_json_file(p_env_path, env_para)
     merge_json_file(p_pred_path, predicted)
 
+if _week1_c2_users:
+    print(
+        "Week-1 CAE drift fell back to c_2 for "
+        + ", ".join(str(u) for u in _week1_c2_users)
+    )
+else:
+    print("Week-1 CAE drift used c_1 for every fitted user")
 
 np.savetxt(file_user_ids, userid_all, fmt='%d')
 

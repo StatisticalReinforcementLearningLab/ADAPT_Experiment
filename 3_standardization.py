@@ -11,7 +11,9 @@
 # ``std_params['HourlyPageviewCount_transform'] = 'log1p'`` marks this
 # convention; consumers treat a missing ``HourlyPageviewCount_zero_count``
 # key as log1p.
-# Next: ``4_perceived_utility.py``.
+# Also writes ``week1_cae_inputs.csv`` (week-1 fourSC and anticipated-affect
+# EWMAs on this same scale) next to ``df_fit.csv``, for the CAE baseline in
+# script 5. Next: ``4b_perceived_utility_bayes.py``.
 
 # 0. Setup
 
@@ -21,6 +23,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+from vani_env import mask_dropout_fit_outcomes, week1_cae_input_table
 
 PROJECT_ROOT = Path(
     os.environ.get("ADAPR_PROJECT_ROOT", Path(__file__).resolve().parent)
@@ -331,3 +335,26 @@ df_fit = df_fit.sort_values(
 df_fit_path = folder / "df_fit.csv"
 df_fit.to_csv(df_fit_path, index=False)
 print(f"Wrote {df_fit_path} ({len(df_fit)} rows)")
+
+# 7. Week-1 mediator EWMAs for the CAE baseline. Scales are the weeks 2-12
+# fit above. An irregular week is recorded and does not stop the script.
+_week1 = df_merged.loc[pd.to_numeric(df_merged["week"], errors="coerce").eq(1)].copy()
+_week1 = mask_dropout_fit_outcomes(_week1)
+_week1_inputs = week1_cae_input_table(_week1, std_params)
+_week1_path = folder / "week1_cae_inputs.csv"
+_week1_inputs.to_csv(_week1_path, index=False)
+_irregular = _week1_inputs.loc[_week1_inputs["irregular"].eq(1), "ParticipantIdentifier"]
+_missing = _week1_inputs.loc[
+    _week1_inputs["reason"].eq("all_missing"), "ParticipantIdentifier"
+]
+print(f"Wrote {_week1_path} ({len(_week1_inputs)} users)")
+if len(_irregular):
+    print(
+        "Week-1 CAE inputs irregular (c_2 fallback in script 5): "
+        + ", ".join(str(int(u)) for u in _irregular)
+    )
+if len(_missing):
+    print(
+        "Week-1 CAE inputs all-missing (c_2 fallback in script 5): "
+        + ", ".join(str(int(u)) for u in _missing)
+    )

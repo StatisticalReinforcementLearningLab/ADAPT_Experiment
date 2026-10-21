@@ -611,31 +611,151 @@ def cae_mediator_ewma_rows(foursc_weeks, antic_weeks) -> tuple[np.ndarray, np.nd
     return foursc_e, antic_e
 
 
-def week1_cae_drift(theta_CAE, foursc_wk, antic_wk) -> float:
-    """Week-1 CAE intercept from study-week-1 mediator rows.
+def c1_from_week1_ewma(theta_CAE, foursc_ewma, antic_ewma) -> float:
+    """Week-1 CAE intercept from the two mediator EWMAs.
 
-    ``c_1 = intercept + beta_wk*week_norm(1) + beta_SC*fourSC_ewma_1
-    + beta_AA*antic_ewma_1``, using :func:`cae_mediator_ewma_rows` and
-    :func:`study_week_norm` as for weeks 2-12. Returns NaN if either
-    mediator is entirely missing so :func:`impute_baseline_cae` can fall
-    back to ``c_2``.
+    ``c_1 = intercept + beta_wk*week_norm(1) + beta_SC*fourSC_ewma
+    + beta_AA*antic_ewma``. A non-finite EWMA returns NaN so
+    :func:`impute_baseline_cae` falls back to ``c_2``.
     """
     theta_CAE = np.asarray(theta_CAE, dtype=float).ravel()
     if theta_CAE.size < 5:
         raise ValueError("theta_CAE must contain intercept, AR(1), week, fourSC, antic")
-    foursc = np.asarray(foursc_wk, dtype=float).ravel()
-    antic = np.asarray(antic_wk, dtype=float).ravel()
-    if foursc.size == 0 or antic.size == 0:
+    if not (np.isfinite(foursc_ewma) and np.isfinite(antic_ewma)):
         return float("nan")
-    if not np.any(np.isfinite(foursc)) or not np.any(np.isfinite(antic)):
-        return float("nan")
-    foursc_e, antic_e = cae_mediator_ewma_rows(foursc, antic)
     return float(
         theta_CAE[0]
         + theta_CAE[2] * study_week_norm(1)
-        + theta_CAE[3] * float(foursc_e[0])
-        + theta_CAE[4] * float(antic_e[0])
+        + theta_CAE[3] * float(foursc_ewma)
+        + theta_CAE[4] * float(antic_ewma)
     )
+
+
+def week1_mediator_slots(dat_week1, std_params) -> tuple[np.ndarray, np.ndarray]:
+    """Study-week-1 fourSC and anticipated affect on the fit scale.
+
+    Uses the script-3 log-then-z and Likert maps. ``std_params`` must be the
+    scales fit on weeks 2-12, not a scale that includes week 1.
+    """
+    dat = (
+        dat_week1.sort_values(["Date", "DecisionTime"], na_position="last")
+        .reset_index(drop=True)
+    )
+    if "4hour_step_norm" in dat.columns:
+        foursc = dat["4hour_step_norm"].to_numpy(dtype=float)
+    else:
+        raw = pd.to_numeric(dat["4hour_step"], errors="coerce").to_numpy(dtype=float)
+        logged = np.full_like(raw, np.nan, dtype=float)
+        ok = np.isfinite(raw) & (raw >= 0.0)
+        logged[ok] = np.log(raw[ok] + 1.0)
+        shift = float(std_params["4hour_step_count_shift"])
+        scale = float(std_params["4hour_step_count_scale"])
+        foursc = (logged - shift) / scale
+    if "anticipated_affect_norm" in dat.columns:
+        antic = dat["anticipated_affect_norm"].to_numpy(dtype=float)
+    else:
+        raw = pd.to_numeric(dat["anticipated_affect"], errors="coerce").to_numpy(dtype=float)
+        invalid = np.isfinite(raw) & ((raw < 1.0) | (raw > 7.0))
+        raw = np.where(invalid, np.nan, raw)
+        antic = 2.0 * (raw - 1.0) / 6.0 - 1.0
+    return foursc, antic
+
+
+def week1_cae_input_record(foursc, antic) -> dict:
+    """One user's week-1 EWMA row.
+
+    A wrong slot or affect count is ``irregular=1`` and both EWMAs are NaN.
+    An all-missing mediator is not irregular; its EWMAs are NaN as well.
+    Neither case raises.
+    """
+    foursc = np.asarray(foursc, dtype=float).ravel()
+    antic = np.asarray(antic, dtype=float).ravel()
+    record = {
+        "foursc_ewma": float("nan"),
+        "antic_ewma": float("nan"),
+        "week_norm": float(study_week_norm(1)),
+        "irregular": 0,
+        "n_foursc": int(foursc.size),
+        "n_antic": int(antic.size),
+        "reason": "",
+    }
+    if (
+        foursc.size == 0
+        or antic.size == 0
+        or not np.any(np.isfinite(foursc))
+        or not np.any(np.isfinite(antic))
+    ):
+        record["reason"] = "all_missing"
+        return record
+    try:
+        foursc_e, antic_e = cae_mediator_ewmas(foursc, antic)
+    except ValueError as exc:
+        record["irregular"] = 1
+        record["reason"] = str(exc)
+        return record
+    record["foursc_ewma"] = float(foursc_e)
+    record["antic_ewma"] = float(antic_e)
+    return record
+
+
+def week1_cae_input_table(week1, std_params) -> pd.DataFrame:
+    """Per-user week-1 mediator EWMAs. ``week1`` is already dropout-masked."""
+    rows = []
+    grouped = week1.groupby("ParticipantIdentifier", sort=False)
+    for uid, dat in grouped:
+        foursc, antic = week1_mediator_slots(dat, std_params)
+        rec = week1_cae_input_record(foursc, antic)
+        rec["ParticipantIdentifier"] = int(uid)
+        rows.append(rec)
+    columns = [
+        "ParticipantIdentifier",
+        "foursc_ewma",
+        "antic_ewma",
+        "week_norm",
+        "irregular",
+        "n_foursc",
+        "n_antic",
+        "reason",
+    ]
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    return pd.DataFrame(rows)[columns]
+
+
+def load_week1_cae_inputs(path) -> dict:
+    """Read ``week1_cae_inputs.csv``. A missing file is an error."""
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Missing {path}. 3_standardization.py writes week1_cae_inputs.csv "
+            "next to df_fit.csv."
+        )
+    frame = pd.read_csv(path)
+    need = {"ParticipantIdentifier", "foursc_ewma", "antic_ewma", "irregular"}
+    missing = sorted(need - set(frame.columns))
+    if missing:
+        raise ValueError(f"{path} is missing columns {missing}")
+    out = {}
+    for row in frame.itertuples(index=False):
+        uid = int(row.ParticipantIdentifier)
+        out[uid] = {
+            "foursc_ewma": float(row.foursc_ewma) if pd.notna(row.foursc_ewma) else float("nan"),
+            "antic_ewma": float(row.antic_ewma) if pd.notna(row.antic_ewma) else float("nan"),
+            "irregular": int(row.irregular),
+            "reason": "" if not hasattr(row, "reason") or pd.isna(row.reason) else str(row.reason),
+        }
+    return out
+
+
+def week1_cae_drift(theta_CAE, foursc_wk, antic_wk) -> float:
+    """Week-1 CAE intercept from study-week-1 mediator rows.
+
+    Same value as :func:`c1_from_week1_ewma` on the EWMAs of those rows.
+    Returns NaN if a mediator is entirely missing or the slot count is not
+    one the EWMA accepts, so the caller can fall back to ``c_2``.
+    """
+    rec = week1_cae_input_record(foursc_wk, antic_wk)
+    return c1_from_week1_ewma(theta_CAE, rec["foursc_ewma"], rec["antic_ewma"])
 
 
 def impute_baseline_cae(
