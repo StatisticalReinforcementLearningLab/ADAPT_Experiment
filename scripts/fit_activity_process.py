@@ -5,13 +5,21 @@ the promotion-time cure model for gap length, and writes the report, figures,
 and ``activity_process`` block of ``generator_calibration.json``. Does not
 refit scripts 1-5.
 
-Run from the repository root::
+Run from the repository root, with ``ADAPR_COMBINED_DIR`` set to the folder
+that holds the script-1 tables::
 
     python scripts/fit_activity_process.py
+    python scripts/fit_activity_process.py --out docs/activity_process_20261021
+
+``ADAPR_ACTIVITY_DAILY`` overrides the daily csv. ``participant_dropout.csv``
+is read from the same directory. Both must exist. Figures and ``report.md``
+go to ``--out`` (default ``docs/activity_process_<YYYYMMDD>/``).
 """
 
 from __future__ import annotations
 
+import argparse
+import datetime
 import json
 import math
 import os
@@ -35,18 +43,77 @@ from scipy.optimize import approx_fprime, minimize
 from vani_env import study_week_norm
 
 
-DAILY_PATH = ROOT / "docs/dropout_check_20261017/participant_dropout_daily.csv"
-META_PATH = ROOT / "docs/dropout_check_20261017/participant_dropout.csv"
-OUT_DIR = ROOT / "docs/activity_process_20261020"
+DAILY_PATH: Path | None = None
+META_PATH: Path | None = None
+OUT_DIR: Path | None = None
 CALIBRATION_PATH = ROOT / "env_para_vanilla/generator_calibration.json"
 
 N_DAYS = 84
 N_WEEKS_FIT = 12
 N_WEEKS_LONG = 36
 MODEL1_NAMES = ("intercept", "week", "act7", "prior_gap")
-SOURCE_FILE = "docs/dropout_check_20261017/participant_dropout_daily.csv"
-SOURCE_DATE = "2026-10-20"
+SOURCE_FILE = ""
+SOURCE_DATE = ""
 HAZARD_CURRENT = 0.0010501443948542925
+DAILY_NAME = "participant_dropout_daily.csv"
+META_NAME = "participant_dropout.csv"
+
+
+def resolve_activity_tables() -> tuple[Path, Path]:
+    """Daily and participant tables from the combined extract.
+
+    ``ADAPR_ACTIVITY_DAILY`` overrides the daily csv. The participant table
+    is the sibling ``participant_dropout.csv``. Otherwise both files are
+    read from ``ADAPR_COMBINED_DIR``. Either missing file is an error.
+    """
+    override = os.environ.get("ADAPR_ACTIVITY_DAILY", "").strip()
+    combined = os.environ.get("ADAPR_COMBINED_DIR", "").strip()
+    if override:
+        daily = Path(override).expanduser().resolve()
+        if not daily.is_file():
+            raise SystemExit(f"ADAPR_ACTIVITY_DAILY does not exist: {daily}")
+        meta = daily.parent / META_NAME
+    else:
+        if not combined:
+            raise SystemExit(
+                "Set ADAPR_COMBINED_DIR to the folder with "
+                f"{DAILY_NAME} and {META_NAME}, or set ADAPR_ACTIVITY_DAILY."
+            )
+        root = Path(combined).expanduser().resolve()
+        daily = root / DAILY_NAME
+        meta = root / META_NAME
+    missing = [path for path in (daily, meta) if not path.is_file()]
+    if missing:
+        raise SystemExit(
+            "Missing activity tables: "
+            + ", ".join(str(path) for path in missing)
+            + f". Script 1 writes {DAILY_NAME} and {META_NAME} in "
+            "ADAPR_COMBINED_DIR. ADAPR_ACTIVITY_DAILY overrides the daily "
+            f"file; {META_NAME} is read from the same directory."
+        )
+    return daily, meta
+
+
+def resolve_output_dir(out: str | None) -> Path:
+    """Figures and report directory. Created if it does not exist."""
+    if out:
+        path = Path(out).expanduser().resolve()
+    else:
+        stamp = datetime.date.today().strftime("%Y%m%d")
+        path = ROOT / "docs" / f"activity_process_{stamp}"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def configure_paths(out: str | None) -> None:
+    """Set the module paths used by the fit, the report, and the calibration write."""
+    global DAILY_PATH, META_PATH, OUT_DIR, SOURCE_FILE, SOURCE_DATE
+    daily, meta = resolve_activity_tables()
+    DAILY_PATH = daily
+    META_PATH = meta
+    SOURCE_FILE = str(daily)
+    SOURCE_DATE = datetime.date.today().isoformat()
+    OUT_DIR = resolve_output_dir(out)
 
 
 def week_number(day: int) -> int:
@@ -1370,6 +1437,15 @@ def write_calibration(model1: dict, model2: dict) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="Directory for figures and report.md "
+        "(default: docs/activity_process_<YYYYMMDD>/, created if absent)",
+    )
+    args = parser.parse_args()
+    configure_paths(args.out)
     panel, _meta = load_panel()
     gaps = build_gaps(panel)
     cohort = assert_cohort(panel, gaps)

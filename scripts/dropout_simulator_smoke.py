@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -25,13 +26,43 @@ def _seed(uid: int, episode: int) -> int:
     )
 
 
+def resolve_dropout_table(explicit: Path | None) -> Path:
+    """Participant table from script 1, not the gitignored docs copy.
+
+    ``--dropout-table`` wins. Otherwise the file is
+    ``ADAPR_COMBINED_DIR/participant_dropout.csv``. When
+    ``ADAPR_ACTIVITY_DAILY`` is set, the table is that file's sibling.
+    """
+    if explicit is not None:
+        path = explicit.expanduser().resolve()
+    else:
+        override = os.environ.get("ADAPR_ACTIVITY_DAILY", "").strip()
+        combined = os.environ.get("ADAPR_COMBINED_DIR", "").strip()
+        if override:
+            path = Path(override).expanduser().resolve().parent / "participant_dropout.csv"
+        elif combined:
+            path = Path(combined).expanduser().resolve() / "participant_dropout.csv"
+        else:
+            raise SystemExit(
+                "Set ADAPR_COMBINED_DIR to the folder with participant_dropout.csv "
+                "(written by script 1), or pass --dropout-table."
+            )
+    if not path.is_file():
+        raise SystemExit(
+            f"Missing {path}. Script 1 writes participant_dropout.csv in ADAPR_COMBINED_DIR."
+        )
+    return path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--params-dir", type=Path, default=Path("env_para_vanilla"))
     parser.add_argument(
         "--dropout-table",
         type=Path,
-        default=Path("docs/dropout_check_20261017/participant_dropout.csv"),
+        default=None,
+        help="participant_dropout.csv (default: ADAPR_COMBINED_DIR, "
+        "or the directory of ADAPR_ACTIVITY_DAILY)",
     )
     parser.add_argument("--episodes", type=int, default=80)
     parser.add_argument(
@@ -41,7 +72,8 @@ def main() -> None:
     )
     args = parser.parse_args()
     params_dir = args.params_dir.expanduser().resolve()
-    calibration = calibrate_constant_daily_hazard(pd.read_csv(args.dropout_table))
+    dropout_table = resolve_dropout_table(args.dropout_table)
+    calibration = calibrate_constant_daily_hazard(pd.read_csv(dropout_table))
     hazard = float(calibration["dropout_hazard_day"])
 
     rows = []
