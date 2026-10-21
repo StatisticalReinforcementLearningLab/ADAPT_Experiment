@@ -1,20 +1,20 @@
 """Fit the remaining generative models and write the parameter directory.
 
-Reads ``df_fit.csv`` (after script 4 has attached E_w). Fits, per participant
+Reads ``df_fit.csv`` (after ``06_fit_pu.py`` has attached E_w). Fits, per participant
 or as a hierarchical Bayesian model:
 
     4-hour step counts, anticipated affect, weekly CAE / short CAE,
     prior-2h steps, active status, walking-suggestion interaction.
 
-The fitting panel (MRT weeks 2-12, renumbered 1-11) is built in script 3.
+The fitting panel (MRT weeks 2-12, renumbered 1-11) is built in ``03_standardize.py``.
 
-The analysis sample is already restricted in script 1 (wear/FourSC, survey
-response, ≥1 CAE week, and the high-CAE ceiling: min weekly CAE_avg ≥ 6 or
-week-1 CAE_avg = 7). This script fits whoever remains in ``df_fit.csv``.
+The analysis sample is already restricted in script 1 by the high-CAE ceiling
+(min weekly CAE_avg ≥ 6 or week-1 CAE_avg = 7). Low wear, missing surveys,
+and zero CAE weeks are retained. This script fits whoever remains in ``df_fit.csv``.
 Writes ``params_env_<uid>.json`` (mediator/outcome blocks and residuals),
 ``pred_<uid>.json`` and ``user_ids.txt``. All models are hierarchical
 Bayesian (one NUTS schedule, NUTS_TUNE / NUTS_DRAWS / NUTS_TARGET_ACCEPT).
-Does not overwrite the E_w / PV / FW / PJ blocks from script 4 (including
+Does not overwrite the E_w / PV / FW / PJ blocks from ``06_fit_pu.py`` (including
 the ``J_w`` ``query_Jw_*`` suffix on PV/FW/PJ).
 Next: ``08_est_ew_weights.py``.
 """
@@ -28,7 +28,6 @@ import numpy as np
 import pandas as pd
 import pymc as pm
 import pytensor.tensor as pt
-from patsy import dmatrix
 from pathlib import Path
 
 from vani_env import (
@@ -80,7 +79,7 @@ file_pred_prefix = str(work_folder / 'pred_')
 file_user_ids = str(work_folder / 'user_ids.txt')
 
 # The fitting panel (MRT weeks 2-12 renumbered 1-11; week 1 only supplies
-# lags) is built in 03_standardize.py and shared with 4b.
+# lags) is built in 03_standardize.py and shared with ``06_fit_pu.py``.
 df_fit["Date"] = pd.to_datetime(df_fit["Date"], errors="coerce")
 assert_complete_week_slots(df_fit)
 
@@ -120,14 +119,6 @@ def fill_nan_with_mean(x, default=0.0):
     if np.all(np.isnan(x)):
         return np.full_like(x, default, dtype=float)
     return np.where(np.isnan(x), np.nanmean(x), x)
-
-
-def safe_nanmean(x, default=0.0):
-    """Mean that stays finite when all values are missing."""
-    x = np.asarray(x, dtype=float)
-    if np.all(np.isnan(x)):
-        return default
-    return np.nanmean(x)
 
 
 def _store_group_effects_as_series(effects_by_group):
@@ -182,7 +173,6 @@ class _BayesianRandomCoefResult:
         min_ess = min(float(np.min(np.asarray(ess[v].values))) for v in ess.data_vars)
         self.n_divergences = n_div
         self.max_rhat = max_rhat
-        self.min_ess_bulk = min_ess
         self.converged = bool(n_div == 0 and max_rhat < 1.01)
         _FIT_DIAGNOSTICS.append(
             {
@@ -213,8 +203,8 @@ class _BayesianRandomCoefResult:
 # the point of a single constant is consistency, not information.
 WEAK_BETA_PRIOR_SD = float(np.sqrt(10.0))
 
-# One NUTS schedule for every hierarchical model in the testbed (CAE-related,
-# additional variables, and 4b's perceived-utility model).
+# One NUTS schedule for every hierarchical model in this script.
+# ``06_fit_pu.py`` has its own sampler settings.
 NUTS_TUNE = 2000
 NUTS_DRAWS = 3000
 NUTS_TARGET_ACCEPT = 0.95
@@ -886,10 +876,6 @@ def participant_theta(result, userid):
 
 def _sigmoid_np(x):
     return 1.0 / (1.0 + np.exp(-x))
-ncv = 5
-seed = 2026
-
-dat_user_all = []
 
 # Users with no observed CAE (all-NaN ``CAE_avg_norm``) are retained since
 # 2026-10-17. The Bayesian random-coefficient CAE fit simply has no rows for
@@ -1002,8 +988,6 @@ mixedlm_CAE = fit_bayesian_random_coef_model(
 print(mixedlm_CAE.summary())
 print(f"CAE Bayesian fit converged: {mixedlm_CAE.converged}")
 
-cae_random_effect_cols = list(range(len(THETA_CAE_NAMES)))
-
 # ============================================================
 # Fit short-CAE random-coefficient model the same way, with weak/uninformative
 # priors throughout (no collinearity or stability concerns for this model).
@@ -1026,8 +1010,6 @@ mixedlm_CAE_short = fit_bayesian_random_coef_model(
 
 print(mixedlm_CAE_short.summary())
 print(f"CAE_short Bayesian fit converged: {mixedlm_CAE_short.converged}")
-
-cae_short_random_effect_cols = list(range(len(THETA_CAE_SHORT_AVG_NAMES)))
 
 # ============================================================
 # Fit the anticipated-affect and FourSC random-coefficient models the same
@@ -1192,9 +1174,6 @@ mixedlm_ws_interaction = fit_bayesian_random_coef_model(
 )
 print(mixedlm_ws_interaction.summary())
 
-theta_pageview_list = []
-theta_fitbitwearing_list = []
-theta_eodcomplete_list = []
 cae_baseline_rows = []
 
 # Week-1 mediator EWMAs are written by 03_standardize.py with the same
@@ -1258,7 +1237,6 @@ for i, userid in enumerate(userid_all):
 
     active_status = dat_user['active_status'].to_numpy()
     active_status_fraction_7days = dat_user['active_status_fraction_7days'].to_numpy()
-    DailyPageviewCount = dat_user['DailyPageviewCount_norm'].to_numpy()
     seven_day_pageview_count = dat_user['Past7DaysPageviewEMA_norm'].to_numpy()
     past7days_hourly_pageview_count = dat_user['Past7DaysHourlyPageviewEMA_norm'].to_numpy()
     
@@ -1267,9 +1245,6 @@ for i, userid in enumerate(userid_all):
     ws_interaction = dat_user['Interacted_walk'].to_numpy()
     Interacted_7d_walk = dat_user['Interacted_7d_walk'].to_numpy()
 
-    week_present = dat_user['week_present'].to_numpy()
-    week_present_lastweek = dat_user['week_present_lastweek'].to_numpy()
-    
     WalkingSuggestion = dat_user['WalkingSuggestion'].to_numpy()
 
     is_weekend = dat_user['is_weekend'].to_numpy(dtype=float)
@@ -1296,9 +1271,6 @@ for i, userid in enumerate(userid_all):
     anticipated_affect_yesterday = fill_nan_with_mean(anticipated_affect_yesterday)
     
     CAE_avg_lastweek = fill_nan_with_mean(CAE_avg_lastweek)
-
-    ws_morning = WalkingSuggestion * (1.0 - decision_time)
-    ws_afternoon = WalkingSuggestion * decision_time
 
     # Per calendar day: AM/PM walking suggestions (rows ordered AM then PM for each Date).
     Walking_pair = WalkingSuggestion.reshape(-1, 2)
@@ -1349,7 +1321,6 @@ for i, userid in enumerate(userid_all):
         Interacted_7d_walk,
         anticipated_affect_yesterday,
         active_status_fraction_7days,
-        # is_weekend, 
         is_weekend, decision_time,
         perceived_utility_lastweek,
         CAE_avg_lastweek, 
@@ -1391,7 +1362,6 @@ for i, userid in enumerate(userid_all):
     # fill in the full residual array with NaN for unobserved
     resid_fourSC = np.full_like(fourSC, np.nan, dtype=float)
     resid_fourSC[idx_obs_fourSC] = resid_obs_fourSC
-    sigma2_fourSC_mean = np.var(resid_obs_fourSC) if resid_obs_fourSC.size > 0 else 0.0
 
     print(f"The fit of fourSC is good for user {userid}")
 
@@ -1443,9 +1413,6 @@ for i, userid in enumerate(userid_all):
     )
     resid_anticipated_affect = np.full_like(y_antic_day, np.nan, dtype=float)
     resid_anticipated_affect[idx_daily_antic] = resid_obs_anticipated_affect
-    sigma2_anticipated_affect_mean = (
-        np.var(resid_obs_anticipated_affect) if resid_obs_anticipated_affect.size > 0 else 0.0
-    )
 
     _obs_antic = resid_anticipated_affect[~np.isnan(resid_anticipated_affect)]
 
