@@ -17,7 +17,7 @@ posterior mean.
 Fits nonnegative within-user ridge (demean each person, shared slopes, then
 one intercept on the raw scale), iterating ``E_lag`` until the recursive
 predictions match the regressor. Writes
-``env_para_vanilla/Ew_pooled_linear_coefs.json``.
+``Ew_pooled_linear_coefs.json`` in the parameter directory.
 """
 from __future__ import annotations
 
@@ -30,17 +30,18 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression, Ridge
 
 from algorithm_helpers import apply_pooled_coefs
+from vani_env import resolve_params_dir
 
-PROJECT_ROOT = Path(
-    os.getenv("ADAPR_PROJECT_ROOT", str(Path(__file__).resolve().parent))
-).expanduser().resolve()
+WORK_DIR = resolve_params_dir()
+if __name__ == "__main__":
+    print(f"params dir: {WORK_DIR}", flush=True)
+
 _combined = os.getenv("ADAPR_COMBINED_DIR", "").strip()
 if not _combined:
     raise SystemExit(
         "Set ADAPR_COMBINED_DIR to the folder with extracted MRT tables."
     )
 COMBINED_DIR = Path(_combined).expanduser().resolve()
-WORK_DIR = PROJECT_ROOT / "env_para_vanilla"
 EW_POOLED_COEF_JSON = WORK_DIR / "Ew_pooled_linear_coefs.json"
 COEF_DECIMALS = 3
 FEATURE_COLS = ["E_lag", "PV_sum", "FW_sum", "PJ_sum", "J_close", "half_J_close"]

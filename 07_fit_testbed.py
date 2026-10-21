@@ -1,4 +1,4 @@
-"""Fit the remaining generative models and write ``env_para_vanilla/``.
+"""Fit the remaining generative models and write the parameter directory.
 
 Reads ``df_fit.csv`` (after script 4 has attached E_w). Fits, per participant
 or as a hierarchical Bayesian model:
@@ -35,14 +35,18 @@ from vani_env import (
     assert_complete_week_slots,
     c1_from_week1_ewma,
     cae_mediator_ewma_rows,
+    default_params_dir,
     impute_baseline_cae,
     load_week1_cae_inputs,
     mask_dropout_fit_outcomes,
+    resolve_params_dir,
 )
 
 PROJECT_ROOT = Path(
     os.environ.get("ADAPR_PROJECT_ROOT", Path(__file__).resolve().parent)
 ).expanduser().resolve()
+WORK_DIR = resolve_params_dir()
+print(f"params dir: {WORK_DIR}", flush=True)
 COMBINED_DIR = Path(
     os.environ.get("ADAPR_COMBINED_DIR", "")
 ).expanduser()
@@ -50,7 +54,6 @@ if not os.environ.get("ADAPR_COMBINED_DIR"):
     raise SystemExit(
         "Set ADAPR_COMBINED_DIR to the folder with extracted MRT tables."
     )
-WORK_DIR = Path(os.environ.get("ADAPR_VANILLA_ENV_DIR", PROJECT_ROOT / "env_para_vanilla"))
 WORK_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -58,7 +61,7 @@ WORK_DIR.mkdir(parents=True, exist_ok=True)
 folder = COMBINED_DIR
 work_folder = Path(WORK_DIR)
 
-std_params_source = PROJECT_ROOT / "env_para_vanilla" / "std_params.json"
+std_params_source = default_params_dir() / "std_params.json"
 std_params_dest = work_folder / "std_params.json"
 if (
     std_params_source.is_file()

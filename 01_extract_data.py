@@ -25,6 +25,9 @@ from dropout_utils import (
     max_raw_observation_timestamp,
     weekly_checkin_completion_lag,
 )
+from vani_env import resolve_params_dir
+
+print(f"params dir: {resolve_params_dir()}", flush=True)
 
 _combined = os.environ.get("ADAPR_COMBINED_DIR", "").strip()
 if not _combined:

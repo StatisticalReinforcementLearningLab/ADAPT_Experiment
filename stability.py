@@ -188,6 +188,7 @@ def main(argv=None):
     ap.add_argument("--out", default="")
     args = ap.parse_args(argv)
     params_dir = Path(ex.resolve_params_dir(args.params_dir))
+    print(f"params dir: {params_dir}", flush=True)
     uids = ([int(u) for u in args.users.split(",") if u.strip()] if args.users
             else [int(u) for u in np.loadtxt(params_dir / "user_ids.txt", dtype=int).ravel()])
     out = {}

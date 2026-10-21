@@ -4,7 +4,8 @@
     python 05_check_refit.py --stage fit      # cluster, after 08
     python 05_check_refit.py --stage priors   # cluster, after 10
 
-Reads ``ADAPR_COMBINED_DIR`` and ``ADAPR_PARAMS_DIR`` only. One PASS, WARN,
+Reads ``ADAPR_COMBINED_DIR`` and the parameter directory
+(``ADAPR_PARAMS_DIR``, otherwise ``env_para_vanilla``). One PASS, WARN,
 or FAIL line per check. Exit status 1 if any check fails. Counts that move
 with a new extract (exclusion totals, baseline-source labels) are warnings.
 """
@@ -21,6 +22,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+from vani_env import resolve_params_dir
 
 ROOT = Path(__file__).resolve().parent
 
@@ -60,11 +63,7 @@ def combined_dir() -> Path | None:
 
 
 def params_dir() -> Path:
-    raw = os.environ.get("ADAPR_PARAMS_DIR", "").strip()
-    path = Path(raw).expanduser() if raw else Path("env_para_vanilla")
-    if not path.is_absolute():
-        path = ROOT / path
-    return path.resolve()
+    return resolve_params_dir()
 
 
 def _ids(frame: pd.DataFrame, column: str = "ParticipantIdentifier") -> set[int]:
@@ -344,6 +343,7 @@ def stage_priors(report: Report) -> None:
 
 
 def main() -> None:
+    print(f"params dir: {params_dir()}", flush=True)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage", required=True, choices=("data", "fit", "priors"))
     args = parser.parse_args()

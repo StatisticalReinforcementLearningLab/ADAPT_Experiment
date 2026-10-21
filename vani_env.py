@@ -5,9 +5,10 @@
 engagement mediators, weekly CAE, and latent E_w given the current state and
 actions. Residuals default to an AR(1) bootstrap of the fitted leftovers.
 
-``PARAMS_DIR`` is ``env_para_vanilla`` unless ``ADAPR_PARAMS_DIR`` is set
-(used by ``tune_ste.py`` to swap in a rescaled copy). This module does not
-run an RL agent; ``experiment.OnlineEnv`` wraps it for slot-by-slot control.
+``resolve_params_dir`` selects the parameter folder: ``ADAPR_PARAMS_DIR``
+if set, otherwise ``<repo>/env_para_vanilla``. ``ADAPR_VANILLA_ENV_DIR`` is
+a deprecated alias of that folder. This module does not run an RL agent;
+``experiment.OnlineEnv`` wraps it for slot-by-slot control.
 
 History summaries (7-day EWMAs, lags, "yesterday" step count) are defined in
 ``derived_covariates.py`` and computed identically from the MRT data and from
@@ -116,12 +117,65 @@ from ewm_utils import ewma_gamma
 PROJECT_ROOT = Path(
     os.environ.get("ADAPR_PROJECT_ROOT", Path(__file__).resolve().parent)
 ).expanduser().resolve()
-# ``ADAPR_PARAMS_DIR`` (absolute, or relative to PROJECT_ROOT) selects an
-# alternative fitted-parameter set, e.g. one of the effect-size-tuned copies
-# written by ``tune_ste.py``, without editing any call site.
-PARAMS_DIR = (
-    PROJECT_ROOT / os.environ.get("ADAPR_PARAMS_DIR", "env_para_vanilla")
-).expanduser().resolve()
+_DEFAULT_PARAMS_NAME = "env_para_vanilla"
+
+
+def default_params_dir() -> Path:
+    """``<repo>/env_para_vanilla``, ignoring ``ADAPR_PARAMS_DIR``."""
+    return (PROJECT_ROOT / _DEFAULT_PARAMS_NAME).resolve()
+
+
+def _params_path(raw) -> Path:
+    """Absolute path. Relative values are under ``PROJECT_ROOT``."""
+    path = Path(str(raw)).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
+
+
+def resolve_params_dir(params_dir=None) -> Path:
+    """Parameter folder for the pipeline and the simulator.
+
+    An explicit ``params_dir`` wins. Otherwise ``ADAPR_PARAMS_DIR`` if it is
+    set (absolute, or relative to the repository), otherwise
+    ``<repo>/env_para_vanilla``.
+
+    ``ADAPR_VANILLA_ENV_DIR`` is a deprecated alias of that folder. If it is
+    set and resolves to a different directory than ``ADAPR_PARAMS_DIR`` (or
+    the default), raise ``ValueError`` naming both. If it resolves to the
+    same directory, warn and continue.
+    """
+    primary_raw = os.environ.get("ADAPR_PARAMS_DIR", "").strip()
+    if primary_raw:
+        chosen = _params_path(primary_raw)
+        chosen_label = "ADAPR_PARAMS_DIR"
+    else:
+        chosen = default_params_dir()
+        chosen_label = "the default parameter directory"
+    alias_raw = os.environ.get("ADAPR_VANILLA_ENV_DIR", "").strip()
+    if alias_raw:
+        alias = _params_path(alias_raw)
+        if alias != chosen:
+            raise ValueError(
+                f"ADAPR_VANILLA_ENV_DIR resolves to {alias}, but "
+                f"{chosen_label} resolves to {chosen}. "
+                "Set only ADAPR_PARAMS_DIR."
+            )
+        warnings.warn(
+            "ADAPR_VANILLA_ENV_DIR is deprecated; "
+            f"it matches {chosen_label} ({chosen}). "
+            "Set only ADAPR_PARAMS_DIR if you need a non-default folder.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    if params_dir is not None and str(params_dir).strip():
+        return _params_path(params_dir)
+    return chosen
+
+
+# Import-time snapshot. Launchers export ``ADAPR_PARAMS_DIR`` before Python
+# starts. Call ``resolve_params_dir`` when the variable may change later.
+PARAMS_DIR = resolve_params_dir()
 
 # Latent E_w support: script-4 quadrature and the simulator clip share this
 # interval. Change it here only (``06_fit_pu`` imports these names).

@@ -4,6 +4,10 @@
 so the fitting module keeps that name. Run this after ``08_est_ew_weights.py``.
 """
 
+from vani_env import resolve_params_dir
+
+print(f"params dir: {resolve_params_dir()}", flush=True)
+
 from est_prior import cli
 
 if __name__ == "__main__":

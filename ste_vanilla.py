@@ -65,7 +65,7 @@ from algorithm_helpers import (
     make_state,
 )
 from experiment import OnlineEnv
-from vani_env import PARAMS_DIR, Env, EnvConfig
+from vani_env import Env, EnvConfig, resolve_params_dir
 
 
 def params_fingerprint(params_dir, uid: int) -> str:
@@ -81,7 +81,7 @@ def params_fingerprint(params_dir, uid: int) -> str:
 
 def _resolve_params_dir(params_dir=None) -> Path:
     """Canonical parameter folder used for train/eval metadata."""
-    return Path(PARAMS_DIR if params_dir is None else params_dir).expanduser().resolve()
+    return resolve_params_dir(params_dir)
 
 SLOTS_PER_WEEK = N_RL_DAYS * N_RL_SLOTS
 DQN_WEEKLY_GAMMA = 0.97
@@ -681,7 +681,7 @@ def rollout_total_cae(
 
     ``policy`` is ``"zero"``, ``"bernoulli"``, or ``"dqn_greedy"``.
     ``dqn_greedy`` uses ``ste_policy_action`` (advantage margin), not argmax.
-    ``params_dir`` defaults to ``vani_env.PARAMS_DIR``; ``tune_ste.py`` passes a
+    ``params_dir`` defaults to ``vani_env.resolve_params_dir()``; ``tune_ste.py`` passes a
     rescaled copy to evaluate alternative effect sizes.  With ``return_weekly``
     the per-week CAE vector is returned alongside the total.  With
     ``return_stats`` the walking-suggestion rate is also returned.
@@ -1002,7 +1002,7 @@ def aggregate_ste(
     Expects ``results_ste/exp{exp}/res{exp}_{userid}.txt`` with two columns:
     ``sum_CAE_zero``, ``sum_CAE_opt`` per Monte Carlo row.
     """
-    uid_path = Path(userid_path) if userid_path else PARAMS_DIR / "user_ids.txt"
+    uid_path = Path(userid_path) if userid_path else resolve_params_dir() / "user_ids.txt"
     userid_all = np.loadtxt(uid_path, dtype=int)
     path = Path("results_ste") / f"exp{exp}"
     idx_zero, idx_opt = 0, 1
@@ -1062,7 +1062,7 @@ def report_ste(
     burn_in_rows: int = 0,
 ) -> None:
     """Print per-user val Δ / SE / z, selected checkpoint, treat rate, and test STE."""
-    uid_path = Path(userid_path) if userid_path else PARAMS_DIR / "user_ids.txt"
+    uid_path = Path(userid_path) if userid_path else resolve_params_dir() / "user_ids.txt"
     userid_all = np.loadtxt(uid_path, dtype=int)
     path = Path("results_ste") / f"exp{exp}"
     logger_dir = Path("d3rlpy_logs") / f"ste_exp_{exp}"

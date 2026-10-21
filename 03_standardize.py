@@ -3,7 +3,7 @@
 # Reads `df_merged.csv`, log-transforms step counts and pageview summaries
 # in place as ``log(x+1)``, z-scores continuous features,
 # maps Likert items to [-1, 1], and writes `df_fit.csv` plus
-# `std_params.json` (shifts, scales, clip limits) under `env_para_vanilla/`.
+# `std_params.json` (shifts, scales, clip limits) in the parameter directory.
 # ``HourlyPageviewCount`` (and its lag) stay raw.
 # ``HourlyPageviewCount_norm`` is ``log(x+1)`` (all counts, like every other
 # count variable), z-scored with the mean / SD of the positive counts (the
@@ -24,18 +24,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from vani_env import mask_dropout_fit_outcomes, week1_cae_input_table
+from vani_env import mask_dropout_fit_outcomes, resolve_params_dir, week1_cae_input_table
 
-PROJECT_ROOT = Path(
-    os.environ.get("ADAPR_PROJECT_ROOT", Path(__file__).resolve().parent)
-).expanduser().resolve()
+WORK_DIR = resolve_params_dir()
+print(f"params dir: {WORK_DIR}", flush=True)
 _combined = os.environ.get("ADAPR_COMBINED_DIR", "").strip()
 if not _combined:
     raise SystemExit(
         "Set ADAPR_COMBINED_DIR to the folder with extracted MRT tables."
     )
 COMBINED_DIR = Path(_combined).expanduser().resolve()
-WORK_DIR = PROJECT_ROOT / "env_para_vanilla"
 WORK_DIR.mkdir(parents=True, exist_ok=True)
 
 folder = COMBINED_DIR

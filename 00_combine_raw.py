@@ -11,6 +11,10 @@ from typing import Any, Iterable
 
 import pandas as pd
 
+from vani_env import resolve_params_dir
+
+print(f"params dir: {resolve_params_dir()}", flush=True)
+
 # ---------- CONFIG ----------
 _raw_root = os.environ.get("ADAPR_RAW_DIR", "").strip()
 if not _raw_root:

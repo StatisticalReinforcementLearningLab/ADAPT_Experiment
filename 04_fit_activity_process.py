@@ -49,13 +49,13 @@ import pandas as pd
 import statsmodels.api as sm
 from scipy.optimize import approx_fprime, minimize
 
-from vani_env import study_week_norm
+from vani_env import resolve_params_dir, study_week_norm
 
 
 DAILY_PATH: Path | None = None
 META_PATH: Path | None = None
 OUT_DIR: Path | None = None
-CALIBRATION_PATH = ROOT / "env_para_vanilla/generator_calibration.json"
+CALIBRATION_PATH = resolve_params_dir() / "generator_calibration.json"
 
 N_DAYS = 84
 N_WEEKS_FIT = 12
@@ -1399,6 +1399,7 @@ def write_calibration(model1: dict, model2: dict) -> None:
 
 
 def main() -> None:
+    print(f"params dir: {resolve_params_dir()}", flush=True)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--out",

@@ -65,7 +65,7 @@ The no-TD-modify Q prior is fit by fitted-Q iteration (FQI):
 The modified-TD prior is fit by direct joint FQI on the stacked
 bottleneck-state TD loss for ``theta=(eta,beta)``.
 
-Output is written to ``env_para_vanilla/rl_priors.json``; see
+Output is written to ``rl_priors.json`` in the parameter directory; see
 ``load_estimated_priors`` for reading it back into experiment.py.
 """
 
@@ -107,6 +107,7 @@ from vani_env import (
     assert_complete_week_slots,
     mask_dropout_fit_outcomes,
     pf_cae_mediator_ewma_rows,
+    resolve_params_dir,
     trim_pf_cae_prior,
 )
 
@@ -114,22 +115,19 @@ from vani_env import (
 # ──────────────────────────────────────────────────────────────────
 # Paths and constants
 # ──────────────────────────────────────────────────────────────────
-PROJECT_ROOT = Path(
-    os.getenv("ADAPR_PROJECT_ROOT", str(Path(__file__).resolve().parent))
-).expanduser().resolve()
+# Priors are written into WORK_DIR. The design still comes from that
+# folder's ``df_fit_11week.csv`` (RCT panel). Tuned STE folders only copy
+# that CSV — they do not contain κ-scaled trajectories — so STE-folder
+# priors stay RCT/vanilla-sized unless you replace the CSV.
+WORK_DIR = resolve_params_dir()
+if __name__ == "__main__":
+    print(f"params dir: {WORK_DIR}", flush=True)
 _combined = os.getenv("ADAPR_COMBINED_DIR", "").strip()
 if not _combined:
     raise SystemExit(
         "Set ADAPR_COMBINED_DIR to the folder with extracted MRT tables."
     )
 COMBINED_DIR = Path(_combined).expanduser().resolve()
-# Priors are written into WORK_DIR. The design still comes from that
-# folder's ``df_fit_11week.csv`` (RCT panel). Tuned STE folders only copy
-# that CSV — they do not contain κ-scaled trajectories — so STE-folder
-# priors stay RCT/vanilla-sized unless you replace the CSV.
-WORK_DIR = Path(os.getenv(
-    "ADAPR_EST_PRIOR_PARAMS_DIR", str(PROJECT_ROOT / "env_para_vanilla")
-)).expanduser().resolve()
 OUTPUT_PATH = WORK_DIR / "rl_priors.json"
 REWARD_PRIOR_PATH = WORK_DIR / "reward_shaping_prior.json"
 RL_Q_PRIOR_PATH = WORK_DIR / "rl_q_priors.json"
@@ -224,7 +222,7 @@ def _default_df_fit_path() -> Path:
             return p
     searched = "\n  ".join(str(p) for p in candidates)
     raise FileNotFoundError(
-        "Could not find df_fit input. Set ADAPR_EST_PRIOR_PARAMS_DIR to a "
+        "Could not find df_fit input. Set ADAPR_PARAMS_DIR to a "
         "folder with df_fit_11week.csv, or set ADAPR_COMBINED_DIR. "
         f"Searched:\n  {searched}"
     )

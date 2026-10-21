@@ -61,7 +61,7 @@ active. Weekly transition means are unchanged. The table is
 ``df_fit.csv``. ``ADAPR_ACTIVITY_DAILY`` overrides that path. A missing
 table is an error.
 
-Outputs (in ``env_para_vanilla/``)
+Outputs (in the parameter directory; default ``env_para_vanilla/``)
 * ``params_env_<uid>.json``: ``theta_penalized_{Ew,J,U1,U2,PV,FW,PJ}`` (+
   ``_names``; key names kept for the downstream readers) at the posterior mean,
   and emission residuals ``resid_penalized_*`` for the simulator's bootstrap;
@@ -93,14 +93,11 @@ import numpy as np
 import pandas as pd
 
 from dropout_utils import in_study_mask, weekly_checkin_completion_lag
-from vani_env import mask_dropout_fit_outcomes
+from vani_env import mask_dropout_fit_outcomes, resolve_params_dir
 
 logger = logging.getLogger("pu_hier")
 
-PROJECT_ROOT = Path(
-    os.environ.get("ADAPR_PROJECT_ROOT", Path(__file__).resolve().parent)
-).expanduser().resolve()
-WORK_DIR = PROJECT_ROOT / "env_para_vanilla"
+WORK_DIR = resolve_params_dir()
 ACTIVITY_DAILY_NAME = "participant_dropout_daily.csv"
 
 
@@ -1186,8 +1183,14 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=2026)
     ap.add_argument("--users", type=str, default="", help="comma list of participant ids (smoke tests)")
     ap.add_argument("--no-write", action="store_true", help="do not overwrite params/pred JSON or df_fit.csv")
-    ap.add_argument("--diag-dir", type=str, default="", help="where to save the posterior / diagnostics (default: env_para_vanilla)")
+    ap.add_argument(
+        "--diag-dir",
+        type=str,
+        default="",
+        help="where to save the posterior / diagnostics (default: the parameter directory)",
+    )
     args = ap.parse_args(argv)
+    print(f"params dir: {WORK_DIR}", flush=True)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     combined = os.environ.get("ADAPR_COMBINED_DIR", "").strip()

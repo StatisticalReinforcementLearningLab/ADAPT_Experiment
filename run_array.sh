@@ -58,7 +58,7 @@ if [ "${PRIOR_MODE}" = "loo" ]; then
   if [ ! -d "${LOO_DIR}" ] || ! ls "${LOO_DIR}"/held_out_*.json >/dev/null 2>&1; then
     echo "PRIOR_MODE=loo requires leave-one-out prior files in ${LOO_DIR}." >&2
     echo "Generate them first:" >&2
-    echo "  ADAPR_EST_PRIOR_PARAMS_DIR=${ADAPR_EXPERIMENT_PARAMS_DIR} python est_prior.py --loo" >&2
+    echo "  ADAPR_PARAMS_DIR=${ADAPR_EXPERIMENT_PARAMS_DIR} python est_prior.py --loo" >&2
     exit 1
   fi
   if [ "${USE_ESTIMATED_PRIORS}" = "0" ]; then

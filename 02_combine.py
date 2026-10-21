@@ -14,6 +14,9 @@ import numpy as np
 import pandas as pd
 
 from derived_covariates import add_derived_covariates
+from vani_env import resolve_params_dir
+
+print(f"params dir: {resolve_params_dir()}", flush=True)
 
 _combined = os.environ.get("ADAPR_COMBINED_DIR", "").strip()
 if not _combined:

@@ -30,7 +30,8 @@ and pulling the refit back, the local `env_para_vanilla/` mixes new data files w
 
 ## 1. LOCAL: data pipeline (minutes)
 
-`export ADAPR_COMBINED_DIR=<local folder with the raw extract>`. Run in order; each step has
+`export ADAPR_COMBINED_DIR=<local folder with the raw extract>`. Set only
+`ADAPR_PARAMS_DIR` if you need a non-default folder. Run in order; each step has
 a check before the next.
 
 - [ ] `python 01_extract_data.py`
@@ -85,6 +86,7 @@ a check before the next.
 - [ ] Back up the current fit: `cp -r env_para_vanilla env_para_vanilla_42users_20261014`
       (also `env_para_ste0.2/0.5/0.8` → `*_42users_20261014`).
 - [ ] `mkdir -p logs`; `module load python; mamba activate budgeted`.
+- [ ] Set only `ADAPR_PARAMS_DIR` if you need a non-default folder.
 
 
 ## 4. CLUSTER: NUTS fits (`sbatch`, hours)

@@ -132,7 +132,7 @@ from vani_env import (
     invert_log_zscore,
     invert_zscore,
     zscore_value,
-    PARAMS_DIR as DEFAULT_PARAMS_DIR,
+    resolve_params_dir as _resolve_params_dir,
     trim_pf_cae_prior,
     study_week_norm,
 )
@@ -197,13 +197,8 @@ SUNDAY_D_W = TERMINAL_D + 1
 
 
 def resolve_params_dir(params_dir=None):
-    """Resolve the parameter folder selected for this experiment run."""
-    raw = (
-        params_dir
-        or os.getenv("ADAPR_EXPERIMENT_PARAMS_DIR")
-        or DEFAULT_PARAMS_DIR
-    )
-    return Path(raw).expanduser().resolve()
+    """Parameter folder for this run. See ``vani_env.resolve_params_dir``."""
+    return _resolve_params_dir(params_dir)
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -2576,7 +2571,7 @@ def configure_leave_one_out_priors(held_out_uid, params_dir=None):
         if not path.is_file():
             raise FileNotFoundError(
                 f"missing leave-one-out prior bundle for user {held_out_uid}: {path}. "
-                f"Generate it offline with ADAPR_EST_PRIOR_PARAMS_DIR={params_dir} "
+                f"Generate it offline with ADAPR_PARAMS_DIR={params_dir} "
                 "python est_prior.py --loo"
             )
         with open(path, encoding="utf-8") as f:
@@ -3226,7 +3221,8 @@ if __name__ == "__main__":
         help=(
             "Parameter folder containing user_ids.txt, params_env_<id>.json, "
             "std_params.json, df_fit_11week.csv, and Ew_pooled_linear_coefs.json. "
-            "Defaults to ADAPR_EXPERIMENT_PARAMS_DIR, then env_para_vanilla."
+            "Defaults to ADAPR_PARAMS_DIR, otherwise <repo>/env_para_vanilla. "
+            "ADAPR_VANILLA_ENV_DIR is a deprecated alias."
         ),
     )
     parser.add_argument(
