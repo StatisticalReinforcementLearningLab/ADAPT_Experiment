@@ -3,7 +3,7 @@ pandas
 matplotlib
 scipy
 scikit-learn
-patsy
 pymc
 arviz
-seaborn
+statsmodels
+pytensor
