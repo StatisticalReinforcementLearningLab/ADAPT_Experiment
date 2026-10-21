@@ -180,32 +180,17 @@ N_FQI_ITERS = 25         # fitted-Q iterations per user
 # Data loading / numeric helpers
 # ──────────────────────────────────────────────────────────────────
 def _week_fix_and_filter(df: pd.DataFrame) -> pd.DataFrame:
-    """Match ``4_perceivedUtility`` week relabel and ``week < 13`` filter."""
+    """Reject a leftover week-0 block and drop week 13 or later."""
     df = df.copy()
     for userid in df["ParticipantIdentifier"].unique():
         vc = df.loc[df["ParticipantIdentifier"] == userid, "week"].value_counts()
         if vc.get(0, 0) > 2:
-            m = df["ParticipantIdentifier"] == userid
-            df.loc[m, "week"] = df.loc[m, "week"] + 1
+            weeks = sorted(int(w) for w in vc.index)
+            raise ValueError(
+                f"Participant {userid} has a week-0 block "
+                f"({int(vc.get(0, 0))} rows); weeks found: {weeks}."
+            )
     return df.loc[df["week"] < 13].copy()
-
-
-def _filter_users_with_cae_obs(df: pd.DataFrame) -> pd.DataFrame:
-    """Drop users with no observed weekly CAE values after the week filter."""
-    has_cae_obs = (
-        df.groupby("ParticipantIdentifier", sort=False)["CAE_avg_norm"]
-        .apply(lambda s: np.isfinite(s.to_numpy(dtype=float)).any())
-    )
-    keep_ids = has_cae_obs[has_cae_obs].index
-    drop_ids = has_cae_obs[~has_cae_obs].index
-    if len(drop_ids) > 0:
-        print(
-            "Excluding users with no CAE observations: "
-            + ", ".join(str(int(uid)) for uid in drop_ids)
-        )
-    if len(keep_ids) == 0:
-        raise ValueError("No users with observed CAE values remain after filtering.")
-    return df.loc[df["ParticipantIdentifier"].isin(keep_ids)].copy()
 
 
 def _default_df_fit_path() -> Path:
@@ -1828,7 +1813,7 @@ def build_pooled_rl_q_summary(df_fit: pd.DataFrame) -> pd.DataFrame:
 
 
 # ──────────────────────────────────────────────────────────────────
-# 5b. Joint (eta, beta) prior for the modified-TD-loss RLSVI
+# Joint (eta, beta) prior for the modified-TD-loss RLSVI
 # ──────────────────────────────────────────────────────────────────
 def _pool_joint_user_fits(
     pooled_theta: Optional[np.ndarray],
