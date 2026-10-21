@@ -40,7 +40,8 @@ mamba activate budgeted
 
 export ADAPR_PROJECT_ROOT="$SLURM_SUBMIT_DIR"
 export ADAPR_PARAMS_DIR="$ENV_VARIANT"
-export ADAPR_EXPERIMENT_PARAMS_DIR="${SLURM_SUBMIT_DIR}/${ENV_VARIANT}"
+# Absolute folder for this shell only. Not exported: Python reads ADAPR_PARAMS_DIR.
+PARAMS_ABS="${SLURM_SUBMIT_DIR}/${ENV_VARIANT}"
 export ADAPR_PRIOR_MODE="${PRIOR_MODE}"
 export USE_ESTIMATED_PRIORS
 export ZERO_CENTRE_POLICY_PRIORS
@@ -54,11 +55,11 @@ if [ "${PRIOR_MODE}" != "saved" ] && [ "${PRIOR_MODE}" != "loo" ]; then
   exit 1
 fi
 if [ "${PRIOR_MODE}" = "loo" ]; then
-  LOO_DIR="${ADAPR_EXPERIMENT_PARAMS_DIR}/loo_priors"
+  LOO_DIR="${PARAMS_ABS}/loo_priors"
   if [ ! -d "${LOO_DIR}" ] || ! ls "${LOO_DIR}"/held_out_*.json >/dev/null 2>&1; then
     echo "PRIOR_MODE=loo requires leave-one-out prior files in ${LOO_DIR}." >&2
     echo "Generate them first:" >&2
-    echo "  ADAPR_PARAMS_DIR=${ADAPR_EXPERIMENT_PARAMS_DIR} python est_prior.py --loo" >&2
+    echo "  ADAPR_PARAMS_DIR=${PARAMS_ABS} python est_prior.py --loo" >&2
     exit 1
   fi
   if [ "${USE_ESTIMATED_PRIORS}" = "0" ]; then
@@ -90,7 +91,7 @@ export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
 echo "ENV_VARIANT=${ENV_VARIANT}"
-echo "PARAMS_DIR=${ADAPR_EXPERIMENT_PARAMS_DIR}"
+echo "PARAMS_DIR=${PARAMS_ABS}"
 echo "PRIOR_MODE=${PRIOR_MODE}"
 echo "USE_ESTIMATED_PRIORS=${USE_ESTIMATED_PRIORS}"
 echo "ZERO_CENTRE_POLICY_PRIORS=${ZERO_CENTRE_POLICY_PRIORS}"
@@ -105,10 +106,10 @@ echo "ADAPR_GENERATOR_CALIBRATION=${ADAPR_GENERATOR_CALIBRATION-<unset>}"
 echo "ADAPR_PARAMS_DIR=${ADAPR_PARAMS_DIR}"
 echo "host=$(hostname)"
 
-python3 - <<'PY'
-import hashlib, json, os
+python3 - "${PARAMS_ABS}" <<'PY'
+import hashlib, json, os, sys
 from pathlib import Path
-p = Path(os.environ["ADAPR_EXPERIMENT_PARAMS_DIR"]) / "params_env_13.json"
+p = Path(sys.argv[1]) / "params_env_13.json"
 raw = p.read_bytes()
 d = json.loads(raw)
 m = dict(zip(d["theta_penalized_PV_names"], d["theta_penalized_PV"]))
@@ -134,7 +135,7 @@ fi
 
 python experiment.py \
   --seed-idx "$SLURM_ARRAY_TASK_ID" \
-  --params-dir "$ADAPR_EXPERIMENT_PARAMS_DIR" \
+  --params-dir "$PARAMS_ABS" \
   --prior-mode "$PRIOR_MODE" \
   --nweek "$NWEEK" \
   --save-mode compact \

@@ -63,18 +63,48 @@ def test_matching_alias_warns_and_uses_that_directory(monkeypatch):
 def test_wrappers_follow_the_shared_resolver(monkeypatch):
     _clear_params_env(monkeypatch)
     monkeypatch.setenv("ADAPR_PARAMS_DIR", "env_para_ste0.8")
-    # The array launcher still passes its absolute path. The experiment
-    # variable is not a second resolver.
-    monkeypatch.setenv(
-        "ADAPR_EXPERIMENT_PARAMS_DIR",
-        str(vani_env.PROJECT_ROOT / "env_para_ste0.2"),
-    )
     selected = (vani_env.PROJECT_ROOT / "env_para_ste0.8").resolve()
     assert experiment.resolve_params_dir() == selected
     assert ste_vanilla._resolve_params_dir() == selected
     explicit = vani_env.PROJECT_ROOT / "env_para_ste0.2"
     assert experiment.resolve_params_dir(explicit) == explicit.resolve()
     assert ste_vanilla._resolve_params_dir("env_para_ste0.2") == explicit.resolve()
+
+
+@pytest.mark.parametrize(
+    "alias",
+    [
+        "ADAPR_VANILLA_ENV_DIR",
+        "ADAPR_EXPERIMENT_PARAMS_DIR",
+        "ADAPR_EST_PRIOR_PARAMS_DIR",
+    ],
+)
+def test_each_params_alias_rejects_a_different_directory(monkeypatch, alias):
+    _clear_params_env(monkeypatch)
+    monkeypatch.setenv("ADAPR_PARAMS_DIR", "env_para_ste0.2")
+    monkeypatch.setenv(alias, "env_para_ste0.8")
+    with pytest.raises(ValueError, match=alias) as exc:
+        resolve_params_dir()
+    message = str(exc.value)
+    assert "env_para_ste0.2" in message
+    assert "env_para_ste0.8" in message
+    assert "ADAPR_PARAMS_DIR" in message
+
+
+@pytest.mark.parametrize(
+    "alias",
+    [
+        "ADAPR_VANILLA_ENV_DIR",
+        "ADAPR_EXPERIMENT_PARAMS_DIR",
+        "ADAPR_EST_PRIOR_PARAMS_DIR",
+    ],
+)
+def test_each_params_alias_warns_when_it_matches(monkeypatch, alias):
+    _clear_params_env(monkeypatch)
+    monkeypatch.setenv(alias, "env_para_vanilla")
+    with pytest.warns(DeprecationWarning, match=alias):
+        got = resolve_params_dir()
+    assert got == default_params_dir()
 
 
 def test_launchers_and_tune_ste_keep_ste_directories(monkeypatch):

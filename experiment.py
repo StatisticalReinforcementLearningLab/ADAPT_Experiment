@@ -3222,7 +3222,8 @@ if __name__ == "__main__":
             "Parameter folder containing user_ids.txt, params_env_<id>.json, "
             "std_params.json, df_fit_11week.csv, and Ew_pooled_linear_coefs.json. "
             "Defaults to ADAPR_PARAMS_DIR, otherwise <repo>/env_para_vanilla. "
-            "ADAPR_VANILLA_ENV_DIR is a deprecated alias."
+            "ADAPR_VANILLA_ENV_DIR, ADAPR_EXPERIMENT_PARAMS_DIR, and "
+            "ADAPR_EST_PRIOR_PARAMS_DIR are deprecated aliases."
         ),
     )
     parser.add_argument(

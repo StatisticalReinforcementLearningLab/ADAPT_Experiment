@@ -6,8 +6,9 @@ engagement mediators, weekly CAE, and latent E_w given the current state and
 actions. Residuals default to an AR(1) bootstrap of the fitted leftovers.
 
 ``resolve_params_dir`` selects the parameter folder: ``ADAPR_PARAMS_DIR``
-if set, otherwise ``<repo>/env_para_vanilla``. ``ADAPR_VANILLA_ENV_DIR`` is
-a deprecated alias of that folder. This module does not run an RL agent;
+if set, otherwise ``<repo>/env_para_vanilla``. ``ADAPR_VANILLA_ENV_DIR``,
+``ADAPR_EXPERIMENT_PARAMS_DIR``, and ``ADAPR_EST_PRIOR_PARAMS_DIR`` are
+deprecated aliases of that folder. This module does not run an RL agent;
 ``experiment.OnlineEnv`` wraps it for slot-by-slot control.
 
 History summaries (7-day EWMAs, lags, "yesterday" step count) are defined in
@@ -118,6 +119,13 @@ PROJECT_ROOT = Path(
     os.environ.get("ADAPR_PROJECT_ROOT", Path(__file__).resolve().parent)
 ).expanduser().resolve()
 _DEFAULT_PARAMS_NAME = "env_para_vanilla"
+# Old names for the parameter folder. Each must resolve to the same directory
+# as ``ADAPR_PARAMS_DIR`` (or the default); a different directory is an error.
+_PARAMS_DIR_ALIASES = (
+    "ADAPR_VANILLA_ENV_DIR",
+    "ADAPR_EXPERIMENT_PARAMS_DIR",
+    "ADAPR_EST_PRIOR_PARAMS_DIR",
+)
 
 
 def default_params_dir() -> Path:
@@ -140,10 +148,11 @@ def resolve_params_dir(params_dir=None) -> Path:
     set (absolute, or relative to the repository), otherwise
     ``<repo>/env_para_vanilla``.
 
-    ``ADAPR_VANILLA_ENV_DIR`` is a deprecated alias of that folder. If it is
-    set and resolves to a different directory than ``ADAPR_PARAMS_DIR`` (or
-    the default), raise ``ValueError`` naming both. If it resolves to the
-    same directory, warn and continue.
+    ``ADAPR_VANILLA_ENV_DIR``, ``ADAPR_EXPERIMENT_PARAMS_DIR``, and
+    ``ADAPR_EST_PRIOR_PARAMS_DIR`` are deprecated aliases of that folder.
+    If one is set and resolves to a different directory than
+    ``ADAPR_PARAMS_DIR`` (or the default), raise ``ValueError`` naming both.
+    If it resolves to the same directory, warn and continue.
     """
     primary_raw = os.environ.get("ADAPR_PARAMS_DIR", "").strip()
     if primary_raw:
@@ -152,17 +161,19 @@ def resolve_params_dir(params_dir=None) -> Path:
     else:
         chosen = default_params_dir()
         chosen_label = "the default parameter directory"
-    alias_raw = os.environ.get("ADAPR_VANILLA_ENV_DIR", "").strip()
-    if alias_raw:
+    for name in _PARAMS_DIR_ALIASES:
+        alias_raw = os.environ.get(name, "").strip()
+        if not alias_raw:
+            continue
         alias = _params_path(alias_raw)
         if alias != chosen:
             raise ValueError(
-                f"ADAPR_VANILLA_ENV_DIR resolves to {alias}, but "
+                f"{name} resolves to {alias}, but "
                 f"{chosen_label} resolves to {chosen}. "
                 "Set only ADAPR_PARAMS_DIR."
             )
         warnings.warn(
-            "ADAPR_VANILLA_ENV_DIR is deprecated; "
+            f"{name} is deprecated; "
             f"it matches {chosen_label} ({chosen}). "
             "Set only ADAPR_PARAMS_DIR if you need a non-default folder.",
             DeprecationWarning,
