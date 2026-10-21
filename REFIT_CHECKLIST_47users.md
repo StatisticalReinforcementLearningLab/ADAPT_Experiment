@@ -74,9 +74,9 @@ a check before the next.
       | dropout table | not in the repo | `$C/participant_dropout.csv` | 04, 05 |
       | daily activity | not in the repo | `$C/participant_dropout_daily.csv` | 04, 06 |
       | weekly check-ins | not in the repo | `$C/df_weekly_filled.csv` | 06 |
-      | calibration | `env_para_vanilla/generator_calibration.json` (tracked seed; transfer the script-04 rewrite) | — | simulator, 05, pytest |
 
       `df_merged.csv` is not a cluster input. 07 no longer reads it.
+      `env_para_vanilla/generator_calibration.json` is committed, including `activity_process`; the cluster reads it from git.
 - [ ] On the cluster, set `ADAPR_COMBINED_DIR` to the folder holding the transferred files.
 
 ## 3. CLUSTER setup (`/n/home09/xliu08/ADAPT_clean`)

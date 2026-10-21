@@ -71,5 +71,53 @@
       "participants": 28
     },
     "estimation_note": "Slot-specific coefficients are delivered-slot offset-logistic maximum-likelihood estimates. The fixed offset is the script-4 page-view occurrence logit (no week_norm in PV/FW/PJ/J); the extra predictor is observed interaction minus the fitted interaction probability. No study-time engagement calibration is applied."
+  },
+  "activity_process": {
+    "source_file": "ADAPR_COMBINED_DIR/participant_dropout_daily.csv",
+    "source_date": "2026-10-21",
+    "cohort": "47 modelled participants, study days 1-84",
+    "covariates": {
+      "week": "protocol Mon-Sun study week via vani_env.study_week_norm(week, n_weeks=12); Sunday starters use week 0 for study day 1 and weeks 1-12 on days 2-85. A Monday-start simulator episode uses the same numbering. The simulator passes its own horizon (n_weeks=36 for a 36-week run)",
+      "act7": "fraction of the previous 7 days active; days before study day 1 count as active; the observed week-0 Sunday is used as history; unobserved days are skipped",
+      "prior_gap": "1 on and after the day a completed gap ends (activity resumes); else 0",
+      "activity": "page view, wear, or a daily end-of-day or weekly check-in submission on the participant's local calendar day"
+    },
+    "model1": {
+      "coefficient_names": [
+        "intercept",
+        "week",
+        "act7",
+        "prior_gap"
+      ],
+      "coefficients": [
+        -0.5690729071626254,
+        0.2895126973876178,
+        -4.604231924466429,
+        1.8671335226793508
+      ],
+      "cluster_robust_se": [
+        0.9880851569205111,
+        0.2736796193458809,
+        0.953084383665669,
+        0.4909276466967899
+      ],
+      "lambda_bar": 0.01639807746677976
+    },
+    "model2": {
+      "c0": 0.9543822154625204,
+      "c1": 0.10769959348183056,
+      "c2": 0.035882028762911355,
+      "mu": 11.378749962681178,
+      "alpha": 0.6430885749382139,
+      "hessian_se": {
+        "c0": 0.3464183112336977,
+        "c1": 0.34292486191012883,
+        "c2": 0.29399988264861493,
+        "log_mu": 0.7648069932250154,
+        "log_alpha": 0.1832642356494742,
+        "mu": 8.702547545617449,
+        "alpha": 0.11785513614096138
+      }
+    }
   }
 }
