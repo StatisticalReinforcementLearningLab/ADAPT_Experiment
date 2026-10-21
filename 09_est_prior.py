@@ -4,7 +4,7 @@
 so the fitting module keeps that name. Run this after ``08_est_ew_weights.py``.
 """
 
-from est_prior import main
+from est_prior import cli
 
 if __name__ == "__main__":
-    main()
+    cli()

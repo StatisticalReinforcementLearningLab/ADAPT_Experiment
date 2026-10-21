@@ -136,6 +136,9 @@ def _store_group_effects_as_series(effects_by_group):
     return {key: pd.Series(np.asarray(vec, dtype=float)) for key, vec in effects_by_group.items()}
 
 
+_FIT_DIAGNOSTICS = []
+
+
 class _BayesianRandomCoefResult:
     """Lightweight stand-in for a ``MixedLMResults``, backed by an MCMC posterior.
 
@@ -169,11 +172,22 @@ class _BayesianRandomCoefResult:
         )
 
         n_div = int(idata.sample_stats["diverging"].sum())
-        rhat = az.rhat(idata, var_names=[v for v in ("beta", "sigma_re", "sigma_eps") if v in post])
+        var_names = [v for v in ("beta", "sigma_re", "sigma_eps") if v in post]
+        rhat = az.rhat(idata, var_names=var_names)
         max_rhat = max(float(rhat[v].max()) for v in rhat.data_vars)
+        ess = az.ess(idata, var_names=var_names, method="bulk")
+        min_ess = min(float(np.min(np.asarray(ess[v].values))) for v in ess.data_vars)
         self.n_divergences = n_div
         self.max_rhat = max_rhat
+        self.min_ess_bulk = min_ess
         self.converged = bool(n_div == 0 and max_rhat < 1.01)
+        _FIT_DIAGNOSTICS.append(
+            {
+                "divergences": n_div,
+                "max_rhat": max_rhat,
+                "min_ess_bulk": min_ess,
+            }
+        )
 
     def summary(self):
         lines = [
@@ -1699,4 +1713,10 @@ pd.DataFrame(cae_baseline_rows).sort_values("uid").to_csv(
 
 # Residual pools for the simulator's partial pooling are built by vani_env
 # from all participants' params_env files (no separate population file).
+_diag_path = work_folder / "testbed_diagnostics.json"
+_diag_path.write_text(
+    json.dumps({"models": _FIT_DIAGNOSTICS}, indent=2) + "\n",
+    encoding="utf-8",
+)
+print(f"Wrote {_diag_path} ({len(_FIT_DIAGNOSTICS)} models)")
 

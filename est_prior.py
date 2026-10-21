@@ -2735,7 +2735,7 @@ def main() -> Dict[str, Any]:
     return priors
 
 
-if __name__ == "__main__":
+def cli(argv=None) -> None:
     parser = argparse.ArgumentParser(description="Estimate shared or leave-one-out RL priors.")
     parser.add_argument(
         "--loo", action="store_true",
@@ -2749,10 +2749,14 @@ if __name__ == "__main__":
         "--loo-users", nargs="+", type=int, default=None,
         help="optional subset of held-out participant IDs to precompute",
     )
-    cli_args = parser.parse_args()
+    cli_args = parser.parse_args(argv)
     if cli_args.loo:
         paths = precompute_leave_one_out_priors(
             output_dir=cli_args.loo_output_dir, held_out_ids=cli_args.loo_users)
         print(f"Saved {len(paths)} leave-one-out prior bundles to {cli_args.loo_output_dir}")
     else:
         main()
+
+
+if __name__ == "__main__":
+    cli()

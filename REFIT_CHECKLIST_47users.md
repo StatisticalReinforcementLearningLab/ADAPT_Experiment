@@ -9,12 +9,14 @@ and pulling the refit back, the local `env_para_vanilla/` mixes new data files w
 
 ## 0. Before starting (local)
 
-- [ ] All code committed on `ste-refit-1009` and pushed to `lab` and `origin`. Code only:
-      scripts 1–5, `5b_patch_generator.py`, `6_est_Ew_weights.py`, `est_prior.py`,
-      `vani_env.py`, `experiment.py`, `ste_vanilla.py`, `aggregate.py`,
-      `dropout_utils.py`, `tests/`, `scripts/dropout_*.py`, `docs/`.
-      Not committed: `df_fit*`, `df_merged*`, `env_para_*/*.json`,
-      `pu_hier_posterior.nc`, `.pipeline_*.log`, `pf_cmp2*`.
+- [ ] All code committed on `ste-refit-1009`. Code only: `00`–`10`, `est_prior.py`,
+      `stability.py`, `vani_env.py`, `experiment.py`, `activity_process.py`,
+      `ste_vanilla.py`, `aggregate.py`, `dropout_utils.py`, `tests/`.
+      Not committed: `df_fit*`, `df_merged*`, `week1_cae_inputs.csv`,
+      `env_para_*/*.json` that a refit rewrites, `pu_hier_posterior.nc`,
+      `.pipeline_*.log`, `pf_cmp2*`.
+      The simulator does not read `fourSC_support_aware_lag`,
+      `activity_carryover_calibration`, or `interaction_pageview_calibration`.
 - [ ] Local tests pass: `python -m pytest tests` (21 dropout + CAE-smoother tests)
       and `python -m pytest RL_agents`.
 - [ ] Expected numbers to check against later (from `docs/dropout_check_20261017/`
@@ -31,28 +33,22 @@ and pulling the refit back, the local `env_para_vanilla/` mixes new data files w
 `export ADAPR_COMBINED_DIR=<local folder with the raw extract>`. Run in order; each step has
 a check before the next.
 
-- [ ] `python 1_data_extraction.py`
+- [ ] `python 01_extract_data.py`
       - [ ] prints 54 span-eligible + force-included 379 = 55 analysis starters; `EXCLUDE_IF_ALL_CAE_MISSING = False`
       - [ ] no-CAE users 112, 251, 257, 388 retained
       - [ ] `participant_dropout.csv` written: 64 starters, 55 complete, 9 still enrolled,
             4 dropouts with the days above
-- [ ] `python 2_combine_data_frame.py`
+- [ ] `python 02_combine.py`
       - [ ] `study_day` = calendar offset (check a non-Monday starter: day 1 = first EOD task date)
       - [ ] `dropout_day` present and NaN for non-dropouts
-- [ ] `python 3_standardization.py`
+- [ ] `python 03_standardize.py`
       - [ ] `study_day`, `dropout_day` carried into `df_fit.csv`; `std_params.json` rewritten
-(`4_perceived_utility.py` is superseded by 4b, which writes the same outputs; do not run it.)
+      - [ ] `week1_cae_inputs.csv` written next to `df_fit.csv`
+(The engagement fit in `archive/superseded/` is superseded by 06; do not run it.)
 
-- [ ] Activity process (gaps + dropout), LOCAL, right after script 3. Reads
-      `participant_dropout_daily.csv` and `participant_dropout.csv` from
-      `ADAPR_COMBINED_DIR` (script 1; survey-inclusive active definition,
-      protocol weeks 1-12, table through day 87). `ADAPR_ACTIVITY_DAILY`
-      overrides the daily file; the participant table is the sibling in that
-      directory. The script errors if either file is missing. Figures and
-      `report.md` go to `--out` (default `docs/activity_process_<YYYYMMDD>/`,
-      created if absent):
+- [ ] Activity process (gaps + dropout), LOCAL, right after script 03:
       ```
-      python scripts/fit_activity_process.py            # writes env_para_vanilla/generator_calibration.json["activity_process"]
+      python 04_fit_activity_process.py
       ```
       then copy the activity_process block into env_para_ste0.2/0.5/0.8 (on the cluster, after their re-tuning, see section 6).
       - [ ] counts: 58 gaps (49 ended, 9 open), 3537 risk-set days, 58 events (or the new extract's values; record them)
@@ -62,15 +58,25 @@ a check before the next.
 
 ## 2. LOCAL -> CLUSTER transfer
 
-- [ ] `python scripts/check_refit.py --stage data` (all PASS; WARN values recorded)
+- [ ] `python 05_check_refit.py --stage data` (all PASS; WARN values recorded)
 - [ ] On the cluster, FIRST pull the code and back up the old fit (section 3, first two items),
       so the backup is not overwritten by the transfer.
-- [ ] rsync to the cluster (scp/rsync only; these are participant data, never git):
-      the processed files that 4b, 5, 6, est_prior and the simulator read — at least
-      `df_fit.csv` / `df_fit_11week.csv`, `std_params.json`, `participant_dropout.csv`,
-      `participant_dropout_daily.csv`, and `env_para_vanilla/generator_calibration.json`
-      (with the new `activity_process` block). The exact list comes from Cursor's
-      "files read by the cluster steps" inventory; transfer exactly that list.
+- [ ] rsync to the cluster (scp/rsync only; these are participant data, never git).
+      Paths below are relative to the repo, and the extract copies are relative to
+      `ADAPR_COMBINED_DIR` (call it `$C`):
+
+      | File | Repo path | Extract path | Read by |
+      | --- | --- | --- | --- |
+      | fit panel | not in the repo | `$C/df_fit.csv` | 06, 07, 08 |
+      | 11-week panel | `env_para_vanilla/df_fit_11week.csv` (gitignored; 07 writes it on the cluster) | — | 09 |
+      | week-1 CAE inputs | not in the repo | `$C/week1_cae_inputs.csv` | 07 |
+      | standardization | `env_para_vanilla/std_params.json` (tracked seed; transfer the script-03 rewrite) | — | 07, simulator |
+      | dropout table | not in the repo | `$C/participant_dropout.csv` | 04, 05 |
+      | daily activity | not in the repo | `$C/participant_dropout_daily.csv` | 04, 06 |
+      | weekly check-ins | not in the repo | `$C/df_weekly_filled.csv` | 06 |
+      | calibration | `env_para_vanilla/generator_calibration.json` (tracked seed; transfer the script-04 rewrite) | — | simulator, 05, pytest |
+
+      `df_merged.csv` is not a cluster input. 07 no longer reads it.
 - [ ] On the cluster, set `ADAPR_COMBINED_DIR` to the folder holding the transferred files.
 
 ## 3. CLUSTER setup (`/n/home09/xliu08/ADAPT_clean`)
@@ -83,7 +89,7 @@ a check before the next.
 
 ## 4. CLUSTER: NUTS fits (`sbatch`, hours)
 
-- [ ] `python 4b_perceived_utility_bayes.py` (defaults: 4 chains, 2000 tune, 3000 draws, target_accept 0.95)
+- [ ] `python 06_fit_pu.py` (defaults: 4 chains, 2000 tune, 3000 draws, target_accept 0.95)
       - [ ] `mask_dropout_fit_outcomes` applied (log line); no post-dropout zeros in the fit panel
       - [ ] `participant_dropout_daily.csv` present in `ADAPR_COMBINED_DIR` (written by script 1,
             covering every df_fit day incl. day-85 Sundays); 4b errors if it is missing
@@ -92,7 +98,7 @@ a check before the next.
             the E_w transition unchanged
       - [ ] 0 divergences, max R-hat ≤ 1.01, min bulk ESS ≥ 400 for every model
       - [ ] `pu_hier_posterior.nc` written (not committed)
-- [ ] `python 5_fit_vanilla_testbed.py`
+- [ ] `python 07_fit_testbed.py`
       - [ ] `user_ids.txt` has 47 ids; 379 present; 82/138/259 present
       - [ ] high-CAE ceiling still removes 8 users; no-CAE users are *not* removed
       - [ ] seven hierarchical models pass the same diagnostics as above
@@ -101,24 +107,19 @@ a check before the next.
             expect roughly observed 27 / backcast 15–16 / model_mean 4–5 for 47 users — record the actual counts
       - [ ] every `params_env_<uid>.json` has `cae_baseline_norm` and `cae_baseline_source`
       - [ ] CAE / reward / Q fits used only CAE users (`_cae_users` log line)
-- [ ] `python 6_est_Ew_weights.py`
+- [ ] `python 08_est_ew_weights.py`
 
 ## 5. CLUSTER: priors and stability (minutes)
 
-- [ ] after 4b/5/6: `python scripts/check_refit.py --stage fit`
+- [ ] after 08: `python 05_check_refit.py --stage fit`
 
-- [ ] `python est_prior.py` → `env_para_vanilla/rl_priors.json`
+- [ ] `python 09_est_prior.py` → `env_para_vanilla/rl_priors.json`
       - [ ] PF priors fitted on all 47; reward/Q priors on CAE users only
       - [ ] fourSC dimension unchanged (17) unless the covariate set changed
-- [ ] `python est_prior.py --loo` → `env_para_vanilla/loo_priors/held_out_<uid>.json`, 47 files
-- [ ] `python stability.py` → max |g^E|, |g^Y| < 1 for all 47 × {never, always}
-- [ ] `python scripts/dropout_simulator_smoke.py` on 3 users
-      (reads `participant_dropout.csv` from `ADAPR_COMBINED_DIR`; errors if missing)
-      - [ ] activity paths: terminal gap >= 14 days by day 84 near 9% (data 8.5%); inactive-day share near 9.5%
-      - [ ] lambda = 0 reproduces the pre-activity simulator bit-for-bit (regression test)
-      - [ ] activity path seeded by (episode seed, uid): different users differ; same (seed, uid) identical across algorithms
-- [ ] `python -m pytest tests RL_agents`
-- [ ] `python scripts/check_refit.py --stage priors`
+- [ ] `python 09_est_prior.py --loo` → `env_para_vanilla/loo_priors/held_out_<uid>.json`, 47 files
+- [ ] `python 10_stability.py` → max |g^E|, |g^Y| < 1 for all 47 × {never, always}
+- [ ] `python 05_check_refit.py --stage priors`
+      (2000 activity paths, stability, loo files, and pytest, including RL_agents when present)
 - [ ] Copy `rl_priors.json` to `RL_agents/rl/rl_priors.json` and record the diff of `nu_0`.
 
 ## 6. CLUSTER: STE environments (sbatch, sequential; days)

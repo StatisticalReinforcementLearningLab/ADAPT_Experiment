@@ -1,0 +1,357 @@
+"""Checks for the 47-user refit.
+
+    python 05_check_refit.py --stage data     # local, after 04
+    python 05_check_refit.py --stage fit      # cluster, after 08
+    python 05_check_refit.py --stage priors   # cluster, after 10
+
+Reads ``ADAPR_COMBINED_DIR`` and ``ADAPR_PARAMS_DIR`` only. One PASS, WARN,
+or FAIL line per check. Exit status 1 if any check fails. Counts that move
+with a new extract (exclusion totals, baseline-source labels) are warnings.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from collections import Counter
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parent
+
+ANALYSIS_STARTERS = 55
+MODELLED = 47
+STARTERS = 64
+NO_CAE = (112, 251, 257, 388)
+MUST_INCLUDE = NO_CAE + (379,)
+HIGH_CAE = (37, 141, 151, 160, 188, 225, 285, 359)
+DROPOUT_DAYS = {379: 9, 138: 58, 82: 62, 259: 63}
+GENERATOR_KEYS = (
+    "theta_prior2hour_step_count",
+    "theta_active_status",
+    "theta_ws_interaction",
+    "theta_fourSC",
+    "theta_antic",
+    "theta_CAE",
+    "theta_CAE_short_avg",
+)
+
+
+class Report:
+    def __init__(self):
+        self.failed = False
+
+    def line(self, status: str, message: str) -> None:
+        print(f"{status} {message}")
+        if status == "FAIL":
+            self.failed = True
+
+
+def combined_dir() -> Path | None:
+    raw = os.environ.get("ADAPR_COMBINED_DIR", "").strip()
+    if not raw:
+        return None
+    return Path(raw).expanduser().resolve()
+
+
+def params_dir() -> Path:
+    raw = os.environ.get("ADAPR_PARAMS_DIR", "").strip()
+    path = Path(raw).expanduser() if raw else Path("env_para_vanilla")
+    if not path.is_absolute():
+        path = ROOT / path
+    return path.resolve()
+
+
+def _ids(frame: pd.DataFrame, column: str = "ParticipantIdentifier") -> set[int]:
+    return {int(v) for v in pd.to_numeric(frame[column], errors="coerce").dropna()}
+
+
+def stage_data(report: Report) -> None:
+    folder = combined_dir()
+    if folder is None:
+        report.line("FAIL", "ADAPR_COMBINED_DIR is not set")
+        return
+    dropout_path = folder / "participant_dropout.csv"
+    daily_path = folder / "participant_dropout_daily.csv"
+    fit_path = folder / "df_fit.csv"
+    week1_path = folder / "week1_cae_inputs.csv"
+    for path in (dropout_path, daily_path, fit_path, week1_path):
+        if not path.is_file():
+            report.line("FAIL", f"missing {path.name} in ADAPR_COMBINED_DIR")
+            return
+    dropout = pd.read_csv(dropout_path)
+    complete = dropout.loc[dropout["window_complete"].astype(bool)]
+    modelled = dropout.loc[dropout["in_modelled_47"].astype(bool)]
+    n_complete = int(len(complete))
+    n_modelled = int(len(modelled))
+    if n_complete == ANALYSIS_STARTERS and n_modelled == MODELLED:
+        report.line("PASS", f"{n_complete} analysis starters -> {n_modelled} modelled")
+    else:
+        report.line(
+            "FAIL",
+            f"analysis starters {n_complete} (expected {ANALYSIS_STARTERS}), "
+            f"modelled {n_modelled} (expected {MODELLED})",
+        )
+    modelled_ids = _ids(modelled)
+    missing = [uid for uid in MUST_INCLUDE if uid not in modelled_ids]
+    if missing:
+        report.line("FAIL", "modelled set is missing " + ", ".join(str(u) for u in missing))
+    else:
+        report.line("PASS", "no-CAE users 112, 251, 257, 388 and user 379 are modelled")
+    high = sorted(uid for uid in HIGH_CAE if uid in modelled_ids)
+    if high:
+        report.line("FAIL", "high-CAE users still modelled: " + ", ".join(str(u) for u in high))
+    else:
+        report.line("PASS", "high-CAE users are not modelled")
+    events = dropout.loc[dropout["dropout_status"].astype(str).eq("dropout")]
+    got = {
+        int(uid): int(day)
+        for uid, day in zip(events["ParticipantIdentifier"], events["dropout_day"])
+    }
+    if got == DROPOUT_DAYS:
+        report.line("PASS", "dropouts " + ", ".join(f"{u}:{d}" for u, d in sorted(got.items())))
+    else:
+        report.line("FAIL", f"dropout days {got} (expected {DROPOUT_DAYS})")
+    daily = pd.read_csv(daily_path, usecols=["ParticipantIdentifier", "study_day"])
+    n_users = daily["ParticipantIdentifier"].nunique()
+    missing_span = []
+    for uid, days in daily.groupby("ParticipantIdentifier")["study_day"]:
+        have = {int(v) for v in pd.to_numeric(days, errors="coerce").dropna()}
+        if not set(range(1, 88)).issubset(have):
+            missing_span.append(int(uid))
+    if n_users == STARTERS and not missing_span:
+        report.line("PASS", f"daily table covers study days 1-87 for {n_users} starters")
+    else:
+        report.line(
+            "FAIL",
+            f"daily users {n_users} (expected {STARTERS}); "
+            f"missing days 1-87 for {missing_span[:8]}",
+        )
+    fit = pd.read_csv(fit_path, nrows=0)
+    if {"study_day", "dropout_day"}.issubset(fit.columns):
+        report.line("PASS", "df_fit has study_day and dropout_day")
+    else:
+        report.line("FAIL", "df_fit is missing study_day or dropout_day")
+    week1 = pd.read_csv(week1_path)
+    week1_ids = _ids(week1)
+    if modelled_ids <= week1_ids and len(week1) == len(week1_ids):
+        report.line(
+            "PASS",
+            f"week1_cae_inputs.csv has one row for each of {n_modelled} modelled users",
+        )
+    else:
+        report.line(
+            "FAIL",
+            "week1_cae_inputs.csv rows "
+            f"{len(week1)}; modelled users missing "
+            + ", ".join(str(u) for u in sorted(modelled_ids - week1_ids)),
+        )
+
+
+def _diag_ok(report: Report, label: str, record: dict) -> None:
+    n_div = record.get("divergences")
+    rhat = record.get("max_rhat")
+    ess = record.get("min_ess_bulk")
+    if n_div is None or rhat is None or ess is None:
+        report.line("FAIL", f"{label} diagnostics are missing divergences, max_rhat, or min_ess_bulk")
+        return
+    if int(n_div) == 0 and float(rhat) <= 1.01 and float(ess) >= 400:
+        report.line(
+            "PASS",
+            f"{label} divergences=0 max R-hat={float(rhat):.4f} min bulk ESS={float(ess):.0f}",
+        )
+    else:
+        report.line(
+            "FAIL",
+            f"{label} divergences={n_div} max R-hat={rhat} min bulk ESS={ess}",
+        )
+
+
+def stage_fit(report: Report) -> None:
+    folder = params_dir()
+    pu_path = folder / "pu_hier_diagnostics.json"
+    tb_path = folder / "testbed_diagnostics.json"
+    if not pu_path.is_file():
+        report.line("FAIL", f"missing {pu_path.name}")
+    else:
+        pu = json.loads(pu_path.read_text(encoding="utf-8"))
+        _diag_ok(report, "06", pu)
+        filt = pu.get("activity_filter")
+        if not isinstance(filt, dict) or "zero_check" not in filt:
+            report.line("FAIL", "06 diagnostics have no activity-filter zero check")
+        elif int(filt["zero_check"]) == 0:
+            report.line("PASS", "06 zero check is 0")
+            report.line(
+                "WARN",
+                "06 exclusions "
+                f"person-days inactive={filt.get('person_days_inactive')} "
+                f"outside_window={filt.get('person_days_outside_window')} "
+                f"person-weeks inactive={filt.get('person_weeks_inactive')} "
+                f"outside_window={filt.get('person_weeks_outside_window')}",
+            )
+        else:
+            report.line("FAIL", f"06 zero check is {filt['zero_check']}")
+    if not tb_path.is_file():
+        report.line("FAIL", f"missing {tb_path.name}")
+    else:
+        models = json.loads(tb_path.read_text(encoding="utf-8")).get("models", [])
+        if not models:
+            report.line("FAIL", "07 diagnostics list no models")
+        for i, model in enumerate(models, start=1):
+            _diag_ok(report, f"07 model {i}", model)
+    ids_path = folder / "user_ids.txt"
+    if not ids_path.is_file():
+        report.line("FAIL", "missing user_ids.txt")
+        uids = []
+    else:
+        uids = [int(u) for u in np.loadtxt(ids_path, dtype=int).ravel()]
+        if len(uids) == MODELLED and 379 in uids:
+            report.line("PASS", f"user_ids.txt has {len(uids)} ids, including 379")
+        else:
+            report.line("FAIL", f"user_ids.txt has {len(uids)} ids; 379 present={379 in uids}")
+    sources = Counter()
+    missing_coef = []
+    for uid in uids:
+        path = folder / f"params_env_{uid}.json"
+        if not path.is_file():
+            missing_coef.append(uid)
+            continue
+        env = json.loads(path.read_text(encoding="utf-8"))
+        if "cae_baseline_norm" not in env or "cae_baseline_source" not in env:
+            missing_coef.append(uid)
+            continue
+        if any(key not in env for key in GENERATOR_KEYS):
+            missing_coef.append(uid)
+            continue
+        sources[str(env["cae_baseline_source"])] += 1
+    if uids and not missing_coef:
+        report.line(
+            "PASS",
+            "every params_env file has cae_baseline_norm, cae_baseline_source, "
+            "and the generator coefficients",
+        )
+    elif uids:
+        report.line(
+            "FAIL",
+            "params missing baseline or generator coefficients: "
+            + ", ".join(str(u) for u in missing_coef[:12]),
+        )
+    report.line(
+        "WARN",
+        "cae_baseline_source counts " + ", ".join(f"{k}={v}" for k, v in sorted(sources.items())),
+    )
+    cal_path = folder / "generator_calibration.json"
+    if not cal_path.is_file():
+        report.line("FAIL", "missing generator_calibration.json")
+    else:
+        cal = json.loads(cal_path.read_text(encoding="utf-8"))
+        if "activity_process" in cal:
+            report.line("PASS", "generator_calibration.json has activity_process")
+        else:
+            report.line("FAIL", "generator_calibration.json has no activity_process")
+
+
+def _simulate_band(report: Report, folder: Path) -> None:
+    from activity_process import (
+        coefficients_from_record,
+        dropout_seed_sequence,
+        simulate_activity_paths,
+        summarize_paths,
+    )
+
+    cal_path = folder / "generator_calibration.json"
+    ids_path = folder / "user_ids.txt"
+    if not cal_path.is_file() or not ids_path.is_file():
+        report.line("FAIL", "2000-path check needs generator_calibration.json and user_ids.txt")
+        return
+    record = json.loads(cal_path.read_text(encoding="utf-8")).get("activity_process")
+    if not record:
+        report.line("FAIL", "2000-path check needs activity_process")
+        return
+    coef, fit = coefficients_from_record(record)
+    uids = [int(u) for u in np.loadtxt(ids_path, dtype=int).ravel()]
+    parts = []
+    for i in range(2000):
+        uid = uids[i % len(uids)]
+        seed = 20261022 + i // len(uids)
+        rng = np.random.default_rng(dropout_seed_sequence(seed, uid))
+        parts.append(simulate_activity_paths(1, 84, coef, fit, 12, rng))
+    stacked = {
+        key: np.concatenate([np.atleast_1d(part[key]) for part in parts])
+        for key in ("n_gaps", "inactive_days", "dropout_day", "ended", "censored", "terminal14")
+    }
+    stacked["n_days"] = 84
+    stacked["n_paths"] = 2000
+    summary = summarize_paths(stacked)
+    terminal = float(summary["terminal14"])
+    inactive = float(summary["inactive_fraction"])
+    if 0.06 <= terminal <= 0.12:
+        report.line("PASS", f"2000 paths terminal gap >= 14 by day 84 is {terminal:.3f}")
+    else:
+        report.line("FAIL", f"2000 paths terminal gap share {terminal:.3f} is outside 0.06-0.12")
+    if 0.07 <= inactive <= 0.12:
+        report.line("PASS", f"2000 paths inactive share is {inactive:.3f}")
+    else:
+        report.line("FAIL", f"2000 paths inactive share {inactive:.3f} is outside 0.07-0.12")
+
+
+def _pytest(report: Report, args: list[str], label: str) -> None:
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", *args, "-q", "--tb=line"],
+        cwd=ROOT,
+        check=False,
+    )
+    if proc.returncode == 0:
+        report.line("PASS", f"pytest {label}")
+    else:
+        report.line("FAIL", f"pytest {label} exited {proc.returncode}")
+
+
+def stage_priors(report: Report) -> None:
+    folder = params_dir()
+    priors = folder / "rl_priors.json"
+    if priors.is_file():
+        report.line("PASS", "rl_priors.json present")
+    else:
+        report.line("FAIL", "missing rl_priors.json")
+    loo = sorted((folder / "loo_priors").glob("held_out_*.json"))
+    if len(loo) == MODELLED:
+        report.line("PASS", f"{len(loo)} loo_priors/held_out_*.json")
+    else:
+        report.line("FAIL", f"{len(loo)} loo prior files (expected {MODELLED})")
+    stability_path = folder / "stability_skeleton.json"
+    if not stability_path.is_file():
+        report.line("FAIL", "missing stability_skeleton.json")
+    else:
+        stability = json.loads(stability_path.read_text(encoding="utf-8"))
+        g_e = abs(float(stability["max_abs_gE"]))
+        g_y = abs(float(stability["max_abs_gY"]))
+        if g_e < 1 and g_y < 1:
+            report.line("PASS", f"stability max |gE|={g_e:.3f} |gY|={g_y:.3f}")
+        else:
+            report.line("FAIL", f"stability max |gE|={g_e:.3f} |gY|={g_y:.3f}")
+    _simulate_band(report, folder)
+    _pytest(report, ["tests"], "tests")
+    if (ROOT / "RL_agents").is_dir():
+        _pytest(report, ["RL_agents"], "RL_agents")
+    else:
+        report.line("WARN", "RL_agents is not in this checkout")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--stage", required=True, choices=("data", "fit", "priors"))
+    args = parser.parse_args()
+    report = Report()
+    {"data": stage_data, "fit": stage_fit, "priors": stage_priors}[args.stage](report)
+    if report.failed:
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()

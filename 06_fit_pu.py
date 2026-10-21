@@ -1,10 +1,10 @@
 """Hierarchical Bayesian perceived-utility state-space model (self-contained).
 
 Fits the perceived-utility (PU) process of the testbed jointly across MRT
-participants by NUTS and writes the same output files as the earlier
-penalized-likelihood script ``archive/superseded/4_perceived_utility.py``, so the downstream
-scripts (5, 5b, 6, ``vani_env``) are unchanged. This script does not import
-script 4.
+participants by NUTS and writes the same output files as the superseded
+penalized-likelihood script in ``archive/superseded/``, so ``07_fit_testbed.py``,
+``08_est_ew_weights.py``, and ``vani_env`` are unchanged. This script does not
+import that archived fit.
 
 Model (Section "Perceived-Utility Process" of the manuscript)
 -------------------------------------------------------------
@@ -1291,6 +1291,16 @@ def main(argv=None):
             "divergences": n_div,
             "max_rhat": rhat_max if np.isfinite(rhat_max) else None,
             "min_ess_bulk": ess_min if np.isfinite(ess_min) else None,
+            "activity_filter": {
+                "person_days_inactive": int(filt["person_days_inactive"]),
+                "person_days_outside_window": int(filt["person_days_outside_window"]),
+                "person_weeks_inactive": int(filt["person_weeks_inactive"]),
+                "person_weeks_outside_window": int(filt["person_weeks_outside_window"]),
+                "nonzero_excluded": {
+                    str(k): int(v) for k, v in filt["nonzero_excluded"].items()
+                },
+                "zero_check": int(sum(int(v) for v in filt["nonzero_excluded"].values())),
+            },
             "sigma_E_fixed": SIGMA_E_FIXED, "re_sd_mode": RE_SD_MODE, "common_coefficients": list(COMMON_COEFS), "E_limits": E_limits,
             "shared_noise_posterior_mean": {nm: float(idata.posterior[nm].values.mean())
                                             for nm in SHARED_NOISE},
