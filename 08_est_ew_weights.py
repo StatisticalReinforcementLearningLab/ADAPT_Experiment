@@ -1,12 +1,12 @@
 """Approximate filtered E_{w+1} with a pooled linear filter of weekly summaries.
 
-Used at RCT time, when the latent E_w from script 4 is not available. The
+Used at RCT time, when the latent E_w from ``06_fit_pu.py`` is not available. The
 outcome is the filtered trajectory in ``pred_<uid>.json``. Predictors follow
 the script-4 SSM: last week's Ê (AR), this week's PV/FW/PJ (transition),
 and this Sunday's ``J_{w+1}`` plus ``J_{w+1}(U_1+U_2)/14`` (measurement
 update of the target E). ``E_lag`` is the previous week's *predicted* Ê
-(week 1 uses the E_1 pin 2.0), not last Sunday's survey and not script 4's
-latent filter.
+(week 1 uses the E_1 pin 2.0), not last Sunday's survey and not the latent
+filter from ``06_fit_pu.py``.
 
 PV/FW/PJ averages are Monday--Saturday means (12 decision slots / 6 days),
 exactly as the online approximation computes them in the trial, with a
