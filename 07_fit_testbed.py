@@ -8,9 +8,9 @@ or as a hierarchical Bayesian model:
 
 The fitting panel (MRT weeks 2-12, renumbered 1-11) is built in ``03_standardize.py``.
 
-The analysis sample is already restricted in script 1 by the high-CAE ceiling
-(min weekly CAE_avg ≥ 6 or week-1 CAE_avg = 7). Low wear, missing surveys,
-and zero CAE weeks are retained. This script fits whoever remains in ``df_fit.csv``.
+Script 1 writes the modelled cohort. This script checks that ``df_fit.csv``
+is that set and raises if it is not. Low wear, missing surveys, and zero CAE
+weeks are retained.
 Writes ``params_env_<uid>.json`` (mediator/outcome blocks and residuals),
 ``pred_<uid>.json`` and ``user_ids.txt``. All models are hierarchical
 Bayesian (one NUTS schedule, NUTS_TUNE / NUTS_DRAWS / NUTS_TARGET_ACCEPT).
@@ -888,6 +888,23 @@ _has_cae_obs = (
     .apply(lambda s: np.any(~np.isnan(s.to_numpy(dtype=float))))
 )
 userid_all = np.array([int(uid) for uid in _all_userids], dtype=int)
+_cohort_path = Path(folder) / "modelled_cohort.csv"
+if not _cohort_path.is_file():
+    raise SystemExit(
+        f"missing {_cohort_path}; script 1 writes the modelled cohort"
+    )
+_cohort = pd.read_csv(_cohort_path)
+_modelled_ids = {
+    int(uid)
+    for uid in _cohort.loc[_cohort["in_modelled"].astype(bool), "uid"]
+}
+_fit_ids = {int(uid) for uid in userid_all}
+if _fit_ids != _modelled_ids:
+    raise SystemExit(
+        "df_fit users do not match modelled_cohort.csv in_modelled: "
+        f"only in df_fit {sorted(_fit_ids - _modelled_ids)}; "
+        f"only modelled {sorted(_modelled_ids - _fit_ids)}"
+    )
 no_cae_userids = np.array(
     [uid for uid in _all_userids if not bool(_has_cae_obs.get(uid, False))],
     dtype=int,

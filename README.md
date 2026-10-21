@@ -63,7 +63,7 @@ is gitignored.
 ## Data that never goes into git
 
 `df_fit.csv`, `df_fit_11week.csv`, `df_merged.csv`, `week1_cae_inputs.csv`,
-`participant_dropout.csv`, `participant_dropout_daily.csv`,
+`participant_dropout.csv`, `modelled_cohort.csv`, `participant_dropout_daily.csv`,
 `df_weekly_filled.csv`, anything matching `env_para_*/df_*.csv`, `docs/**/*.csv`,
 `*.pkl`, and the `results*/` folders. `params_env_*.json`, `pred_*.json`,
 `user_ids.txt`, `loo_priors/`, and `stability_skeleton.json` stay tracked as

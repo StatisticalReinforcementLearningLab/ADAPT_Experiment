@@ -7,7 +7,8 @@
 Reads ``ADAPR_COMBINED_DIR`` and the parameter directory
 (``ADAPR_PARAMS_DIR``, otherwise ``env_para_vanilla``). One PASS, WARN,
 or FAIL line per check. Exit status 1 if any check fails. Counts that move
-with a new extract (exclusion totals, baseline-source labels) are warnings.
+with a new extract (the modelled-cohort size, exclusion totals,
+baseline-source labels) are warnings. A missing ``modelled_cohort.csv`` fails.
 """
 
 from __future__ import annotations
@@ -79,24 +80,45 @@ def stage_data(report: Report) -> None:
     daily_path = folder / "participant_dropout_daily.csv"
     fit_path = folder / "df_fit.csv"
     week1_path = folder / "week1_cae_inputs.csv"
-    for path in (dropout_path, daily_path, fit_path, week1_path):
+    cohort_path = folder / "modelled_cohort.csv"
+    for path in (dropout_path, daily_path, fit_path, week1_path, cohort_path):
         if not path.is_file():
             report.line("FAIL", f"missing {path.name} in ADAPR_COMBINED_DIR")
             return
     dropout = pd.read_csv(dropout_path)
+    if "in_modelled" not in dropout.columns:
+        report.line("FAIL", "participant_dropout.csv has no in_modelled column")
+        return
+    cohort = pd.read_csv(cohort_path)
+    if not {"uid", "in_modelled", "reason"}.issubset(cohort.columns):
+        report.line("FAIL", "modelled_cohort.csv is missing uid, in_modelled, or reason")
+        return
     complete = dropout.loc[dropout["window_complete"].astype(bool)]
-    modelled = dropout.loc[dropout["in_modelled_47"].astype(bool)]
+    modelled = dropout.loc[dropout["in_modelled"].astype(bool)]
     n_complete = int(len(complete))
-    n_modelled = int(len(modelled))
-    if n_complete == ANALYSIS_STARTERS and n_modelled == MODELLED:
-        report.line("PASS", f"{n_complete} analysis starters -> {n_modelled} modelled")
+    n_modelled = int(cohort["in_modelled"].astype(bool).sum())
+    if n_complete == ANALYSIS_STARTERS:
+        report.line("PASS", f"{n_complete} analysis starters")
     else:
         report.line(
             "FAIL",
-            f"analysis starters {n_complete} (expected {ANALYSIS_STARTERS}), "
-            f"modelled {n_modelled} (expected {MODELLED})",
+            f"analysis starters {n_complete} (expected {ANALYSIS_STARTERS})",
+        )
+    if n_modelled == MODELLED:
+        report.line("PASS", f"modelled_cohort.csv has {n_modelled} modelled users")
+    else:
+        report.line(
+            "WARN",
+            f"modelled_cohort.csv has {n_modelled} modelled users "
+            f"(expected {MODELLED} on the October extract)",
         )
     modelled_ids = _ids(modelled)
+    cohort_ids = _ids(cohort.loc[cohort["in_modelled"].astype(bool)], "uid")
+    if modelled_ids != cohort_ids:
+        report.line(
+            "FAIL",
+            "in_modelled on participant_dropout.csv does not match modelled_cohort.csv",
+        )
     missing = [uid for uid in MUST_INCLUDE if uid not in modelled_ids]
     if missing:
         report.line("FAIL", "modelled set is missing " + ", ".join(str(u) for u in missing))

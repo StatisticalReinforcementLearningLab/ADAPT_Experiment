@@ -72,7 +72,8 @@ a check before the next.
       | 11-week panel | `env_para_vanilla/df_fit_11week.csv` (gitignored; 07 writes it on the cluster) | — | 09 |
       | week-1 CAE inputs | not in the repo | `$C/week1_cae_inputs.csv` | 07 |
       | standardization | `env_para_vanilla/std_params.json` (tracked seed; transfer the script-03 rewrite) | — | 07, simulator |
-      | dropout table | not in the repo | `$C/participant_dropout.csv` | 04, 05 |
+      | dropout table | not in the repo | `$C/participant_dropout.csv` (`in_modelled` column) | 04, 05 |
+      | modelled cohort | not in the repo | `$C/modelled_cohort.csv` | 04 (via `in_modelled`), 05, 07 |
       | daily activity | not in the repo | `$C/participant_dropout_daily.csv` | 04, 06 |
       | weekly check-ins | not in the repo | `$C/df_weekly_filled.csv` | 06 |
 

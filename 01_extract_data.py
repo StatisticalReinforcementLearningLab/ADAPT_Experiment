@@ -2,10 +2,11 @@
 #
 # Reads the ADAPTS MRT source tables under `DATA_FOLDER` and writes one CSV per
 # stream (surveys, schedule, page views, walking suggestions, wearables, steps).
-# Cohort rules (83-day completers, minus the high-CAE ceiling) are the
-# constants in the setup cell below. Low wear, low FourSC, missing weekly or
-# daily surveys, and zero CAE weeks are all retained (no-CAE users get a
-# model-imputed baseline CAE in 07_fit_testbed.py).
+# Cohort rules (83-day span, the force-include, and the high-CAE ceiling) are
+# the constants in the setup cell below. ``cohort.modelled_membership`` applies
+# them once and writes ``modelled_cohort.csv``. Low wear, low FourSC, missing
+# weekly or daily surveys, and zero CAE weeks are all retained (no-CAE users
+# get a model-imputed baseline CAE in 07_fit_testbed.py).
 # Next: `02_combine.py`.
 
 # 0. Setup
@@ -20,6 +21,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from cohort import CohortPolicy, modelled_membership
 from dropout_utils import (
     build_participant_dropout_table,
     max_raw_observation_timestamp,
@@ -970,6 +972,28 @@ df_daily_filled = fill_daily_84(
 )
 
 
+def _cohort_policy() -> CohortPolicy:
+    """The constants above, as the single modelled-cohort policy."""
+    return CohortPolicy(
+        min_active_span_days=MIN_ACTIVE_SPAN_DAYS,
+        force_include_ids=tuple(str(pid) for pid in FORCE_INCLUDE_IDS),
+        manual_override_ids=tuple(str(pid) for pid in MANUAL_EXCLUSION_OVERRIDE_IDS),
+        exclude_if_insufficient_wear=EXCLUDE_IF_INSUFFICIENT_WEAR,
+        exclude_if_insufficient_foursc=EXCLUDE_IF_INSUFFICIENT_FOURSC,
+        exclude_if_all_weekly_surveys_missing=EXCLUDE_IF_ALL_WEEKLY_SURVEYS_MISSING,
+        exclude_if_all_daily_surveys_missing=EXCLUDE_IF_ALL_DAILY_SURVEYS_MISSING,
+        exclude_if_all_cae_missing=EXCLUDE_IF_ALL_CAE_MISSING,
+        min_decision_window_wear_sum=MIN_DECISION_WINDOW_WEAR_SUM,
+        min_foursc_non_nan=MIN_FOURSC_NON_NAN,
+        min_weekly_surveys_present=MIN_WEEKLY_SURVEYS_PRESENT,
+        min_daily_surveys_present=MIN_DAILY_SURVEYS_PRESENT,
+        min_cae_weeks_present=MIN_CAE_WEEKS_PRESENT,
+        exclude_if_high_cae=EXCLUDE_IF_HIGH_CAE,
+        min_weekly_cae_threshold=MIN_WEEKLY_CAE_THRESHOLD,
+        week1_cae_ceiling=WEEK1_CAE_CEILING,
+    )
+
+
 def _weekly_cae_ceiling_stats(df_weekly_filled):
     """Per-user min and week-1 ``CAE_avg`` on the 12 filled weekly slots.
 
@@ -1019,15 +1043,11 @@ def audit_analysis_sample_exclusions(
     """
     Apply analysis-sample exclusion rules and return an audit table.
 
-    Rules that remove someone:
-      * No week with a non-missing CAE item.
-      * High-CAE ceiling: 12-week min CAE_avg ≥ MIN_WEEKLY_CAE_THRESHOLD
-        or week-1 CAE_avg = WEEK1_CAE_CEILING.
-    Wear, FourSC, and missing weekly or daily surveys are recorded and
-    retained. FORCE_INCLUDE_IDS are kept.
+    Inclusion and exclusion come from ``cohort.modelled_membership`` (span,
+    force-include, the high-CAE ceiling, and the EXCLUDE_IF flags). Wear,
+    FourSC, and survey counts are recorded on the audit row.
     """
     override = {str(pid) for pid in MANUAL_EXCLUSION_OVERRIDE_IDS}
-    force_include = {str(pid) for pid in FORCE_INCLUDE_IDS}
 
     def _non_nan_counts(df, value_col):
         if df is None or len(df) == 0 or value_col not in df.columns:
@@ -1085,6 +1105,13 @@ def audit_analysis_sample_exclusions(
         .astype(int)
     )
 
+    span_by_id = (
+        summary_surveytask.assign(
+            ParticipantIdentifier=summary_surveytask["ParticipantIdentifier"].astype(str)
+        )
+        .set_index("ParticipantIdentifier")["span_days"]
+    )
+    policy = _cohort_policy()
     rows = []
     for pid in participant_ids:
         pid_key = str(pid)
@@ -1096,42 +1123,25 @@ def audit_analysis_sample_exclusions(
         n_cae = int(cae_weeks.get(pid_key, 0))
         min_cae = min_weekly_cae.get(pid_key, np.nan)
         w1_cae = week1_cae.get(pid_key, np.nan)
-
-        low_wear = n_wear < MIN_DECISION_WINDOW_WEAR_SUM
-        low_foursc = n_foursc < MIN_FOURSC_NON_NAN
-        no_daily = n_daily < MIN_DAILY_SURVEYS_PRESENT
-        retain_low_engagement = low_wear or low_foursc or no_daily
-
-        reasons = []
-        if EXCLUDE_IF_INSUFFICIENT_WEAR and low_wear:
-            reasons.append("insufficient_decision_window_wear")
-        if EXCLUDE_IF_INSUFFICIENT_FOURSC and low_foursc:
-            reasons.append("no_foursc_step_outcomes")
-        if (
-            EXCLUDE_IF_ALL_WEEKLY_SURVEYS_MISSING
-            and n_weekly < MIN_WEEKLY_SURVEYS_PRESENT
-            and not retain_low_engagement
-        ):
-            reasons.append("all_weekly_surveys_missing")
-        if EXCLUDE_IF_ALL_DAILY_SURVEYS_MISSING and no_daily:
-            reasons.append("all_daily_surveys_missing")
-        if EXCLUDE_IF_ALL_CAE_MISSING and n_cae < MIN_CAE_WEEKS_PRESENT:
-            reasons.append("all_cae_missing")
-        if pid_key in force_include:
-            reasons = []
-        elif EXCLUDE_IF_HIGH_CAE:
-            if np.isfinite(min_cae) and float(min_cae) >= float(
-                MIN_WEEKLY_CAE_THRESHOLD
-            ):
-                reasons.append("min_weekly_cae_ge_6")
-            if np.isfinite(w1_cae) and np.isclose(
-                float(w1_cae), float(WEEK1_CAE_CEILING)
-            ):
-                reasons.append("week1_cae_eq_7")
-        if pid_key in override and not reasons:
-            reasons.append("manual_override")
-
-        reason = "|".join(reasons)
+        decision = modelled_membership(
+            pd.DataFrame(
+                [
+                    {
+                        "ParticipantIdentifier": pid_key,
+                        "span_days": span_by_id.get(pid_key, np.nan),
+                        "decision_window_wear_sum": n_wear,
+                        "hourly_non_nan": n_foursc,
+                        "weekly_present_sum": n_weekly,
+                        "daily_present_sum": n_daily,
+                        "cae_weeks_present": n_cae,
+                        "min_weekly_cae": min_cae,
+                        "week1_cae": w1_cae,
+                    }
+                ]
+            ),
+            policy,
+        ).iloc[0]
+        reason = "" if bool(decision.in_modelled) else str(decision.reason)
         rows.append(
             {
                 "ParticipantIdentifier": pid_key,
@@ -3013,10 +3023,65 @@ else:
         )
     print(f"Wrote exclusion table to {_exclusion_path}")
 
-analysis_participant_ids = np.setdiff1d(
-    complete_participant_ids,
-    list(EXCLUDED_PARTICIPANT_IDS),
+_span_anchors = summary_surveytask[
+    ["ParticipantIdentifier", "span_days"]
+].copy()
+_span_anchors["ParticipantIdentifier"] = _span_anchors["ParticipantIdentifier"].astype(str)
+_audit_stats = _analysis_audit_df[
+    [
+        "ParticipantIdentifier",
+        "decision_window_wear_sum",
+        "hourly_non_nan",
+        "weekly_present_sum",
+        "daily_present_sum",
+        "cae_weeks_present",
+        "min_weekly_cae",
+        "week1_cae",
+    ]
+].copy()
+_audit_stats["ParticipantIdentifier"] = _audit_stats["ParticipantIdentifier"].astype(str)
+_membership_input = _span_anchors.merge(
+    _audit_stats, on="ParticipantIdentifier", how="left"
 )
+modelled_cohort = modelled_membership(_membership_input, _cohort_policy())
+_modelled_ids = set(
+    modelled_cohort.loc[modelled_cohort["in_modelled"], "uid"].astype(str)
+)
+_from_audit = set(
+    map(
+        str,
+        np.setdiff1d(complete_participant_ids, list(EXCLUDED_PARTICIPANT_IDS)),
+    )
+)
+if _modelled_ids != _from_audit:
+    raise RuntimeError(
+        "modelled_membership disagrees with the analysis-sample audit: "
+        f"only modelled {sorted(_modelled_ids - _from_audit)}; "
+        f"only audit {sorted(_from_audit - _modelled_ids)}"
+    )
+modelled_cohort.to_csv(folder / "modelled_cohort.csv", index=False)
+participant_dropout = participant_dropout.merge(
+    modelled_cohort.rename(columns={"uid": "ParticipantIdentifier"})[
+        ["ParticipantIdentifier", "in_modelled"]
+    ],
+    on="ParticipantIdentifier",
+    how="left",
+)
+if participant_dropout["in_modelled"].isna().any():
+    _missing = participant_dropout.loc[
+        participant_dropout["in_modelled"].isna(), "ParticipantIdentifier"
+    ].astype(str).tolist()
+    raise RuntimeError(
+        "participant_dropout.csv has starters missing from modelled_cohort.csv: "
+        + ", ".join(_missing)
+    )
+participant_dropout["in_modelled"] = participant_dropout["in_modelled"].astype(bool)
+participant_dropout.to_csv(folder / "participant_dropout.csv", index=False)
+print(
+    f"Wrote {folder / 'modelled_cohort.csv'} "
+    f"({int(modelled_cohort['in_modelled'].sum())} modelled)"
+)
+analysis_participant_ids = np.array(sorted(_modelled_ids), dtype=object)
 print(
     f"Final analysis sample: {len(analysis_participant_ids)} participants "
     f"(from {len(complete_participant_ids)} span-eligible)"

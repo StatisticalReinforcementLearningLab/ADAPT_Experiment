@@ -1,4 +1,4 @@
-"""Fit the two-state activity process on the 47 modelled participants.
+"""Fit the two-state activity process on the modelled participants.
 
 Reads the daily activity table, fits the active-to-inactive logistic hazard and
 the promotion-time cure model for gap length, and writes the report, figures,
@@ -166,7 +166,12 @@ def gap_survival(d: np.ndarray, theta: np.ndarray, mu: float, alpha: float) -> n
 def load_panel() -> tuple[pd.DataFrame, pd.DataFrame]:
     meta = pd.read_csv(META_PATH)
     meta["ParticipantIdentifier"] = meta["ParticipantIdentifier"].astype(str)
-    ids = set(meta.loc[meta["in_modelled_47"].astype(bool), "ParticipantIdentifier"])
+    if "in_modelled" not in meta.columns:
+        raise SystemExit(
+            "participant_dropout.csv has no in_modelled column. "
+            "Script 01 writes it from modelled_cohort.csv."
+        )
+    ids = set(meta.loc[meta["in_modelled"].astype(bool), "ParticipantIdentifier"])
     daily = pd.read_csv(DAILY_PATH)
     daily["ParticipantIdentifier"] = daily["ParticipantIdentifier"].astype(str)
     panel = daily[
@@ -271,8 +276,6 @@ def assert_cohort(panel: pd.DataFrame, gaps: pd.DataFrame) -> dict:
     n_users = panel["ParticipantIdentifier"].nunique()
     open_lengths = tuple(sorted(int(x) for x in gaps.loc[gaps["delta"].eq(0), "length"]))
     problems = []
-    if n_users != 47:
-        problems.append(f"{n_users} modelled users, expected 47")
     window = panel.loc[panel["in_window"]]
     if int((window["observed"] != 1).sum()) != 0:
         problems.append("a week 1–12 day is unobserved")
@@ -280,7 +283,7 @@ def assert_cohort(panel: pd.DataFrame, gaps: pd.DataFrame) -> dict:
     if not sizes.eq(N_DAYS).all():
         problems.append("protocol weeks 1–12 are not 84 days for every user")
     day1 = panel.loc[panel["study_day"].eq(1)]
-    if int(day1["active"].sum()) != 47 or int(day1["observed"].sum()) != 47:
+    if int(day1["active"].sum()) != n_users or int(day1["observed"].sum()) != n_users:
         problems.append("study day 1 is not an observed active day for every modelled user")
     n_monday = int(panel.groupby("ParticipantIdentifier")["start_dow"].first().eq(0).sum())
     n_sunday = int(panel.groupby("ParticipantIdentifier")["start_dow"].first().eq(6).sum())
@@ -970,7 +973,7 @@ def simulator_check_lines() -> list[str]:
     coef, fit = coefficients_from_record(record)
     meta = pd.read_csv(META_PATH)
     uids = sorted(
-        int(u) for u in meta.loc[meta["in_modelled_47"].astype(bool), "ParticipantIdentifier"]
+        int(u) for u in meta.loc[meta["in_modelled"].astype(bool), "ParticipantIdentifier"]
     )
     sim84 = summarize_paths(_uid_paths(2000, 84, N_WEEKS_FIT, coef, fit, uids, 20261022))
     sim252 = summarize_paths(_uid_paths(2000, 252, N_WEEKS_LONG, coef, fit, uids, 20261023))
@@ -1002,7 +1005,7 @@ def simulator_check_lines() -> list[str]:
     a("column is the Step 1 validation (10,000 paths from one shared stream, seeds")
     a("20261020 and 20261021).")
     a("")
-    a("| Quantity | Data (47 people) | 10,000 paths | 2000 paths |")
+    a(f"| Quantity | Data ({len(uids)} people) | 10,000 paths | 2000 paths |")
     a("|---|---:|---:|---:|")
     a(f"| Mean gaps per person | 1.23 | 1.33 | {fmt(sim84['mean_gaps'], 2)} |")
     a(f"| Proportion with 0 gaps | 0.617 | 0.621 | {fmt(sim84['p0'], 3)} |")
@@ -1043,13 +1046,13 @@ def write_report(payload: dict) -> None:
     a("# Activity process fit (2026-10-20)")
     a("")
     cohort = payload["cohort"]
-    a("Two transition models on daily activity for the 47 modelled participants.")
+    a(f"Two transition models on daily activity for the {cohort['n_users']} modelled participants.")
     a("The process is exogenous: no latent perceived utility and no action terms.")
     a("Scripts 01–03 and 06–07 were not rerun. The simulator and the script-06 likelihood are not in this fit.")
     a("")
     a("## Data")
     a("")
-    a(f"Source: `{SOURCE_FILE}`, restricted with `in_modelled_47` in `participant_dropout.csv`.")
+    a(f"Source: `{SOURCE_FILE}`, restricted with `in_modelled` in `participant_dropout.csv`.")
     a("`active_d` is a page view, wear, or a daily or weekly survey submission on that local day.")
     a("Study day 1 is the first local end-of-day date and is active.")
     a(f"The fit window is protocol weeks 1–12 (Monday–Sunday): days 1–84 for the {cohort['n_monday']} Monday starters,")
@@ -1060,7 +1063,7 @@ def write_report(payload: dict) -> None:
     a("")
     a("| Check | Value |")
     a("|---|---:|")
-    a("| Modelled users | 47 |")
+    a(f"| Modelled users | {cohort['n_users']} |")
     a(f"| Gaps | {cohort['n_gaps']} ({cohort['n_ended']} ended, {cohort['n_open']} censored) |")
     a(f"| Users with / without a gap | {cohort['n_with_gap']} / {cohort['n_without_gap']} |")
     a(f"| Active person-days in the model 1 risk set | {payload['n_risk']} |")
@@ -1272,7 +1275,7 @@ def write_report(payload: dict) -> None:
     a("with the fitting week scale `n_weeks=12`. A permanent draw stays inactive through day 84 and is")
     a("censored for the gap-length comparison, as an open gap is in the data.")
     a("")
-    a("| Quantity | Data (47 people) | Simulated paths |")
+    a(f"| Quantity | Data ({cohort['n_users']} people) | Simulated paths |")
     a("|---|---:|---:|")
     a(f"| Mean gaps per person | {fmt(data['mean_gaps'], 2)} | {fmt(sim['mean_gaps'], 2)} |")
     a(f"| Proportion with 0 gaps | {fmt(data['p0'], 3)} | {fmt(sim['p0'], 3)} |")
@@ -1355,10 +1358,12 @@ def data_summary(panel: pd.DataFrame, gaps: pd.DataFrame) -> dict:
 def write_calibration(model1: dict, model2: dict) -> None:
     payload = json.loads(CALIBRATION_PATH.read_text(encoding="utf-8"))
     kept = {key: payload[key] for key in payload if key.startswith("dropout_")}
+    meta = pd.read_csv(META_PATH)
+    n_modelled = int(meta["in_modelled"].astype(bool).sum())
     payload["activity_process"] = {
-        "source_file": SOURCE_FILE,
+        "source_file": "ADAPR_COMBINED_DIR/participant_dropout_daily.csv",
         "source_date": SOURCE_DATE,
-        "cohort": "47 modelled participants, study days 1-84",
+        "cohort": f"{n_modelled} modelled participants, study days 1-84",
         "covariates": {
             "week": (
                 "protocol Mon-Sun study week via vani_env.study_week_norm(week, n_weeks=12); "
