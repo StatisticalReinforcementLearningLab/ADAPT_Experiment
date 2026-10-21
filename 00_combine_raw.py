@@ -210,55 +210,8 @@ def combine_dataset_streaming(dataset: str, paths: list[Path]) -> None:
     print(f"[OK] {dataset}: {written} records -> {out_json.name}, {out_csv.name}")
 
 
-PATTERN = "FitbitIntradayCombined_*.json"
-
-
-def iter_jsonl_records(path: Path) -> Iterable[dict[str, Any]]:
-    # FitbitIntradayCombined rows look like JSONL: one JSON object per line
-    with path.open("r", encoding="utf-8-sig", errors="replace", buffering=_IO_BUFFER) as f:
-        for line_no, ln in enumerate(f, start=1):
-            if not ln or ln.isspace():
-                continue
-            try:
-                obj = json.loads(ln)
-            except json.JSONDecodeError as e:
-                print(f"[skip bad line] {path}:{line_no} ({e})")
-                continue
-            yield obj if isinstance(obj, dict) else {"value": obj}
-
-
-def find_first_intraday_file() -> Path | None:
-    for d in pd.date_range(DATE_START, DATE_END, freq="D"):
-        folder = ROOT_DIR / d.strftime(FOLDER_FMT)
-        if not folder.exists():
-            continue
-        files = sorted(folder.glob(PATTERN))
-        if files:
-            return files[0]
-    return None
-
-
-def list_types_from_one_file() -> set[str]:
-    p = find_first_intraday_file()
-    if p is None:
-        raise FileNotFoundError(f"No files matching {PATTERN} found in date range.")
-    types = set()
-    for rec in iter_jsonl_records(p):
-        t = rec.get("Type")
-        if t is not None:
-            types.add(str(t))
-    print(f"Using sample file: {p}")
-    print("Distinct Types:")
-    for t in sorted(types):
-        print("  -", t)
-    return types
-
-# --- Run ---
-# types = list_types_from_one_file()
-
 TARGET_TYPES = {
     "activities-steps": "filtered_activities-steps.json",
-    # "hrv": "filtered_hrv.json",
     "activities-heart": "filtered_activities-heart.json",
 }
 
@@ -282,20 +235,6 @@ def _value_dict(rec: dict) -> dict:
             except json.JSONDecodeError:
                 return {}
     return {}
-
-
-def _activities_heart_datetimes(rec: dict) -> tuple[Any, Any]:
-    """Return raw DateTime and InsertedDate from top-level or nested Value."""
-    dt = rec.get("DateTime") or rec.get("dateTime")
-    ins = rec.get("InsertedDate")
-    if dt is not None and ins is not None:
-        return dt, ins
-    vd = _value_dict(rec)
-    if dt is None:
-        dt = vd.get("DateTime") or vd.get("dateTime")
-    if ins is None:
-        ins = vd.get("InsertedDate")
-    return dt, ins
 
 
 def _to_minute_iso(val: Any) -> str | None:
@@ -380,29 +319,6 @@ def _heart_rate_float(v: Any) -> float | None:
         except ValueError:
             return None
     return None
-
-
-def _heart_rate_value(rec: dict) -> Any:
-    """Heart rate (bpm) from top-level Value — Fitbit intraday is usually a number."""
-    v = rec.get("Value")
-    hr = _heart_rate_float(v)
-    if hr is None:
-        return None if isinstance(v, dict) else v
-    return int(hr) if hr.is_integer() else hr
-
-
-def _slim_activities_heart_record(rec: dict) -> dict[str, Any] | None:
-    """One raw row: minute-rounded times + HR (used to aggregate many seconds into one minute)."""
-    dt_raw, ins_raw = _activities_heart_datetimes(rec)
-    dt_m = _to_minute_iso(dt_raw)
-    if dt_m is None:
-        return None
-    return {
-        "ParticipantIdentifier": rec.get("ParticipantIdentifier"),
-        "Value": _heart_rate_value(rec),
-        "DateTime": dt_m,
-        "InsertedDate": _to_minute_iso(ins_raw),
-    }
 
 
 def _line_may_match_target(line: str) -> bool:
@@ -588,51 +504,6 @@ def main() -> None:
 
     for dataset, paths in sorted(groups.items()):
         combine_dataset_streaming(dataset, sorted(paths))
-
-
-# Extract data from ProjectDeviceData_clean
-# timeZone, phase, participantidentifier, utcOffset, Value-timestamp
-
-
-# 1) Read JSON
-# - Use lines=True if file is NDJSON (one JSON object per line)
-# - If this errors, try removing lines=True
-# df = pd.read_json(OUT_DIR / "ProjectDeviceData_cleaned.json", lines=True)
-
-# 2) try normal JSON first, then NDJSON, then manual line parsing
-def load_json_flex(path: Path) -> pd.DataFrame:
-    text = path.read_text(encoding="utf-8-sig").strip()  # handles BOM
-    if not text:
-        raise ValueError("File is empty.")
-    # A) whole-file JSON (array/object)
-    try:
-        obj = json.loads(text)
-        if isinstance(obj, list):
-            return pd.DataFrame(obj)
-        if isinstance(obj, dict):
-            return pd.DataFrame([obj])
-    except json.JSONDecodeError:
-        pass
-    # B) pandas NDJSON
-    try:
-        return pd.read_json(path, lines=True)
-    except Exception:
-        pass
-    # C) manual NDJSON parse (skip bad lines)
-    rows = []
-    for line in text.splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        try:
-            rec = json.loads(s)
-            if isinstance(rec, dict):
-                rows.append(rec)
-        except json.JSONDecodeError:
-            continue
-    if not rows:
-        raise ValueError("Could not parse JSON file as array/object or line-delimited JSON.")
-    return pd.DataFrame(rows)
 
 
 def parse_value(v):
