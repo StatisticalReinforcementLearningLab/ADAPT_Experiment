@@ -21,11 +21,15 @@
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")}"
 
+# The fits need pymc / arviz / pytensor, which the RL environment (budgeted) does not have.
+# REFIT_ENV names the conda env for these steps (default adapt_fit); REFIT_PYTHON, if set,
+# is used as-is and skips the module stack.
+REFIT_ENV="${REFIT_ENV:-adapt_fit}"
 if [[ -z "${REFIT_PYTHON:-}" ]]; then
   set +u                      # module / conda scripts read unset variables
   module load python
   eval "$(conda shell.bash hook)"
-  mamba activate budgeted 2>/dev/null || conda activate budgeted
+  mamba activate "$REFIT_ENV" 2>/dev/null || conda activate "$REFIT_ENV"
   set -u
 fi
 PY="${REFIT_PYTHON:-python}"
@@ -36,6 +40,18 @@ STAGE="${STAGE:-all}"
 
 echo "commit: $(git rev-parse --short HEAD)   stage: ${STAGE}   combined dir: ${ADAPR_COMBINED_DIR}"
 echo "start:  $(date)"
+"$PY" - <<'PYEOF'
+import importlib, sys
+print("python", sys.version.split()[0])
+missing = []
+for m in ("numpy", "pandas", "scipy", "sklearn", "statsmodels", "pymc", "arviz", "pytensor"):
+    try:
+        print(f"  {m} {importlib.import_module(m).__version__}")
+    except ImportError:
+        missing.append(m)
+if missing:
+    sys.exit(f"missing packages in this environment: {', '.join(missing)}")
+PYEOF
 
 step() {
   echo
