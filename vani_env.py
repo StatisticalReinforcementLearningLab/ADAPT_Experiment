@@ -1384,7 +1384,7 @@ def pv_hurdle_occurrence_z_gap(std: dict) -> float:
 class EnvConfig:
     """Load environment parameters from ``params_env_{userid}.json``."""
 
-    def __init__(self, userid, params_dir=PARAMS_DIR, nweek=36):
+    def __init__(self, userid, params_dir=PARAMS_DIR, nweek=36, activity_process_mode=None):
         self.userid = userid
         self.K = 2
         self.W = 7
@@ -1403,6 +1403,16 @@ class EnvConfig:
         self.activity_process = None
         self.activity_lambda = None
         self.activity_pi = None
+        mode = activity_process_mode
+        if mode is None:
+            mode = os.environ.get("ADAPR_ACTIVITY_PROCESS_MODE", "pooled")
+        mode = str(mode).strip().lower()
+        if mode not in {"frailty", "pooled"}:
+            raise ValueError(
+                "activity_process_mode must be 'frailty' or 'pooled', "
+                f"got {activity_process_mode!r}"
+            )
+        self.activity_process_mode = mode
         # ``activity`` and ``constant`` are exclusive. ``none`` is the
         # missing-calibration default (legacy hazard 0, with a warning).
         self.dropout_mechanism = "none"

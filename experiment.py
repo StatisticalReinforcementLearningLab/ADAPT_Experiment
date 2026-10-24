@@ -20,8 +20,8 @@ from functools import partial
 
 
 from activity_process import (
-    coefficients_from_record,
     dropout_seed_sequence,
+    prepare_activity,
     simulate_activity_paths,
 )
 from ewm_utils import ewma_gamma, gamma_from_n
@@ -641,11 +641,16 @@ class OnlineEnv:
                 lambda_p=1.0, pi=1.0,
             )
         else:
-            coef, fit = coefficients_from_record(record)
+            mode = getattr(cfg, "activity_process_mode", "pooled")
+            coef, fit, u, gamma = prepare_activity(
+                record, mode, cfg.userid, self._dropout_rng
+            )
             sim = simulate_activity_paths(
                 1, self.D, coef, fit, self.nweek, self._dropout_rng,
                 lambda_p=None if lam is None else float(lam),
                 pi=None if pi is None else float(pi),
+                u=None if u is None else np.asarray([u], dtype=float),
+                gamma=gamma,
             )
         self._activity_status = np.asarray(sim["status"][0], dtype=np.int8)
         self._activity_b = np.asarray(sim["b"][0], dtype=float)
@@ -2629,10 +2634,15 @@ def _episode_seed(exp_seed: int, draw_idx: int) -> int:
 
 def _make_online_env(
     uid, seed=42, params_dir=None, dropout_hazard_day=None,
-    activity_lambda=None, activity_pi=None,
+    activity_lambda=None, activity_pi=None, activity_process_mode=None,
 ):
     params_dir = resolve_params_dir(params_dir)
-    cfg = EnvConfig(uid, params_dir=params_dir, nweek=NWEEK)
+    cfg = EnvConfig(
+        uid,
+        params_dir=params_dir,
+        nweek=NWEEK,
+        activity_process_mode=activity_process_mode,
+    )
     if dropout_hazard_day is not None:
         cfg.dropout_hazard_day = float(dropout_hazard_day)
         # Hazard 0 is the bit-for-bit all-active episode. Hazard 1 is the
@@ -2858,6 +2868,7 @@ def _run_fixed_policy_fast(
     seed=42,
     params_dir=None,
     dropout_hazard_day=None,
+    activity_process_mode=None,
 ):
     """Run fixed baselines without PF/RLSVI/state-feature bookkeeping."""
     _ensure_priors_configured(params_dir)
@@ -2866,6 +2877,7 @@ def _run_fixed_policy_fast(
         seed=seed,
         params_dir=params_dir,
         dropout_hazard_day=dropout_hazard_day,
+        activity_process_mode=activity_process_mode,
     )
     nweek = cfg.nweek
 
@@ -2932,24 +2944,34 @@ def _run_fixed_policy_fast(
     return result, oenv
 
 
-def _run_fixed_policy(agent_cls, uid, seed=42, params_dir=None):
+def _run_fixed_policy(agent_cls, uid, seed=42, params_dir=None, activity_process_mode=None):
     """Run a fixed walking-suggestion policy (never/always/random send)."""
     if agent_cls is NeverSendAgent:
-        return _run_fixed_policy_fast("never_send", uid, seed=seed, params_dir=params_dir)
+        return _run_fixed_policy_fast(
+            "never_send", uid, seed=seed, params_dir=params_dir,
+            activity_process_mode=activity_process_mode,
+        )
     if agent_cls is AlwaysSendAgent:
-        return _run_fixed_policy_fast("always_send", uid, seed=seed, params_dir=params_dir)
+        return _run_fixed_policy_fast(
+            "always_send", uid, seed=seed, params_dir=params_dir,
+            activity_process_mode=activity_process_mode,
+        )
     if agent_cls is RandomSendAgent:
-        return _run_fixed_policy_fast("random_send", uid, seed=seed, params_dir=params_dir)
+        return _run_fixed_policy_fast(
+            "random_send", uid, seed=seed, params_dir=params_dir,
+            activity_process_mode=activity_process_mode,
+        )
     raise TypeError(f"unsupported fixed-policy class {agent_cls!r}")
 
 
 def run_never_send(
-    uid, seed=42, params_dir=None, dropout_hazard_day=None
+    uid, seed=42, params_dir=None, dropout_hazard_day=None, activity_process_mode=None
 ):
     """Baseline: never send (A=0, π_A=0). Not the RLSVI clip π_A=ε."""
     if dropout_hazard_day is None:
         return _run_fixed_policy(
-            NeverSendAgent, uid, seed=seed, params_dir=params_dir
+            NeverSendAgent, uid, seed=seed, params_dir=params_dir,
+            activity_process_mode=activity_process_mode,
         )
     return _run_fixed_policy_fast(
         "never_send",
@@ -2957,16 +2979,18 @@ def run_never_send(
         seed=seed,
         params_dir=params_dir,
         dropout_hazard_day=dropout_hazard_day,
+        activity_process_mode=activity_process_mode,
     )
 
 
 def run_always_send(
-    uid, seed=42, params_dir=None, dropout_hazard_day=None
+    uid, seed=42, params_dir=None, dropout_hazard_day=None, activity_process_mode=None
 ):
     """Baseline: always send (A=1, π_A=1). Not the RLSVI clip π_A=1-ε."""
     if dropout_hazard_day is None:
         return _run_fixed_policy(
-            AlwaysSendAgent, uid, seed=seed, params_dir=params_dir
+            AlwaysSendAgent, uid, seed=seed, params_dir=params_dir,
+            activity_process_mode=activity_process_mode,
         )
     return _run_fixed_policy_fast(
         "always_send",
@@ -2974,16 +2998,18 @@ def run_always_send(
         seed=seed,
         params_dir=params_dir,
         dropout_hazard_day=dropout_hazard_day,
+        activity_process_mode=activity_process_mode,
     )
 
 
 def run_random_send(
-    uid, seed=42, params_dir=None, dropout_hazard_day=None
+    uid, seed=42, params_dir=None, dropout_hazard_day=None, activity_process_mode=None
 ):
     """Baseline: send at random with fixed propensity pi_A = 0.5."""
     if dropout_hazard_day is None:
         return _run_fixed_policy(
-            RandomSendAgent, uid, seed=seed, params_dir=params_dir
+            RandomSendAgent, uid, seed=seed, params_dir=params_dir,
+            activity_process_mode=activity_process_mode,
         )
     return _run_fixed_policy_fast(
         "random_send",
@@ -2991,6 +3017,7 @@ def run_random_send(
         seed=seed,
         params_dir=params_dir,
         dropout_hazard_day=dropout_hazard_day,
+        activity_process_mode=activity_process_mode,
     )
 
 

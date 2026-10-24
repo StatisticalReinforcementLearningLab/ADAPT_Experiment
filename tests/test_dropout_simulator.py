@@ -210,18 +210,99 @@ def test_lambda_one_pi_one_drops_on_day_2_and_zeros_presence():
 
 
 def test_activity_path_matches_the_dropout_rng_stream():
-    from activity_process import coefficients_from_record, simulate_activity_paths
+    from activity_process import prepare_activity, simulate_activity_paths
 
     cfg, _env, oenv = experiment._make_online_env(13, seed=7, params_dir=PARAMS)
-    coef, fit = coefficients_from_record(cfg.activity_process)
+    assert cfg.activity_process_mode == "pooled"
     rng = np.random.default_rng(
         experiment.OnlineEnv._dropout_seed_sequence(7, 13)
     )
-    sim = simulate_activity_paths(1, oenv.D, coef, fit, oenv.nweek, rng)
+    coef, fit, u, gamma = prepare_activity(
+        cfg.activity_process, cfg.activity_process_mode, 13, rng
+    )
+    sim = simulate_activity_paths(
+        1, oenv.D, coef, fit, oenv.nweek, rng,
+        u=None if u is None else np.asarray([u]),
+        gamma=gamma,
+    )
     assert oenv._dropout_day_planned == int(sim["dropout_day"][0])
     assert oenv.n_gaps == int(sim["n_gaps"][0])
     assert oenv.inactive_days == int(sim["inactive_days"][0])
     np.testing.assert_array_equal(oenv._activity_status, sim["status"][0])
+
+
+def test_same_seed_and_uid_share_the_activity_path_across_policies():
+    for mode in ("frailty", "pooled"):
+        _never, never_env = experiment.run_never_send(
+            13, seed=1, params_dir=PARAMS, activity_process_mode=mode
+        )
+        _always, always_env = experiment.run_always_send(
+            13, seed=1, params_dir=PARAMS, activity_process_mode=mode
+        )
+        assert not np.array_equal(never_env.action_all, always_env.action_all)
+        np.testing.assert_array_equal(never_env._activity_status, always_env._activity_status)
+        assert never_env._dropout_day_planned == always_env._dropout_day_planned
+        assert never_env.n_gaps == always_env.n_gaps
+
+
+def _within_mc(got: dict, expected: dict) -> None:
+    n = int(expected["n_paths"])
+    for key in (
+        "mean_gaps", "p0", "p1", "p2", "p3plus",
+        "inactive_fraction", "terminal14", "permanent",
+    ):
+        diff = abs(float(got[key]) - float(expected[key]))
+        level = float(expected[key])
+        if key == "mean_gaps":
+            tol = 0.05
+        else:
+            se = (max(level, 0.0) * (1.0 - min(level, 1.0)) / n) ** 0.5
+            tol = max(3.0 * se, 0.01)
+        assert diff <= tol, f"{key}: {got[key]} vs {expected[key]} (tol {tol})"
+    for key in ("ended_p50", "ended_p75", "ended_p90", "km_p90"):
+        if expected[key] is None or got[key] is None:
+            assert expected[key] is None and got[key] is None
+        else:
+            assert abs(float(got[key]) - float(expected[key])) <= 2.0
+
+
+def _recomputed_table(mode: str) -> tuple[dict, dict]:
+    from activity_process import simulate_cohort_paths, summarize_paths
+
+    record = json.loads((PARAMS / "generator_calibration.json").read_text())["activity_process"]
+    table = record["validation_2000"][mode]
+    uids = table and record["validation_2000"]["uids"]
+    got84 = summarize_paths(
+        simulate_cohort_paths(
+            record, mode, int(table["n_paths"]), int(table["n_days_84"]), 12,
+            uids, int(table["base_seed_84"]),
+        )
+    )
+    got252 = summarize_paths(
+        simulate_cohort_paths(
+            record, mode, int(table["n_paths"]), int(table["n_days_252"]), 36,
+            uids, int(table["base_seed_252"]),
+        )
+    )
+    return got84, got252
+
+
+def test_frailty_mode_reproduces_its_2000_path_table():
+    record = json.loads((PARAMS / "generator_calibration.json").read_text())["activity_process"]
+    expected = record["validation_2000"]["frailty"]
+    got84, got252 = _recomputed_table("frailty")
+    _within_mc(got84, expected)
+    se = (expected["permanent_252"] * (1.0 - expected["permanent_252"]) / expected["n_paths"]) ** 0.5
+    assert abs(got252["permanent"] - expected["permanent_252"]) <= max(3.0 * se, 0.01)
+
+
+def test_pooled_mode_reproduces_its_2000_path_table():
+    record = json.loads((PARAMS / "generator_calibration.json").read_text())["activity_process"]
+    expected = record["validation_2000"]["pooled"]
+    got84, got252 = _recomputed_table("pooled")
+    _within_mc(got84, expected)
+    se = (expected["permanent_252"] * (1.0 - expected["permanent_252"]) / expected["n_paths"]) ** 0.5
+    assert abs(got252["permanent"] - expected["permanent_252"]) <= max(3.0 * se, 0.01)
 
 
 def test_inactive_day_zeros_presence_and_checkin_window():

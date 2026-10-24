@@ -1,9 +1,12 @@
 """Exogenous daily activity path for the simulator.
 
 Monday-start episodes. Day 1 is active. Protocol month is ``ceil(week / 4)``
-and the covariate is that month minus 2, on a fixed scale: months 1–3 in the
-12-week fit, months 1–9 over 36 weeks. The path is drawn once, from its own
-RNG, and the day loop only reads it.
+and model 1 uses that month minus 2, on a fixed scale: months 1–3 in the
+12-week fit, months 1–9 over 36 weeks. Model 2's log theta depends on
+``prior_gap`` only. The path is drawn once, from its own RNG, and the day
+loop only reads it. The default mode is the pooled fit. The shared-frailty
+draw, one thinned posterior ``u`` then the path, both from
+``SeedSequence([seed, uid, 771337])``, stays selectable and is not the default.
 """
 
 from __future__ import annotations
@@ -90,18 +93,44 @@ def hazard_uncured(k: np.ndarray, theta: np.ndarray, mu: float, alpha: float) ->
     return 1.0 - s_cur / np.maximum(s_prev, 1e-15)
 
 
-def coefficients_from_record(record: dict) -> tuple[np.ndarray, dict]:
-    """Model 1 coefficients and model 2 parameters from calibration JSON."""
-    coef = np.asarray(record["model1"]["coefficients"], dtype=float)
-    model2 = record["model2"]
-    fit = {
+def _model2_fit(model2: dict) -> dict:
+    """Promotion-time parameters. Log theta is ``c0 + c1 * prior_gap``."""
+    return {
         "c0": float(model2["c0"]),
         "c1": float(model2["c1"]),
-        "c2": float(model2["c2"]),
         "mu": float(model2["mu"]),
         "alpha": float(model2["alpha"]),
     }
-    return coef, fit
+
+
+def coefficients_from_record(record: dict) -> tuple[np.ndarray, dict]:
+    """Pooled model 1 coefficients and model 2 parameters from calibration JSON."""
+    coef = np.asarray(record["model1"]["coefficients"], dtype=float)
+    return coef, _model2_fit(record["model2"])
+
+
+def prepare_activity(record: dict, mode: str, uid, rng: np.random.Generator):
+    """Coefficients, and one frailty draw, for one episode.
+
+    ``pooled`` uses the maximum-likelihood block and does not touch ``rng``.
+    ``frailty`` uses posterior-mean fixed effects. The user draw is one index
+    into that user's thinned posterior, taken from ``rng`` so a later path
+    draw continues the same stream.
+    """
+    chosen = "pooled" if mode is None else str(mode).strip().lower()
+    if chosen == "pooled":
+        coef, fit = coefficients_from_record(record)
+        return coef, fit, None, 0.0
+    if chosen != "frailty":
+        raise ValueError(
+            f"activity_process_mode must be 'frailty' or 'pooled', got {mode!r}"
+        )
+    frailty = record["frailty"]
+    coef = np.asarray(frailty["model1_coefficients"], dtype=float)
+    fit = _model2_fit(frailty["model2"])
+    draws = frailty["u_by_uid"][str(int(uid))]
+    index = int(rng.integers(0, len(draws)))
+    return coef, fit, float(draws[index]), float(frailty["gamma"])
 
 
 def _empty_result(n_paths: int, n_state: int) -> dict:
@@ -145,6 +174,7 @@ def simulate_activity_paths(
     use it: month 9 is week 36 on the same scale as the 12-week fit.
     ``u`` is a shared frailty per path, added to the model-1 logit and
     subtracted, times ``gamma``, from model 2's log theta. ``None`` is pooled.
+    Model 2's log theta is ``c0 + c1 * prior_gap``. Month stays in model 1.
     """
     n_paths = int(n_paths)
     n_days = int(n_days)
@@ -227,10 +257,7 @@ def simulate_activity_paths(
             if len(starters):
                 u_start = 0.0 if frailty is None else frailty[starters]
                 theta = np.exp(
-                    fit["c0"]
-                    + fit["c1"] * prior[starters]
-                    + fit["c2"] * month[day + 1]
-                    - gamma * u_start
+                    fit["c0"] + fit["c1"] * prior[starters] - gamma * u_start
                 )
                 p_perm = np.exp(-theta) if pi is None else np.full(len(starters), float(pi))
                 perm = rng.random(len(starters)) < p_perm
@@ -299,6 +326,7 @@ def summarize_paths(sim: dict) -> dict:
     event = np.concatenate(
         [np.ones(ended.size, dtype=int), np.zeros(cens.size, dtype=int)]
     ) if time.size else np.asarray([], dtype=int)
+    km50 = None
     km90 = None
     if time.size:
         order = np.argsort(time, kind="mergesort")
@@ -320,6 +348,8 @@ def summarize_paths(sim: dict) -> dict:
             if n_risk > 0 and deaths:
                 surv *= 1.0 - deaths / n_risk
             n_risk -= deaths + cens_n
+            if km50 is None and surv <= 0.5:
+                km50 = float(t)
             if surv <= 0.1:
                 km90 = float(t)
                 break
@@ -333,8 +363,54 @@ def summarize_paths(sim: dict) -> dict:
         "ended_p50": q(ended, 0.50),
         "ended_p75": q(ended, 0.75),
         "ended_p90": q(ended, 0.90),
+        "km_p50": km50,
         "km_p90": km90,
         "inactive_fraction": float(np.mean(sim["inactive_days"]) / n_days),
         "terminal14": float(np.mean(sim["terminal14"])),
         "permanent": float(np.mean(np.asarray(sim["dropout_day"]) > 0)),
+    }
+
+
+def simulate_cohort_paths(
+    record: dict,
+    mode: str,
+    n_paths: int,
+    n_days: int,
+    n_weeks: int,
+    uids,
+    base_seed: int,
+) -> dict:
+    """One episode path per ``(base_seed + pass, uid)``, cycling ``uids``.
+
+    Frailty mode draws the user index from that episode's activity stream.
+    """
+    uids = [int(u) for u in uids]
+    if not uids:
+        raise ValueError("uids is empty")
+    n_paths = int(n_paths)
+    parts = []
+    for i in range(n_paths):
+        uid = uids[i % len(uids)]
+        seed = int(base_seed) + i // len(uids)
+        rng = np.random.default_rng(dropout_seed_sequence(seed, uid))
+        coef, fit, u, gamma = prepare_activity(record, mode, uid, rng)
+        u_arr = None if u is None else np.asarray([u], dtype=float)
+        parts.append(
+            simulate_activity_paths(
+                1, int(n_days), coef, fit, int(n_weeks), rng, u=u_arr, gamma=gamma
+            )
+        )
+
+    def cat(key):
+        return np.concatenate([np.atleast_1d(part[key]) for part in parts])
+
+    return {
+        "n_gaps": cat("n_gaps"),
+        "inactive_days": cat("inactive_days"),
+        "dropout_day": cat("dropout_day"),
+        "ended": cat("ended"),
+        "censored": cat("censored"),
+        "terminal14": cat("terminal14"),
+        "n_days": int(n_days),
+        "n_paths": n_paths,
     }

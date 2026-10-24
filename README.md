@@ -35,9 +35,10 @@ Do not run the superseded generator-patch script in `archive/superseded/`.
 
 `activity_process.py` draws the exogenous activity path and holds the shared
 hazard, the protocol-month covariate, and the dropout seed. Protocol month is
-`ceil(week / 4)` and the regression uses that month minus 2. Months 1–3 are
+`ceil(week / 4)` and model 1 uses that month minus 2. Months 1–3 are
 the 12-week fit; a 36-week episode uses months 1–9 on the same scale, with no
-stretch and no cap. `vani_env.py` is the generative
+stretch and no cap. Model 2's log theta depends on prior gap only.
+The activity process is pooled across participants; dropout is calibrated in aggregate but not assigned to the participants who disengaged in the MRT. The shared-frailty mode is experimental (gamma is bimodal) and not used. `vani_env.py` is the generative
 model. CAE, page views, Fitbit wear, the daily survey, weekly presence, and
 perceived utility have no study-week slope. `experiment.py` runs an episode. `dropout_utils.py` defines an active day and
 the dropout table. `algorithm_helpers.py`, `derived_covariates.py`,
