@@ -193,27 +193,6 @@ PARAMS_DIR = resolve_params_dir()
 # interval. Change it here only (``06_fit_pu`` imports these names).
 E_QUAD_LO = -4.0
 E_QUAD_HI = 4.0
-# Activity-process study-week covariate. Default n_weeks=11 is the MRT
-# panel scale (w - 6) / 5. Callers pass the horizon they fit or simulate.
-VANILLA_WEEK_RANGE = 11
-
-
-def study_week_norm(week, *, n_weeks=None):
-    """Map 1-based study week onto ``[-1, 1]`` over ``n_weeks``.
-
-    Default ``n_weeks=11`` is the MRT fit scale ``(w - 6) / 5``. Pass the
-    simulation horizon to stretch the same endpoints over a longer run.
-    """
-    if n_weeks is None:
-        n_weeks = VANILLA_WEEK_RANGE
-    w = np.asarray(week, dtype=float)
-    n = float(n_weeks)
-    denom = (n - 1.0) / 2.0
-    center = (1.0 + n) / 2.0
-    out = np.where(denom == 0.0, 0.0, (w - center) / denom)
-    if np.ndim(week) == 0:
-        return float(out)
-    return out
 
 
 def _load_json(path: Path):

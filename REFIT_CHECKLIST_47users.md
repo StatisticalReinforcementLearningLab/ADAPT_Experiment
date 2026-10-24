@@ -3,7 +3,9 @@
 Scope: one full refit after the October cohort/dropout/baseline-CAE/activity-process
 changes. The generator has no study-week slope in CAE, page views, Fitbit wear,
 the daily survey, weekly presence, or perceived utility. The activity process
-still uses a study-week covariate until the month refit.
+uses protocol month `ceil(week / 4)`, with covariate `month_c = m - 2`.
+The 12-week fit covers months 1–3. A 36-week episode uses months 1–9 on that
+same scale, with no stretch and no cap.
 
 Scripts 1–3 and the activity-process fit run LOCALLY (raw data stay on the
 laptop); their processed outputs are copied to the cluster by rsync (never via git);
@@ -21,8 +23,8 @@ and pulling the refit back, the local `env_para_vanilla/` mixes new data files w
       `.pipeline_*.log`, `pf_cmp2*`.
       The simulator does not read `fourSC_support_aware_lag`,
       `activity_carryover_calibration`, or `interaction_pageview_calibration`.
-- [ ] Local tests pass: `python -m pytest tests` (21 dropout + CAE-smoother tests)
-      and `python -m pytest RL_agents`.
+- [ ] Local tests pass: `python -m pytest tests` (50 tests)
+      and `python -m pytest RL_agents` (33 tests).
 - [ ] Expected numbers to check against later (from `docs/dropout_check_20261017/`
       and `docs/cohort_checks_20261017/`):
       55 analysis starters before the high-CAE ceiling (54 span-eligible + force-included 379);

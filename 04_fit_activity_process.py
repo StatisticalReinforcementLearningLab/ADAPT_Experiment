@@ -35,8 +35,9 @@ from activity_process import (
     dropout_seed_sequence,
     expit,
     hazard_uncured,
+    month_c_from_week,
+    month_c_of,
     survival_uncured,
-    week_norm_of,
     weibull_F,
 )
 
@@ -49,7 +50,7 @@ import pandas as pd
 import statsmodels.api as sm
 from scipy.optimize import approx_fprime, minimize
 
-from vani_env import resolve_params_dir, study_week_norm
+from vani_env import resolve_params_dir
 
 
 DAILY_PATH: Path | None = None
@@ -60,7 +61,7 @@ CALIBRATION_PATH = resolve_params_dir() / "generator_calibration.json"
 N_DAYS = 84
 N_WEEKS_FIT = 12
 N_WEEKS_LONG = 36
-MODEL1_NAMES = ("intercept", "week", "act7", "prior_gap")
+MODEL1_NAMES = ("intercept", "month", "act7", "prior_gap")
 SOURCE_FILE = ""
 SOURCE_DATE = ""
 HAZARD_CURRENT = 0.0010501443948542925
@@ -255,7 +256,7 @@ def build_gaps(panel: pd.DataFrame) -> pd.DataFrame:
                     "delta": int(returned),
                     "return_day": day if returned else np.nan,
                     "week_number": wk,
-                    "week": float(study_week_norm(wk, n_weeks=N_WEEKS_FIT)),
+                    "month": float(month_c_from_week(wk)),
                     "window_start": start_day,
                 }
             )
@@ -360,7 +361,7 @@ def model1_frame(panel: pd.DataFrame, gaps: pd.DataFrame) -> pd.DataFrame:
                     "day": day,
                     "y": int(active[day + 1] == 0),
                     "week_number": wk,
-                    "week": float(study_week_norm(wk, n_weeks=N_WEEKS_FIT)),
+                    "month": float(month_c_from_week(wk)),
                     "act7": act7_of(day, active),
                     "prior_gap": prior_gap_of(day, ret),
                 }
@@ -429,11 +430,11 @@ def calibration_tables(frame: pd.DataFrame, fitted: np.ndarray) -> tuple[pd.Data
     return by_week, by_decile
 
 
-def model2_nll(eta: np.ndarray, prior: np.ndarray, week: np.ndarray, length: np.ndarray, delta: np.ndarray) -> float:
+def model2_nll(eta: np.ndarray, prior: np.ndarray, month: np.ndarray, length: np.ndarray, delta: np.ndarray) -> float:
     c0, c1, c2, log_mu, log_alpha = (float(v) for v in eta)
     mu = math.exp(log_mu)
     alpha = math.exp(log_alpha)
-    theta = np.exp(c0 + c1 * prior + c2 * week)
+    theta = np.exp(c0 + c1 * prior + c2 * month)
     f_now = weibull_F(length, mu, alpha)
     cens = delta == 0
     ll = np.empty(len(length), dtype=float)
@@ -451,7 +452,7 @@ def model2_nll(eta: np.ndarray, prior: np.ndarray, week: np.ndarray, length: np.
 
 def fit_model2(gaps: pd.DataFrame) -> dict:
     prior = gaps["prior_gap"].to_numpy(dtype=float)
-    week = gaps["week"].to_numpy(dtype=float)
+    month = gaps["month"].to_numpy(dtype=float)
     length = gaps["length"].to_numpy(dtype=float)
     delta = gaps["delta"].to_numpy(dtype=float)
     bounds = [
@@ -478,7 +479,7 @@ def fit_model2(gaps: pd.DataFrame) -> dict:
         result = minimize(
             model2_nll,
             start,
-            args=(prior, week, length, delta),
+            args=(prior, month, length, delta),
             method="L-BFGS-B",
             bounds=bounds,
             options={"ftol": 1e-14, "gtol": 1e-8, "maxiter": 500},
@@ -488,7 +489,7 @@ def fit_model2(gaps: pd.DataFrame) -> dict:
     if not finite:
         raise SystemExit("Model 2 likelihood did not return a finite value from any start.")
     best = min(finite, key=lambda r: r.fun)
-    grad = approx_fprime(best.x, model2_nll, 1e-6, prior, week, length, delta)
+    grad = approx_fprime(best.x, model2_nll, 1e-6, prior, month, length, delta)
     if (not best.success) or float(np.max(np.abs(grad))) > 1e-3:
         raise SystemExit(
             "Model 2 likelihood did not converge: "
@@ -507,7 +508,7 @@ def fit_model2(gaps: pd.DataFrame) -> dict:
                 "Model 2 has two nearby modes with different parameters: "
                 f"{best.x.tolist()} vs {other.tolist()}."
             )
-    hess = numerical_hessian(lambda z: model2_nll(z, prior, week, length, delta), best.x)
+    hess = numerical_hessian(lambda z: model2_nll(z, prior, month, length, delta), best.x)
     eigval, eigvec = np.linalg.eigh(hess)
     if float(np.min(eigval)) <= 1e-8:
         raise SystemExit(
@@ -562,10 +563,10 @@ def numerical_hessian(fun, x: np.ndarray, eps: float = 1e-4) -> np.ndarray:
     return hess
 
 
-def theta_of(prior, week, fit: dict) -> np.ndarray:
+def theta_of(prior, month, fit: dict) -> np.ndarray:
     prior = np.asarray(prior, dtype=float)
-    week = np.asarray(week, dtype=float)
-    return np.exp(fit["c0"] + fit["c1"] * prior + fit["c2"] * week)
+    month = np.asarray(month, dtype=float)
+    return np.exp(fit["c0"] + fit["c1"] * prior + fit["c2"] * month)
 
 
 def kaplan_meier(time: np.ndarray, event: np.ndarray) -> pd.DataFrame:
@@ -632,30 +633,30 @@ def median_returner(theta: float, mu: float, alpha: float, horizon: int = 200) -
 def derived_quantities(gaps: pd.DataFrame, fit: dict, lambda_bar: float) -> dict:
     mu, alpha = fit["mu"], fit["alpha"]
     cells = []
-    for prior, week_num, label in (
-        (0, 3, "prior_gap=0, week 3"),
-        (1, 3, "prior_gap=1, week 3"),
-        (0, 9, "prior_gap=0, week 9"),
-        (1, 9, "prior_gap=1, week 9"),
+    for prior, month_num, label in (
+        (0, 2, "prior_gap=0, month 2"),
+        (1, 2, "prior_gap=1, month 2"),
+        (0, 9, "prior_gap=0, month 9"),
+        (1, 9, "prior_gap=1, month 9"),
     ):
-        week = week_norm_of(7 * (week_num - 1) + 1, N_WEEKS_FIT)
-        theta = float(theta_of(prior, week, fit))
+        month = float(month_num - 2)
+        theta = float(theta_of(prior, month, fit))
         cells.append(
             {
                 "label": label,
                 "prior_gap": prior,
-                "week_number": week_num,
-                "week": week,
+                "month_number": month_num,
+                "month": month,
                 "theta": theta,
                 "pi": float(math.exp(-theta)),
                 "median_return": median_returner(theta, mu, alpha),
             }
         )
-    theta_i = theta_of(gaps["prior_gap"], gaps["week"], fit)
+    theta_i = theta_of(gaps["prior_gap"], gaps["month"], fit)
     pi_i = np.exp(-theta_i)
     open_rows = []
     for row in gaps.loc[gaps["delta"].eq(0)].sort_values("length").itertuples(index=False):
-        theta = float(theta_of(row.prior_gap, row.week, fit))
+        theta = float(theta_of(row.prior_gap, row.month, fit))
         pi = math.exp(-theta)
         s_c = float(gap_survival(np.array([row.length]), np.array([theta]), mu, alpha)[0])
         open_rows.append(
@@ -692,10 +693,23 @@ def derived_quantities(gaps: pd.DataFrame, fit: dict, lambda_bar: float) -> dict
     }
 
 
-def simulate_checked(n_paths: int, n_days: int, coef: np.ndarray, fit: dict, n_weeks: int, seed: int) -> dict:
+def simulate_checked(
+    n_paths: int,
+    n_days: int,
+    coef: np.ndarray,
+    fit: dict,
+    n_weeks: int,
+    seed: int,
+    u: np.ndarray | None = None,
+    gamma: float = 0.0,
+) -> dict:
     """Simulate, keeping the end-of-window inactive indicator from before the advance."""
     rng = np.random.default_rng(seed)
-    week_of = np.array([week_norm_of(day, n_weeks) if day else 0.0 for day in range(n_days + 2)])
+    month_of = np.array([month_c_of(day) for day in range(n_days + 2)])
+    if month_c_of(7 * int(n_weeks)) != float(math.ceil(int(n_weeks) / 4.0) - 2):
+        raise SystemExit("Month covariate does not match ceil(week/4) - 2.")
+    frailty = None if u is None else np.asarray(u, dtype=float).reshape(n_paths)
+    gamma = float(gamma)
     status = np.zeros(n_paths, dtype=np.int8)
     k = np.zeros(n_paths, dtype=np.int16)
     prior = np.zeros(n_paths, dtype=float)
@@ -724,11 +738,22 @@ def simulate_checked(n_paths: int, n_days: int, coef: np.ndarray, fit: dict, n_w
         active_idx = np.flatnonzero(status == 0)
         if len(active_idx):
             act7 = hist[active_idx].mean(axis=1)
-            eta = coef[0] + coef[1] * week_of[day] + coef[2] * act7 + coef[3] * prior[active_idx]
+            u_active = 0.0 if frailty is None else frailty[active_idx]
+            eta = (
+                coef[0]
+                + coef[1] * month_of[day]
+                + coef[2] * act7
+                + coef[3] * prior[active_idx]
+                + u_active
+            )
             starters = active_idx[rng.random(len(active_idx)) < expit(eta)]
             if len(starters):
+                u_start = 0.0 if frailty is None else frailty[starters]
                 theta = np.exp(
-                    fit["c0"] + fit["c1"] * prior[starters] + fit["c2"] * week_of[day + 1]
+                    fit["c0"]
+                    + fit["c1"] * prior[starters]
+                    + fit["c2"] * month_of[day + 1]
+                    - gamma * u_start
                 )
                 perm = rng.random(len(starters)) < np.exp(-theta)
                 perm_idx = starters[perm]
@@ -835,7 +860,7 @@ def fitted_mean_survival(gaps: pd.DataFrame, fit: dict, dmax: int, mask: np.ndar
     sub = gaps if mask is None else gaps.loc[mask]
     if sub.empty:
         return np.full(dmax + 1, np.nan)
-    theta = theta_of(sub["prior_gap"], sub["week"], fit)
+    theta = theta_of(sub["prior_gap"], sub["month"], fit)
     days = np.arange(dmax + 1)
     surv = np.array(
         [float(np.mean(gap_survival(np.full(len(theta), day), theta, fit["mu"], fit["alpha"]))) for day in days]
@@ -965,7 +990,7 @@ def _uid_paths(n_paths, n_days, n_weeks, coef, fit, uids, base_seed) -> dict:
     return _stack_paths(parts)
 
 
-def simulator_check_lines() -> list[str]:
+def simulator_check_lines(data: dict, sim84_ref: dict, sim252_ref: dict) -> list[str]:
     """2000-path check of the episode generator against the 10,000-path validation."""
     from activity_process import coefficients_from_record, simulate_activity_paths, summarize_paths
 
@@ -1002,30 +1027,28 @@ def simulator_check_lines() -> list[str]:
     a("The table is 2000 paths from that seeding. The modelled participants cycle through")
     a("the uid slot, and the episode seed starts at 20261022 (84 days, `n_weeks=12`) or")
     a("20261023 (252 days, `n_weeks=36`) and increases after each full pass. The middle")
-    a("column is the Step 1 validation (10,000 paths from one shared stream, seeds")
-    a("20261020 and 20261021).")
+    a("column is the 10,000-path validation above (seeds 20261020 and 20261021).")
     a("")
     a(f"| Quantity | Data ({len(uids)} people) | 10,000 paths | 2000 paths |")
     a("|---|---:|---:|---:|")
-    a(f"| Mean gaps per person | 1.23 | 1.33 | {fmt(sim84['mean_gaps'], 2)} |")
-    a(f"| Proportion with 0 gaps | 0.617 | 0.621 | {fmt(sim84['p0'], 3)} |")
-    a(f"| Proportion with 1 gap | 0.170 | 0.109 | {fmt(sim84['p1'], 3)} |")
-    a(f"| Proportion with 2 gaps | 0.043 | 0.065 | {fmt(sim84['p2'], 3)} |")
-    a(f"| Proportion with 3 or more | 0.170 | 0.205 | {fmt(sim84['p3plus'], 3)} |")
-    a(f"| Ended-gap length, median | 2.0 | 2.0 | {fmt(sim84['ended_p50'], 1)} |")
-    a(f"| Ended-gap length, 75th | 3.0 | 4.0 | {fmt(sim84['ended_p75'], 1)} |")
-    a(f"| Ended-gap length, 90th | 7.2 | 9.0 | {fmt(sim84['ended_p90'], 1)} |")
-    a(f"| Kaplan–Meier 90th percentile | 56.0 | 33.0 | {fmt(sim84['km_p90'], 1)} |")
-    a(f"| Fraction of inactive days | 0.094 | 0.098 | {fmt(sim84['inactive_fraction'], 3)} |")
-    a(f"| Terminal gap of 14 days or more | 0.085 | 0.094 | {fmt(sim84['terminal14'], 3)} |")
-    a(f"| Latent permanent by day 84 | — | 0.083 | {fmt(sim84['permanent'], 3)} |")
-    a(f"| Latent permanent by day 252 | — | 0.337 | {fmt(sim252['permanent'], 3)} |")
+    a(f"| Mean gaps per person | {fmt(data['mean_gaps'], 2)} | {fmt(sim84_ref['mean_gaps'], 2)} | {fmt(sim84['mean_gaps'], 2)} |")
+    a(f"| Proportion with 0 gaps | {fmt(data['p0'], 3)} | {fmt(sim84_ref['p0'], 3)} | {fmt(sim84['p0'], 3)} |")
+    a(f"| Proportion with 1 gap | {fmt(data['p1'], 3)} | {fmt(sim84_ref['p1'], 3)} | {fmt(sim84['p1'], 3)} |")
+    a(f"| Proportion with 2 gaps | {fmt(data['p2'], 3)} | {fmt(sim84_ref['p2'], 3)} | {fmt(sim84['p2'], 3)} |")
+    a(f"| Proportion with 3 or more | {fmt(data['p3plus'], 3)} | {fmt(sim84_ref['p3plus'], 3)} | {fmt(sim84['p3plus'], 3)} |")
+    a(f"| Ended-gap length, median | {fmt(data['ended_p50'], 1)} | {fmt(sim84_ref['ended_p50'], 1)} | {fmt(sim84['ended_p50'], 1)} |")
+    a(f"| Ended-gap length, 75th | {fmt(data['ended_p75'], 1)} | {fmt(sim84_ref['ended_p75'], 1)} | {fmt(sim84['ended_p75'], 1)} |")
+    a(f"| Ended-gap length, 90th | {fmt(data['ended_p90'], 1)} | {fmt(sim84_ref['ended_p90'], 1)} | {fmt(sim84['ended_p90'], 1)} |")
+    a(f"| Kaplan–Meier 90th percentile | {fmt(data['km_p90'], 1)} | {fmt(sim84_ref['km_p90'], 1)} | {fmt(sim84['km_p90'], 1)} |")
+    a(f"| Fraction of inactive days | {fmt(data['inactive_fraction'], 3)} | {fmt(sim84_ref['inactive_fraction'], 3)} | {fmt(sim84['inactive_fraction'], 3)} |")
+    a(f"| Terminal gap of 14 days or more | {fmt(data['terminal14'], 3)} | {fmt(sim84_ref['terminal14'], 3)} | {fmt(sim84['terminal14'], 3)} |")
+    a(f"| Latent permanent by day 84 | — | {fmt(sim84_ref['permanent'], 3)} | {fmt(sim84['permanent'], 3)} |")
+    a(f"| Latent permanent by day 252 | — | {fmt(sim252_ref['permanent'], 3)} | {fmt(sim252['permanent'], 3)} |")
     a("")
     a("At n = 2000 a proportion near 0.10 has a Monte Carlo standard error of about 0.007,")
-    a("and a proportion near 0.60 has one of about 0.011. The 2000-path column sits on the")
-    a("10,000-path column inside that noise. The Step 1 conclusions are unchanged:")
-    a("the long-gap tail is still the day-56 return, and aggregate dropout stays next to")
-    a("the 14-day count. The Step 1 constant-hazard extrapolation to day 252 is 0.233.")
+    a("and a proportion near 0.60 has one of about 0.011. The 2000 paths are the episode")
+    a("generator on the coefficients just written. The 10,000 paths are the validation above.")
+    a("The Step 1 constant-hazard extrapolation to day 252 is 0.233.")
     a("")
     return lines
 
@@ -1043,7 +1066,7 @@ def write_report(payload: dict) -> None:
     mz0 = payload["mz_without_112"]
     lines = []
     a = lines.append
-    a("# Activity process fit (2026-10-20)")
+    a(f"# Activity process fit ({SOURCE_DATE})")
     a("")
     cohort = payload["cohort"]
     a(f"Two transition models on daily activity for the {cohort['n_users']} modelled participants.")
@@ -1079,8 +1102,11 @@ def write_report(payload: dict) -> None:
     a("with no page view and no wear, so it was inactive before. It splits one ended 3-day gap (days 54–56) into")
     a("two ended 1-day gaps. The censored lengths are unchanged, and the risk set gains that Saturday.")
     a("")
-    a("`week` is the protocol study week, `study_week_norm(week, n_weeks=12)` = (week − 6.5) / 5.5,")
-    a("not `ceil(study_day/7)`. A Monday-start simulator episode uses the same week, because its day 1 is Monday.")
+    a("`month_c` is the protocol month minus 2. Protocol month is `ceil(week / 4)`:")
+    a("weeks 1–4, 5–8, and 9–12 are months 1, 2, and 3, so `month_c` is −1, 0, and 1.")
+    a("A Monday-start simulator episode uses the same months. Over 36 weeks the month runs 1–9")
+    a("(`month_c` from −1 to 7), with no stretch and no cap. Week 0, a Sunday starter's first day,")
+    a("is month 1. It is history for `act7` and is not a model row.")
     a("`act7` is the fraction of the previous seven days that were active. Days before study day 1 count as active.")
     a("The observed week-0 Sunday is used when it falls in those seven days.")
     a("`prior_gap` becomes 1 on the day activity resumes and stays 1. That is the simulator rule")
@@ -1111,10 +1137,10 @@ def write_report(payload: dict) -> None:
     a("")
     a("Reference predictions from the fitted logit:")
     a("")
-    a("| Week norm | act7 | prior_gap | Fitted λ |")
+    a("| Month covariate | act7 | prior_gap | Fitted λ |")
     a("|---:|---:|---:|---:|")
     for row in m1["references"]:
-        a(f"| {fmt(row['week'], 2)} | {fmt(row['act7'], 1)} | {row['prior_gap']} | {fmt(row['lambda'], 4)} |")
+        a(f"| {fmt(row['month'], 2)} | {fmt(row['act7'], 1)} | {row['prior_gap']} | {fmt(row['lambda'], 4)} |")
     a("")
     a("### Calibration")
     a("")
@@ -1152,7 +1178,7 @@ def write_report(payload: dict) -> None:
     a("|---|---:|---:|")
     a(f"| c0 | {fmt(m2['c0'], 3)} | {fmt(m2['se']['c0'], 3)} |")
     a(f"| c1 (prior_gap) | {fmt(m2['c1'], 3)} | {fmt(m2['se']['c1'], 3)} |")
-    a(f"| c2 (week at gap start) | {fmt(m2['c2'], 3)} | {fmt(m2['se']['c2'], 3)} |")
+    a(f"| c2 (month at gap start) | {fmt(m2['c2'], 3)} | {fmt(m2['se']['c2'], 3)} |")
     a(f"| μ | {fmt(m2['mu'], 3)} | {fmt(m2['se']['mu'], 3)} |")
     a(f"| α | {fmt(m2['alpha'], 3)} | {fmt(m2['se']['alpha'], 3)} |")
     a("")
@@ -1160,7 +1186,7 @@ def write_report(payload: dict) -> None:
     a(f"α {'<' if m2['alpha'] < 1 else '≥'} 1, so the Weibull return hazard is "
       f"{'decreasing' if m2['alpha'] < 1 else 'not decreasing'}.")
     if abs(m2["c1"]) < m2["se"]["c1"] and abs(m2["c2"]) < m2["se"]["c2"]:
-        a("c1 and c2 are smaller than those standard errors. π barely moves with prior gap or with the week the gap starts.")
+        a("c1 and c2 are smaller than those standard errors. π barely moves with prior gap or with the month the gap starts.")
         a("μ itself is imprecise relative to its point estimate.")
     a("")
     a("### Fitted survival against Kaplan–Meier")
@@ -1207,7 +1233,7 @@ def write_report(payload: dict) -> None:
     a("")
     a("### Permanent fraction, return hazard, and the 14-day count")
     a("")
-    a("`π(x)` below is evaluated at prior_gap 0/1 and at week 3 or week 9 (the middle of weeks 1–6 and 7–12).")
+    a("`π(x)` below is evaluated at prior_gap 0/1 and at month 2 (`month_c` = 0) or month 9 (`month_c` = 7).")
     a("The median is the gap length among people who do return, from `S_u`.")
     a("")
     a("| Covariates | θ | π | Median length if they return |")
@@ -1271,9 +1297,8 @@ def write_report(payload: dict) -> None:
     a("")
     a("## Paths simulated from the fitted process")
     a("")
-    a("10,000 independent 84-day paths. Day 1 starts active. Covariates are computed from the path itself,")
-    a("with the fitting week scale `n_weeks=12`. A permanent draw stays inactive through day 84 and is")
-    a("censored for the gap-length comparison, as an open gap is in the data.")
+    a("10,000 independent 84-day paths. Day 1 starts active. `month_c` is computed from the path's protocol month.")
+    a("A permanent draw stays inactive through day 84 and is censored for the gap-length comparison, as an open gap is in the data.")
     a("")
     a(f"| Quantity | Data ({cohort['n_users']} people) | Simulated paths |")
     a("|---|---:|---:|")
@@ -1300,9 +1325,12 @@ def write_report(payload: dict) -> None:
     a("")
     a("### 36-week extrapolation")
     a("")
-    a("Separate 10,000 paths of 252 days. Week is stretched with `n_weeks=36`, which is what the simulator")
-    a("will pass for a 36-week horizon. Week 12 then sits at "
-      f"{fmt(week_norm_of(78, N_WEEKS_LONG), 2)} rather than at 1, so this is not the fitted 84-day covariate scale.")
+    a("Separate 10,000 paths of 252 days. Protocol month runs 1 through 9. `month_c` runs from −1 to 7")
+    a("on the same scale as the 12-week fit: month 2 is 0 in both, and month 9 is not folded back.")
+    odds9 = math.exp(7.0 * float(m1["coef"][1]))
+    theta9 = math.exp(7.0 * float(m2["c2"]))
+    a(f"Month 9 versus month 2 multiplies the model-1 odds of starting a gap by {fmt(odds9, 3)}")
+    a(f"and multiplies model 2's promotion intensity θ by {fmt(theta9, 3)}.")
     a(f"Fraction permanently gone by day 252: **{fmt(long['permanent'], 3)}**.")
     a("The stored constant-hazard extrapolation over the same horizon is 0.233 (`dropout_cumulative_day252`).")
     a(f"The 36-week figure is driven by prior_gap (odds ratio {fmt(m1['or'][3], 1)}, permanent once set):")
@@ -1310,17 +1338,60 @@ def write_report(payload: dict) -> None:
     a("(see the time-to-first-gap Kaplan–Meier). This is an assumption-driven extrapolation.")
     a(f"The simulated share with 3 or more gaps ({fmt(sim['p3plus'], 2)} versus {fmt(data['p3plus'], 2)})")
     a("suggests prior_gap slightly overstates event dependence.")
-    a("The week slope is also being used outside the fitted range of calendar weeks even though")
-    a("the normalized covariate stays in [−1, 1].")
+    a("The month slope is the linear extrapolation past month 3, the last month in the fit.")
+    a("")
+    fr = payload.get("frailty")
+    fr84 = payload.get("frailty_sim84")
+    fr252 = payload.get("frailty_sim252")
+    if fr is not None and fr84 is not None and fr252 is not None:
+        a("## Shared frailty")
+        a("")
+        a("The same two regressions share one user frailty `u_p`. Model 1 adds `u_p` to the logit.")
+        a("Model 2 subtracts `gamma * u_p` from log theta at the gap start.")
+        a("Priors: regression coefficients N(0, 5²), log μ ~ N(log 5, 1), log α ~ N(0, 1),")
+        a("τ ~ HalfNormal(1), γ ~ N(0, 1). Four NUTS chains, 3000 tuning steps, 2000 draws,")
+        a(f"target acceptance 0.99, seed {fr['seed']}. Chains start at the pooled maximum likelihood,")
+        a("with τ = 0.5 and the frailties at 0.")
+        a(f"Divergences {fr['divergences']}. Maximum R-hat {fmt(fr['max_rhat'], 3)}. "
+          f"Minimum bulk ESS {fmt(fr['min_ess'], 0)}.")
+        a("")
+        a("| Term | Posterior mean | SD | 95% interval |")
+        a("|---|---:|---:|---|")
+        for name, mean, sd, lo, hi in zip(
+            fr["names"], fr["mean"], fr["sd"], fr["q025"], fr["q975"]
+        ):
+            a(f"| {name} | {fmt(mean, 3)} | {fmt(sd, 3)} | {fmt(lo, 3)}–{fmt(hi, 3)} |")
+        a("")
+        a(f"Month 9 versus month 2 multiplies the frailty model-1 odds by {fmt(fr['odds_month9'], 3)}")
+        a(f"and multiplies θ by {fmt(fr['theta_month9'], 3)}.")
+        a("Each path draws one `u_p` from N(0, τ²) at the posterior-mean τ, then uses the posterior-mean coefficients.")
+        a("")
+        a("| Quantity | Data | Pooled paths | Frailty paths |")
+        a("|---|---:|---:|---:|")
+        a(f"| Mean gaps per person | {fmt(data['mean_gaps'], 2)} | {fmt(sim['mean_gaps'], 2)} | {fmt(fr84['mean_gaps'], 2)} |")
+        a(f"| Proportion with 0 gaps | {fmt(data['p0'], 3)} | {fmt(sim['p0'], 3)} | {fmt(fr84['p0'], 3)} |")
+        a(f"| Proportion with 1 gap | {fmt(data['p1'], 3)} | {fmt(sim['p1'], 3)} | {fmt(fr84['p1'], 3)} |")
+        a(f"| Proportion with 2 gaps | {fmt(data['p2'], 3)} | {fmt(sim['p2'], 3)} | {fmt(fr84['p2'], 3)} |")
+        a(f"| Proportion with 3 or more | {fmt(data['p3plus'], 3)} | {fmt(sim['p3plus'], 3)} | {fmt(fr84['p3plus'], 3)} |")
+        a(f"| Ended-gap length, median | {fmt(data['ended_p50'], 1)} | {fmt(sim['ended_p50'], 1)} | {fmt(fr84['ended_p50'], 1)} |")
+        a(f"| Ended-gap length, 75th | {fmt(data['ended_p75'], 1)} | {fmt(sim['ended_p75'], 1)} | {fmt(fr84['ended_p75'], 1)} |")
+        a(f"| Ended-gap length, 90th | {fmt(data['ended_p90'], 1)} | {fmt(sim['ended_p90'], 1)} | {fmt(fr84['ended_p90'], 1)} |")
+        a(f"| Kaplan–Meier 90th percentile | {data['km_p90'] if data['km_p90'] is not None else '—'} | {sim['km_p90'] if sim['km_p90'] is not None else '—'} | {fr84['km_p90'] if fr84['km_p90'] is not None else '—'} |")
+        a(f"| Fraction of inactive days | {fmt(data['inactive_fraction'], 3)} | {fmt(sim['inactive_fraction'], 3)} | {fmt(fr84['inactive_fraction'], 3)} |")
+        a(f"| Terminal gap of 14 days or more | {fmt(data['terminal14'], 3)} | {fmt(sim['terminal14'], 3)} | {fmt(fr84['terminal14'], 3)} |")
+        a(f"| Permanently gone by day 84 | — | {fmt(sim['permanent'], 3)} | {fmt(fr84['permanent'], 3)} |")
+        a(f"| Permanently gone by day 252 | — | {fmt(long['permanent'], 3)} | {fmt(fr252['permanent'], 3)} |")
+        a("")
     a("")
     a("## Parameters written for the simulator")
     a("")
     a("`env_para_vanilla/generator_calibration.json`, key `activity_process`. Existing `dropout_*` keys are unchanged.")
-    a("Model 1 coefficients are intercept, week, act7, prior_gap. Model 2 stores c0, c1, c2, μ, α.")
+    a("Model 1 coefficients are intercept, month, act7, prior_gap. Model 2 stores c0, c1, c2, μ, α.")
+    a("The shared-frailty block stores posterior means under the tight priors.")
     a("")
     a("The local `06_fit_pu.py` run on 2026-10-19 (`python 06_fit_pu.py --chains 4 --cores 4 --tune 2000 --draws 3000 --target-accept 0.95`, finished 21:12) predates the active-day filter and is not used. `env_para_vanilla/` was restored to commit `65a9fed`, plus the `activity_process` block.")
     a("")
-    lines.extend(simulator_check_lines())
+    lines.extend(simulator_check_lines(data, sim, long))
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     (OUT_DIR / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -1355,7 +1426,195 @@ def data_summary(panel: pd.DataFrame, gaps: pd.DataFrame) -> dict:
     }
 
 
-def write_calibration(model1: dict, model2: dict) -> None:
+def fit_shared_frailty(frame: pd.DataFrame, gaps: pd.DataFrame, model1: dict, model2: dict) -> dict:
+    """Shared-frailty joint model with the tight priors. Posterior means are plug-in values."""
+    import os
+    import sys
+
+    sys.path = [p for p in sys.path if p not in ("", "/tmp", "/private/tmp")]
+    os.environ.setdefault("PYTENSOR_FLAGS", "compiledir=/tmp/pytensor_compile_activity")
+    import pymc as pm
+    import pytensor.tensor as pt
+
+    uids = list(dict.fromkeys(list(frame["uid"]) + list(gaps["uid"])))
+    uid_index = {uid: i for i, uid in enumerate(uids)}
+    month = frame["month"].to_numpy(dtype=float)
+    act7 = frame["act7"].to_numpy(dtype=float)
+    prior1 = frame["prior_gap"].to_numpy(dtype=float)
+    y = frame["y"].to_numpy(dtype=int)
+    i1 = frame["uid"].map(uid_index).to_numpy(dtype=int)
+    g_prior = gaps["prior_gap"].to_numpy(dtype=float)
+    g_month = gaps["month"].to_numpy(dtype=float)
+    length = gaps["length"].to_numpy(dtype=float)
+    delta = gaps["delta"].to_numpy(dtype=float)
+    i2 = gaps["uid"].map(uid_index).to_numpy(dtype=int)
+    n_users = len(uids)
+
+    def gap_loglik(theta, mu, alpha):
+        def weibull_cdf(d):
+            base = pt.maximum(d, 1.0)
+            on = pt.cast(pt.gt(d, 0.0), "float64")
+            return on * (1.0 - pt.exp(-pt.pow(base / mu, alpha)))
+
+        f_now = weibull_cdf(length)
+        f_prev = weibull_cdf(length - 1.0)
+        step = theta * (f_now - f_prev)
+        log_one_minus = pt.switch(
+            pt.gt(step, math.log(2.0)),
+            pt.log1p(-pt.exp(-step)),
+            pt.log(-pt.expm1(-step)),
+        )
+        ended = -theta * f_prev + log_one_minus
+        opened = -theta * f_now
+        return pt.sum(pt.switch(pt.eq(delta, 0.0), opened, ended))
+
+    a_hat = np.asarray(model1["coef"], dtype=float)
+    c_hat = np.array([model2["c0"], model2["c1"], model2["c2"]], dtype=float)
+    eta0 = a_hat[0] + a_hat[1] * month + a_hat[2] * act7 + a_hat[3] * prior1
+    logit_ll = float(np.sum(y * eta0 - np.logaddexp(0.0, eta0)))
+    if abs(logit_ll - float(model1["llf"])) > 1e-4:
+        raise SystemExit(
+            f"Frailty model-1 log likelihood {logit_ll} disagrees with the pooled fit {model1['llf']}."
+        )
+
+    theta0 = np.exp(c_hat[0] + c_hat[1] * g_prior + c_hat[2] * g_month)
+    gap_value = float(
+        gap_loglik(
+            pt.as_tensor_variable(np.asarray(theta0, dtype=float)),
+            pt.as_tensor_variable(float(model2["mu"])),
+            pt.as_tensor_variable(float(model2["alpha"])),
+        ).eval()
+    )
+    expected_gap = -model2_nll(
+        np.array(
+            [c_hat[0], c_hat[1], c_hat[2], math.log(model2["mu"]), math.log(model2["alpha"])],
+            dtype=float,
+        ),
+        g_prior,
+        g_month,
+        length,
+        delta,
+    )
+    if abs(gap_value - expected_gap) > 1e-4 or abs(expected_gap - float(model2["loglik"])) > 1e-4:
+        raise SystemExit(
+            "Frailty gap log likelihood "
+            f"{gap_value} disagrees with the pooled cure fit {model2['loglik']} ({expected_gap})."
+        )
+    print(
+        f"Frailty log likelihood at the pooled MLE with u=0: {logit_ll + expected_gap:.4f}",
+        flush=True,
+    )
+
+    with pm.Model() as model:
+        a = pm.Normal("a", 0.0, 5.0, shape=4)
+        c = pm.Normal("c", 0.0, 5.0, shape=3)
+        log_mu = pm.Normal("log_mu", math.log(5.0), 1.0)
+        log_alpha = pm.Normal("log_alpha", 0.0, 1.0)
+        tau = pm.HalfNormal("tau", 1.0)
+        gamma = pm.Normal("gamma", 0.0, 1.0)
+        z = pm.Normal("z", 0.0, 1.0, shape=n_users)
+        u = tau * z
+        eta = a[0] + a[1] * month + a[2] * act7 + a[3] * prior1 + u[i1]
+        pm.Bernoulli("y", logit_p=eta, observed=y)
+        mu = pt.exp(log_mu)
+        alpha = pt.exp(log_alpha)
+        theta = pt.exp(c[0] + c[1] * g_prior + c[2] * g_month - gamma * u[i2])
+        pm.Potential("gaps", gap_loglik(theta, mu, alpha))
+        init_point = model.initial_point()
+        init_logp = np.asarray(model.compile_logp()(init_point), dtype=float)
+        init_grad = np.asarray(model.compile_dlogp()(init_point), dtype=float)
+        if not np.isfinite(init_logp).all() or not np.isfinite(init_grad).all():
+            raise SystemExit(
+                "Shared-frailty log density or its gradient is not finite at the initial point."
+            )
+        print(
+            f"Shared-frailty initial logp {float(init_logp):.3f}; gradient is finite.",
+            flush=True,
+        )
+        print("Sampling shared frailty (4 chains, tune 3000, draws 2000)", flush=True)
+        idata = pm.sample(
+            draws=2000,
+            tune=3000,
+            chains=4,
+            cores=4,
+            target_accept=0.99,
+            random_seed=2027,
+            progressbar=True,
+            initvals={
+                "a": a_hat,
+                "c": c_hat,
+                "log_mu": float(math.log(model2["mu"])),
+                "log_alpha": float(math.log(model2["alpha"])),
+                "tau": 0.5,
+                "gamma": 0.0,
+                "z": np.zeros(n_users),
+            },
+            idata_kwargs={"log_likelihood": False},
+        )
+    import arviz as az
+
+    var_names = ["a", "c", "log_mu", "log_alpha", "tau", "gamma"]
+    summary = az.summary(idata, var_names=var_names)
+    draws = idata.posterior
+    names = [
+        "a0", "a1_month", "a2_act7", "a3_prior_gap",
+        "c0", "c1_prior_gap", "c2_month",
+        "mu", "alpha", "tau", "gamma",
+    ]
+    def _samples(name: str) -> np.ndarray:
+        stacked = draws[name].stack(sample=("chain", "draw"))
+        values = np.asarray(stacked)
+        sample_axis = stacked.dims.index("sample")
+        return np.moveaxis(values, sample_axis, 0)
+
+    a_s = _samples("a")
+    c_s = _samples("c")
+    mu_s = np.exp(_samples("log_mu"))
+    alpha_s = np.exp(_samples("log_alpha"))
+    tau_s = _samples("tau")
+    gamma_s = _samples("gamma")
+    columns = np.column_stack([a_s, c_s, mu_s, alpha_s, tau_s, gamma_s])
+    divergences = int(idata.sample_stats["diverging"].sum())
+    max_rhat = float(summary["r_hat"].max())
+    min_ess = float(summary["ess_bulk"].min())
+    worst = summary.sort_values("r_hat", ascending=False).head(8)
+    print(worst[["mean", "sd", "r_hat", "ess_bulk"]].to_string(), flush=True)
+    if max_rhat > 1.01 or min_ess < 400:
+        raise SystemExit(
+            f"Shared frailty did not mix: max R-hat {max_rhat:.3f}, min bulk ESS {min_ess:.0f}."
+        )
+    mean = columns.mean(axis=0)
+    return {
+        "seed": 2027,
+        "priors": (
+            "coefficients N(0, 5^2); log mu N(log 5, 1); log alpha N(0, 1); "
+            "tau HalfNormal(1); gamma N(0, 1)"
+        ),
+        "sampler": "NUTS, 4 chains, tune 3000, draws 2000, target_accept 0.99, started at the pooled MLE",
+        "names": names,
+        "mean": [float(v) for v in mean],
+        "sd": [float(v) for v in columns.std(axis=0, ddof=1)],
+        "q025": [float(v) for v in np.quantile(columns, 0.025, axis=0)],
+        "q975": [float(v) for v in np.quantile(columns, 0.975, axis=0)],
+        "divergences": divergences,
+        "max_rhat": max_rhat,
+        "min_ess": min_ess,
+        "odds_month9": float(math.exp(7.0 * mean[1])),
+        "theta_month9": float(math.exp(7.0 * mean[6])),
+        "model1_coefficients": [float(v) for v in mean[:4]],
+        "model2": {
+            "c0": float(mean[4]),
+            "c1": float(mean[5]),
+            "c2": float(mean[6]),
+            "mu": float(mean[7]),
+            "alpha": float(mean[8]),
+            "gamma": float(mean[10]),
+            "tau": float(mean[9]),
+        },
+    }
+
+
+def write_calibration(model1: dict, model2: dict, frailty: dict) -> None:
     payload = json.loads(CALIBRATION_PATH.read_text(encoding="utf-8"))
     kept = {key: payload[key] for key in payload if key.startswith("dropout_")}
     meta = pd.read_csv(META_PATH)
@@ -1365,11 +1624,11 @@ def write_calibration(model1: dict, model2: dict) -> None:
         "source_date": SOURCE_DATE,
         "cohort": f"{n_modelled} modelled participants, study days 1-84",
         "covariates": {
-            "week": (
-                "protocol Mon-Sun study week via vani_env.study_week_norm(week, n_weeks=12); "
-                "Sunday starters use week 0 for study day 1 and weeks 1-12 on days 2-85. "
-                "A Monday-start simulator episode uses the same numbering. "
-                "The simulator passes its own horizon (n_weeks=36 for a 36-week run)"
+            "month": (
+                "protocol month m = ceil(week/4), covariate month_c = m - 2. "
+                "Weeks 1-4, 5-8, and 9-12 are months 1, 2, and 3. "
+                "A 36-week episode uses months 1-9 on this same scale, with no cap. "
+                "Week 0 (a Sunday starter's first day) is month 1."
             ),
             "act7": (
                 "fraction of the previous 7 days active; days before study day 1 count as active; "
@@ -1394,6 +1653,28 @@ def write_calibration(model1: dict, model2: dict) -> None:
             "mu": model2["mu"],
             "alpha": model2["alpha"],
             "hessian_se": model2["se"],
+        },
+        "frailty": {
+            "note": (
+                "Shared user frailty. Model 1 adds u_p to the logit; model 2 subtracts "
+                "gamma * u_p from log theta. The live simulator uses the pooled model1 "
+                "and model2 coefficients. These posterior means are the frailty validation."
+            ),
+            "seed": frailty["seed"],
+            "priors": frailty["priors"],
+            "sampler": frailty["sampler"],
+            "names": frailty["names"],
+            "posterior_mean": frailty["mean"],
+            "posterior_sd": frailty["sd"],
+            "q025": frailty["q025"],
+            "q975": frailty["q975"],
+            "divergences": frailty["divergences"],
+            "max_rhat": frailty["max_rhat"],
+            "min_ess": frailty["min_ess"],
+            "model1_coefficients": frailty["model1_coefficients"],
+            "model2": frailty["model2"],
+            "odds_multiplier_month9_vs_month2": frailty["odds_month9"],
+            "theta_multiplier_month9_vs_month2": frailty["theta_month9"],
         },
     }
     CALIBRATION_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -1422,16 +1703,16 @@ def main() -> None:
     if not 3000 <= n_risk <= 4200:
         raise SystemExit(f"Active person-days {n_risk} are outside 3000–4200. Stop.")
 
-    full = fit_logit(frame, ["week", "act7", "prior_gap"])
+    full = fit_logit(frame, ["month", "act7", "prior_gap"])
     null = fit_logit(frame, [])
     fitted = np.asarray(full.predict(), dtype=float)
     by_week, by_decile = calibration_tables(frame, fitted)
     wald = full.wald_test(np.eye(4)[1:], scalar=True)
     first = frame["prior_gap"].eq(0)
     references = []
-    for week, act7, prior in ((0.0, 1.0, 0), (0.0, 1.0, 1), (0.0, 0.5, 1), (1.0, 1.0, 0), (-1.0, 1.0, 0)):
-        eta = float(full.params[0] + full.params[1] * week + full.params[2] * act7 + full.params[3] * prior)
-        references.append({"week": week, "act7": act7, "prior_gap": prior, "lambda": float(expit(np.array([eta]))[0])})
+    for month, act7, prior in ((0.0, 1.0, 0), (0.0, 1.0, 1), (0.0, 0.5, 1), (1.0, 1.0, 0), (-1.0, 1.0, 0)):
+        eta = float(full.params[0] + full.params[1] * month + full.params[2] * act7 + full.params[3] * prior)
+        references.append({"month": month, "act7": act7, "prior_gap": prior, "lambda": float(expit(np.array([eta]))[0])})
     or_ci = np.exp(np.asarray(full.conf_int(), dtype=float))
     model1 = {
         "coef": [float(v) for v in full.params],
@@ -1455,6 +1736,7 @@ def main() -> None:
         "references": references,
     }
     model2 = fit_model2(gaps)
+    frailty = fit_shared_frailty(frame, gaps, model1, model2)
     sanity_check_simulator(model2)
     derived = derived_quantities(gaps, model2, model1["lambda_bar"])
     long_gap = gaps["length"].eq(56) & gaps["delta"].eq(1) & gaps["uid"].eq("112")
@@ -1468,7 +1750,23 @@ def main() -> None:
     sim252 = summarize_sim(
         simulate_checked(10000, 252, np.asarray(model1["coef"]), model2, N_WEEKS_LONG, seed=20261021)
     )
+    fr_coef = np.asarray(frailty["model1_coefficients"], dtype=float)
+    fr_fit = dict(frailty["model2"])
+    fr_rng = np.random.default_rng(20261024)
+    u84 = fr_rng.normal(0.0, fr_fit["tau"], size=10000)
+    u252 = np.random.default_rng(20261025).normal(0.0, fr_fit["tau"], size=10000)
+    frailty_sim84 = summarize_sim(
+        simulate_checked(
+            10000, 84, fr_coef, fr_fit, N_WEEKS_FIT, seed=20261024, u=u84, gamma=fr_fit["gamma"]
+        )
+    )
+    frailty_sim252 = summarize_sim(
+        simulate_checked(
+            10000, 252, fr_coef, fr_fit, N_WEEKS_LONG, seed=20261025, u=u252, gamma=fr_fit["gamma"]
+        )
+    )
     save_figures(gaps, model2, by_week, by_decile, derived)
+    write_calibration(model1, model2, frailty)
     write_report(
         {
             "n_risk": n_risk,
@@ -1481,12 +1779,14 @@ def main() -> None:
             "data_summary": data,
             "sim84": sim84,
             "sim252": sim252,
+            "frailty": frailty,
+            "frailty_sim84": frailty_sim84,
+            "frailty_sim252": frailty_sim252,
             "mz": mz,
             "mz_without_112": mz0,
             "cohort": cohort,
         }
     )
-    write_calibration(model1, model2)
     print(
         f"risk={n_risk} events={int(frame['y'].sum())} "
         f"lambda_bar={model1['lambda_bar']:.4f} "

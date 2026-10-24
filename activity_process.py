@@ -1,7 +1,8 @@
 """Exogenous daily activity path for the simulator.
 
-Monday-start episodes. Day 1 is active. Week is ``ceil(day/7)`` passed through
-``study_week_norm(..., n_weeks=horizon)``. The path is drawn once, from its own
+Monday-start episodes. Day 1 is active. Protocol month is ``ceil(week / 4)``
+and the covariate is that month minus 2, on a fixed scale: months 1–3 in the
+12-week fit, months 1–9 over 36 weeks. The path is drawn once, from its own
 RNG, and the day loop only reads it.
 """
 
@@ -11,18 +12,34 @@ import math
 
 import numpy as np
 
-from vani_env import study_week_norm
-
 
 def week_number(day: int) -> int:
     """Protocol week of a Monday-start episode. Day 1 is Monday of week 1."""
     return int(math.ceil(int(day) / 7.0))
 
 
-def week_norm_of(day: int, n_weeks: int) -> float:
+def protocol_month(week: int) -> int:
+    """Protocol month ``ceil(week / 4)``. Weeks 1–4, 5–8, and 9–12 are 1, 2, 3.
+
+    Week 0, the partial Sunday before a Sunday starter's week 1, sits in month 1.
+    Later weeks are not capped.
+    """
+    w = int(week)
+    if w <= 0:
+        return 1
+    return math.ceil(w / 4.0)
+
+
+def month_c_from_week(week: int) -> float:
+    """Month covariate on the fixed scale ``protocol_month(week) - 2``."""
+    return float(protocol_month(week) - 2)
+
+
+def month_c_of(day: int) -> float:
+    """Month covariate of a Monday-start study day. Day 0 uses month 1."""
     if int(day) <= 0:
-        return 0.0
-    return float(study_week_norm(week_number(day), n_weeks=n_weeks))
+        return month_c_from_week(1)
+    return month_c_from_week(week_number(day))
 
 
 DROPOUT_RNG_SALT = 771337
@@ -113,6 +130,8 @@ def simulate_activity_paths(
     extra_days: int = 2,
     lambda_p: float | None = None,
     pi: float | None = None,
+    u: np.ndarray | None = None,
+    gamma: float = 0.0,
 ) -> dict:
     """Draw activity paths.
 
@@ -122,6 +141,10 @@ def simulate_activity_paths(
     Gap summaries (ended, censored, inactive days, dropout) use ``n_days`` only.
     ``lambda_p = 0`` is all active and consumes no random numbers.
     ``lambda_p = 1`` and ``pi = 1`` drops every path on day 2.
+    ``n_weeks`` is the episode horizon in weeks. The month covariate does not
+    use it: month 9 is week 36 on the same scale as the 12-week fit.
+    ``u`` is a shared frailty per path, added to the model-1 logit and
+    subtracted, times ``gamma``, from model 2's log theta. ``None`` is pooled.
     """
     n_paths = int(n_paths)
     n_days = int(n_days)
@@ -148,9 +171,11 @@ def simulate_activity_paths(
         return out
 
     coef = np.asarray(coef, dtype=float)
-    week = np.array(
-        [week_norm_of(day, n_weeks) for day in range(n_state + 2)], dtype=float
-    )
+    if int(n_weeks) < 1:
+        raise ValueError("n_weeks must be positive")
+    month = np.array([month_c_of(day) for day in range(n_state + 2)], dtype=float)
+    frailty = None if u is None else np.asarray(u, dtype=float).reshape(n_paths)
+    gamma = float(gamma)
     status = np.zeros(n_paths, dtype=np.int8)
     k = np.zeros(n_paths, dtype=np.int16)
     prior = np.zeros(n_paths, dtype=float)
@@ -186,22 +211,26 @@ def simulate_activity_paths(
         active_idx = np.flatnonzero(status == 0)
         if len(active_idx):
             act7 = hist[active_idx].mean(axis=1)
+            u_active = 0.0 if frailty is None else frailty[active_idx]
             if lambda_p is None:
                 eta = (
                     coef[0]
-                    + coef[1] * week[day]
+                    + coef[1] * month[day]
                     + coef[2] * act7
                     + coef[3] * prior[active_idx]
+                    + u_active
                 )
                 p_start = expit(eta)
             else:
                 p_start = np.full(len(active_idx), float(lambda_p))
             starters = active_idx[rng.random(len(active_idx)) < p_start]
             if len(starters):
+                u_start = 0.0 if frailty is None else frailty[starters]
                 theta = np.exp(
                     fit["c0"]
                     + fit["c1"] * prior[starters]
-                    + fit["c2"] * week[day + 1]
+                    + fit["c2"] * month[day + 1]
+                    - gamma * u_start
                 )
                 p_perm = np.exp(-theta) if pi is None else np.full(len(starters), float(pi))
                 perm = rng.random(len(starters)) < p_perm

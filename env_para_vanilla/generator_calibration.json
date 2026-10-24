@@ -74,10 +74,10 @@
   },
   "activity_process": {
     "source_file": "ADAPR_COMBINED_DIR/participant_dropout_daily.csv",
-    "source_date": "2026-10-21",
+    "source_date": "2026-10-24",
     "cohort": "47 modelled participants, study days 1-84",
     "covariates": {
-      "week": "protocol Mon-Sun study week via vani_env.study_week_norm(week, n_weeks=12); Sunday starters use week 0 for study day 1 and weeks 1-12 on days 2-85. A Monday-start simulator episode uses the same numbering. The simulator passes its own horizon (n_weeks=36 for a 36-week run)",
+      "month": "protocol month m = ceil(week/4), covariate month_c = m - 2. Weeks 1-4, 5-8, and 9-12 are months 1, 2, and 3. A 36-week episode uses months 1-9 on this same scale, with no cap. Week 0 (a Sunday starter's first day) is month 1.",
       "act7": "fraction of the previous 7 days active; days before study day 1 count as active; the observed week-0 Sunday is used as history; unobserved days are skipped",
       "prior_gap": "1 on and after the day a completed gap ends (activity resumes); else 0",
       "activity": "page view, wear, or a daily end-of-day or weekly check-in submission on the participant's local calendar day"
@@ -85,39 +85,130 @@
     "model1": {
       "coefficient_names": [
         "intercept",
-        "week",
+        "month",
         "act7",
         "prior_gap"
       ],
       "coefficients": [
-        -0.5690729071626254,
-        0.2895126973876178,
-        -4.604231924466429,
-        1.8671335226793508
+        -0.5608645840195403,
+        0.11971236075895682,
+        -4.612610993016422,
+        1.9098140306068951
       ],
       "cluster_robust_se": [
-        0.9880851569205111,
-        0.2736796193458809,
-        0.953084383665669,
-        0.4909276466967899
+        0.9873224410178664,
+        0.17191644884255453,
+        0.954263186737457,
+        0.5016967384014606
       ],
       "lambda_bar": 0.01639807746677976
     },
     "model2": {
-      "c0": 0.9543822154625204,
-      "c1": 0.10769959348183056,
-      "c2": 0.035882028762911355,
-      "mu": 11.378749962681178,
-      "alpha": 0.6430885749382139,
+      "c0": 0.8953396300616384,
+      "c1": 0.26495117832920373,
+      "c2": -0.20916013121258528,
+      "mu": 10.205239156150238,
+      "alpha": 0.6567218618013052,
       "hessian_se": {
-        "c0": 0.3464183112336977,
-        "c1": 0.34292486191012883,
-        "c2": 0.29399988264861493,
-        "log_mu": 0.7648069932250154,
-        "log_alpha": 0.1832642356494742,
-        "mu": 8.702547545617449,
-        "alpha": 0.11785513614096138
+        "c0": 0.3161273725342922,
+        "c1": 0.35273070973479553,
+        "c2": 0.22114887859537713,
+        "log_mu": 0.6456610948521322,
+        "log_alpha": 0.17598612045972253,
+        "mu": 6.589125886787812,
+        "alpha": 0.11557393267949775
       }
+    },
+    "frailty": {
+      "note": "Shared user frailty. Model 1 adds u_p to the logit; model 2 subtracts gamma * u_p from log theta. The live simulator uses the pooled model1 and model2 coefficients. These posterior means are the frailty validation.",
+      "seed": 2027,
+      "priors": "coefficients N(0, 5^2); log mu N(log 5, 1); log alpha N(0, 1); tau HalfNormal(1); gamma N(0, 1)",
+      "sampler": "NUTS, 4 chains, tune 3000, draws 2000, target_accept 0.99, started at the pooled MLE",
+      "names": [
+        "a0",
+        "a1_month",
+        "a2_act7",
+        "a3_prior_gap",
+        "c0",
+        "c1_prior_gap",
+        "c2_month",
+        "mu",
+        "alpha",
+        "tau",
+        "gamma"
+      ],
+      "posterior_mean": [
+        -1.403185112045843,
+        0.37043637980597677,
+        -4.124730124319629,
+        1.327006208328094,
+        3.3408601791060875,
+        0.7621260498206763,
+        -0.6401021719539634,
+        24.27081161982844,
+        0.9150172673259658,
+        1.3467147103885808,
+        1.572251699028899
+      ],
+      "posterior_sd": [
+        0.8120561751855958,
+        0.2374677783654039,
+        0.6935033949865043,
+        0.5822490812583705,
+        1.1569154298848336,
+        0.4719018724078587,
+        0.32970523990575984,
+        17.214840005738267,
+        0.1454726518155366,
+        0.4453178976823905,
+        0.508645923066206
+      ],
+      "q025": [
+        -2.9924829524559358,
+        -0.07781057293471726,
+        -5.528115009752965,
+        0.16130986849996157,
+        1.4111040771774754,
+        -0.150418286075536,
+        -1.3171713219835999,
+        8.41345322520476,
+        0.645496791126775,
+        0.5620036816335964,
+        0.7136699135368917
+      ],
+      "q975": [
+        0.17689001063959928,
+        0.8489929443993778,
+        -2.82782810461785,
+        2.4062893551631825,
+        5.962449184979702,
+        1.6926917727958373,
+        -0.01229036812786592,
+        68.27688152563375,
+        1.2105087691975078,
+        2.293170473996062,
+        2.7145871589419186
+      ],
+      "divergences": 0,
+      "max_rhat": 1.01,
+      "min_ess": 1507.0,
+      "model1_coefficients": [
+        -1.403185112045843,
+        0.37043637980597677,
+        -4.124730124319629,
+        1.327006208328094
+      ],
+      "model2": {
+        "c0": 3.3408601791060875,
+        "c1": 0.7621260498206763,
+        "c2": -0.6401021719539634,
+        "mu": 24.27081161982844,
+        "alpha": 0.9150172673259658,
+        "gamma": 1.572251699028899,
+        "tau": 1.3467147103885808
+      },
+      "odds_multiplier_month9_vs_month2": 13.370551758233939,
+      "theta_multiplier_month9_vs_month2": 0.011325310353819668
     }
   }
 }
