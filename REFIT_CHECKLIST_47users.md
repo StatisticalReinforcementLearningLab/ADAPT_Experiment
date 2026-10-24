@@ -25,7 +25,7 @@ and pulling the refit back, the local `env_para_vanilla/` mixes new data files w
       `.pipeline_*.log`, `pf_cmp2*`.
       The simulator does not read `fourSC_support_aware_lag`,
       `activity_carryover_calibration`, or `interaction_pageview_calibration`.
-- [ ] Local tests pass: `python -m pytest tests` (53 tests)
+- [ ] Local tests pass: `python -m pytest tests` (57 tests)
       and `python -m pytest RL_agents` (33 tests).
 - [ ] Expected numbers to check against later (from `docs/dropout_check_20261017/`
       and `docs/cohort_checks_20261017/`):

@@ -109,6 +109,47 @@ def coefficients_from_record(record: dict) -> tuple[np.ndarray, dict]:
     return coef, _model2_fit(record["model2"])
 
 
+def mover_coefficients(record: dict, p_stay: float) -> np.ndarray:
+    """Mover model-1 coefficients stored for this stayer fraction."""
+    block = record.get("stayer_variants")
+    if not isinstance(block, dict) or "variants" not in block:
+        raise KeyError("activity_process.stayer_variants has no calibrated mover coefficients")
+    target = float(p_stay)
+    for item in block["variants"]:
+        if abs(float(item["p_stay"]) - target) <= 1e-8:
+            return np.asarray(item["coefficients"], dtype=float)
+    known = ", ".join(str(item["p_stay"]) for item in block["variants"])
+    raise KeyError(f"no mover coefficients for p_stay={p_stay}. Stored values: {known}")
+
+
+def activity_draw(
+    record: dict,
+    mode: str,
+    uid,
+    rng: np.random.Generator,
+    stayer_fraction: float = 0.0,
+    stayer_recalibrate: bool = True,
+):
+    """Coefficients for one episode, and whether this episode is a stayer.
+
+    ``stayer_fraction`` of 0 uses the pooled coefficients and draws no extra
+    uniform. A positive fraction draws one uniform from ``rng`` before the
+    path. A stayer is then active every day. A mover uses the recalibrated
+    coefficients for that fraction, or the pooled coefficients when
+    ``stayer_recalibrate`` is false.
+    """
+    coef, fit, u, gamma = prepare_activity(record, mode, uid, rng)
+    p_stay = float(stayer_fraction)
+    if not 0.0 <= p_stay <= 1.0:
+        raise ValueError(f"activity_stayer_fraction must be in [0, 1], got {p_stay}")
+    if p_stay <= 0.0:
+        return coef, fit, u, gamma, False
+    is_stayer = float(rng.random()) < p_stay
+    if is_stayer or not stayer_recalibrate:
+        return coef, fit, u, gamma, is_stayer
+    return mover_coefficients(record, p_stay), fit, u, gamma, False
+
+
 def prepare_activity(record: dict, mode: str, uid, rng: np.random.Generator):
     """Coefficients, and one frailty draw, for one episode.
 
@@ -379,10 +420,13 @@ def simulate_cohort_paths(
     n_weeks: int,
     uids,
     base_seed: int,
+    stayer_fraction: float = 0.0,
+    stayer_recalibrate: bool = True,
 ) -> dict:
     """One episode path per ``(base_seed + pass, uid)``, cycling ``uids``.
 
     Frailty mode draws the user index from that episode's activity stream.
+    A positive stayer fraction draws the stayer uniform before the path.
     """
     uids = [int(u) for u in uids]
     if not uids:
@@ -393,7 +437,16 @@ def simulate_cohort_paths(
         uid = uids[i % len(uids)]
         seed = int(base_seed) + i // len(uids)
         rng = np.random.default_rng(dropout_seed_sequence(seed, uid))
-        coef, fit, u, gamma = prepare_activity(record, mode, uid, rng)
+        coef, fit, u, gamma, is_stayer = activity_draw(
+            record, mode, uid, rng, stayer_fraction, stayer_recalibrate
+        )
+        if is_stayer:
+            parts.append(
+                simulate_activity_paths(
+                    1, int(n_days), coef, fit, int(n_weeks), rng, lambda_p=0.0
+                )
+            )
+            continue
         u_arr = None if u is None else np.asarray([u], dtype=float)
         parts.append(
             simulate_activity_paths(

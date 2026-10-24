@@ -305,6 +305,95 @@ def test_pooled_mode_reproduces_its_2000_path_table():
     assert abs(got252["permanent"] - expected["permanent_252"]) <= max(3.0 * se, 0.01)
 
 
+def test_stayer_fraction_zero_matches_the_pooled_simulator_and_draws_nothing():
+    from activity_process import (
+        activity_draw,
+        dropout_seed_sequence,
+        simulate_activity_paths,
+    )
+
+    record = json.loads((PARAMS / "generator_calibration.json").read_text())["activity_process"]
+    _cfg, _env, pooled = experiment._make_online_env(13, seed=7, params_dir=PARAMS)
+    _cfg0, _env0, explicit = experiment._make_online_env(
+        13, seed=7, params_dir=PARAMS, activity_stayer_fraction=0.0
+    )
+    assert pooled.env.cfg.activity_stayer_fraction == 0.0
+    np.testing.assert_array_equal(pooled._activity_status, explicit._activity_status)
+    direct = np.random.default_rng(dropout_seed_sequence(7, 13))
+    wrapped = np.random.default_rng(dropout_seed_sequence(7, 13))
+    coef, fit, _u, gamma = activity_draw(record, "pooled", 13, direct)[:4]
+    sim = simulate_activity_paths(1, pooled.D, coef, fit, pooled.nweek, direct, gamma=gamma)
+    coef_w, fit_w, _uw, gamma_w, is_stayer = activity_draw(
+        record, "pooled", 13, wrapped, stayer_fraction=0.0
+    )
+    assert is_stayer is False
+    sim_w = simulate_activity_paths(1, pooled.D, coef_w, fit_w, pooled.nweek, wrapped, gamma=gamma_w)
+    np.testing.assert_array_equal(sim["status"], sim_w["status"])
+    np.testing.assert_array_equal(pooled._activity_status, sim["status"][0])
+    assert direct.random() == wrapped.random()
+
+
+def test_stayer_path_is_active_every_day():
+    _cfg, _env, oenv = experiment._make_online_env(
+        13, seed=1, params_dir=PARAMS, activity_stayer_fraction=1.0
+    )
+    assert np.all(oenv._activity_status == 0)
+    assert oenv.n_gaps == 0
+    assert oenv._dropout_day_planned == -1
+    assert oenv.inactive_days == 0
+
+
+def test_same_seed_and_uid_share_the_stayer_draw_across_policies():
+    fraction = 0.4
+    _never, never_env = experiment.run_never_send(
+        13, seed=1, params_dir=PARAMS, activity_stayer_fraction=fraction
+    )
+    _always, always_env = experiment.run_always_send(
+        13, seed=1, params_dir=PARAMS, activity_stayer_fraction=fraction
+    )
+    assert not np.array_equal(never_env.action_all, always_env.action_all)
+    np.testing.assert_array_equal(never_env._activity_status, always_env._activity_status)
+    assert never_env.n_gaps == always_env.n_gaps
+    from activity_process import dropout_seed_sequence
+
+    rng = np.random.default_rng(dropout_seed_sequence(1, 13))
+    if float(rng.random()) < fraction:
+        assert np.all(never_env._activity_status == 0)
+        assert never_env.n_gaps == 0
+
+
+def test_calibrated_stayer_variants_match_the_stored_table_and_inactive_share():
+    """Inactive share matches the data. No-gap share matches the stored 10,000-path table.
+
+    The mixture fit does not pin the simulated no-gap share to the observed
+    0.617 once the stayer fraction is 0.4 or higher. The stored table is the
+    record of that. p_stay 0 still matches the observed no-gap share.
+    """
+    from activity_process import simulate_cohort_paths, summarize_paths
+
+    record = json.loads((PARAMS / "generator_calibration.json").read_text())["activity_process"]
+    block = record["stayer_variants"]
+    uids = record["validation_2000"]["uids"]
+    n = 2000
+    observed_p0 = float(block["observed_no_gap_share"])
+    observed_inactive = float(block["observed_inactive_share"])
+    for item in block["variants"]:
+        got = summarize_paths(
+            simulate_cohort_paths(
+                record, "pooled", n, 84, 12, uids, 20261032,
+                stayer_fraction=float(item["p_stay"]), stayer_recalibrate=True,
+            )
+        )
+        stored = item["validation_10000"]
+        se_p0 = (float(stored["p0"]) * (1.0 - float(stored["p0"])) / n) ** 0.5
+        assert abs(float(got["p0"]) - float(stored["p0"])) <= max(3.0 * se_p0, 0.01)
+        se_in = (observed_inactive * (1.0 - observed_inactive) / n) ** 0.5
+        assert abs(float(got["inactive_fraction"]) - observed_inactive) <= max(3.0 * se_in, 0.01)
+        if float(item["p_stay"]) == 0.0:
+            se_obs = (observed_p0 * (1.0 - observed_p0) / n) ** 0.5
+            assert abs(float(got["p0"]) - observed_p0) <= max(3.0 * se_obs, 0.01)
+
+
 def test_inactive_day_zeros_presence_and_checkin_window():
     _cfg, _env, oenv = experiment._make_online_env(
         13, seed=3, params_dir=PARAMS, dropout_hazard_day=0.0

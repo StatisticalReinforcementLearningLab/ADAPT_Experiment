@@ -1384,7 +1384,15 @@ def pv_hurdle_occurrence_z_gap(std: dict) -> float:
 class EnvConfig:
     """Load environment parameters from ``params_env_{userid}.json``."""
 
-    def __init__(self, userid, params_dir=PARAMS_DIR, nweek=36, activity_process_mode=None):
+    def __init__(
+        self,
+        userid,
+        params_dir=PARAMS_DIR,
+        nweek=36,
+        activity_process_mode=None,
+        activity_stayer_fraction=None,
+        activity_stayer_recalibrate=None,
+    ):
         self.userid = userid
         self.K = 2
         self.W = 7
@@ -1413,6 +1421,23 @@ class EnvConfig:
                 f"got {activity_process_mode!r}"
             )
         self.activity_process_mode = mode
+        if activity_stayer_fraction is None:
+            fraction = float(os.environ.get("ADAPR_ACTIVITY_STAYER_FRACTION", "0"))
+        else:
+            fraction = float(activity_stayer_fraction)
+        if not 0.0 <= fraction <= 1.0:
+            raise ValueError(
+                f"activity_stayer_fraction must be in [0, 1], got {activity_stayer_fraction!r}"
+            )
+        self.activity_stayer_fraction = fraction
+        if activity_stayer_recalibrate is None:
+            raw = os.environ.get("ADAPR_ACTIVITY_STAYER_RECALIBRATE")
+            recalibrate = True if raw is None or raw.strip() == "" else raw.strip().lower() not in {
+                "0", "false", "no", "off",
+            }
+        else:
+            recalibrate = bool(activity_stayer_recalibrate)
+        self.activity_stayer_recalibrate = recalibrate
         # ``activity`` and ``constant`` are exclusive. ``none`` is the
         # missing-calibration default (legacy hazard 0, with a warning).
         self.dropout_mechanism = "none"
