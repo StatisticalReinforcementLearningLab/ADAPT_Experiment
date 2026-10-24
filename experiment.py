@@ -134,7 +134,6 @@ from vani_env import (
     zscore_value,
     resolve_params_dir as _resolve_params_dir,
     trim_pf_cae_prior,
-    study_week_norm,
 )
 from agents import (
     MicroQueryAgent,
@@ -856,8 +855,8 @@ class OnlineEnv:
             da = env.gen_antic_mean(s, 0.0, 1.0) - env.gen_antic_mean(s, 0.0, 0.0)
         th = env.cfg.theta_CAE
         return (
-            float(th[3]) * _CAE_EWMA_SLOT_W[int(d) * N_RL_SLOTS + int(t)] * float(df)
-            + float(th[4]) * _CAE_EWMA_DAY_W[int(d)] * float(da)
+            float(th[2]) * _CAE_EWMA_SLOT_W[int(d) * N_RL_SLOTS + int(t)] * float(df)
+            + float(th[3]) * _CAE_EWMA_DAY_W[int(d)] * float(da)
         )
 
     def week_truth_pm_minus_am(self, k):
@@ -1221,8 +1220,6 @@ class OnlineEnv:
         Jw = self._jw_week(sim_w)
         d_w_sun = SUNDAY_D_W
         d_global = self._day_idx(sim_w, d_w_sun)
-        # Same stretch as CAE: week ∈ {1,…,n} maps to [-1, 1]
-        week_norm = study_week_norm(sim_w + 1, n_weeks=self.nweek)
 
         self._ensure_day_started(sim_w, d_w_sun, d_global)
 
@@ -1280,11 +1277,11 @@ class OnlineEnv:
         # Latent (noise-free) conditional mean E[CAE | realized history]; the
         # realized ``cae`` below adds residual noise (and clipping) on top.
         cae_mean = self.env.gen_CAE_mean(
-            self.s["caeAverageLastWeek"], week_norm,
+            self.s["caeAverageLastWeek"],
             self._foursc_wk, self._antic_wk,
         )
         cae = self.env.gen_CAE(
-            self.s["caeAverageLastWeek"], week_norm,
+            self.s["caeAverageLastWeek"],
             self._foursc_wk, self._antic_wk, sim_w,
         )
         cs = self.env.gen_CAE_short(cae, sim_w)
@@ -1295,7 +1292,7 @@ class OnlineEnv:
         # week's mediators read them as opening J_w. ``wp_all[sim_w]`` was
         # set at the previous Sunday and is not overwritten.
         pu = self.env.gen_perceivedUtility(
-            e_w, week_norm,
+            e_w,
             self._pw_wk, self._dw_wk, self._dp_wk, sim_w,
         )
         u1 = self.env.gen_tool_U1(pu, sim_w)
@@ -1359,9 +1356,6 @@ class OnlineEnv:
         cfg = self.env.cfg
         logs = [self._z_to_log(z, cfg.fourSC_log_shift, cfg.fourSC_log_scale) for z in foursc_z_pair]
         return zscore_value(float(np.mean(logs)), cfg.yesterday_step_shift, cfg.yesterday_step_scale)
-
-    def _week_norm(self, sim_w):
-        return study_week_norm(sim_w + 1, n_weeks=self.nweek)
 
     def _prior2HourStepCountEma7d_for_slot(self, slot):
         """Same-slot 7-day EWMA of prior-2h log steps (``derived_covariates``), z-scored."""

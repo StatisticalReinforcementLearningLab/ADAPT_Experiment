@@ -437,7 +437,6 @@ def build_cae_mixedlm_data(df, userid_all, K=14):
     Current CAE model:
         CAE_avg ~ intercept
                   + CAE_avg_lastweek
-                  + week
                   + EWMA of 14 FourSC decision-slot summaries
                   + EWMA of 7 anticipated-affect daily summaries
 
@@ -468,7 +467,6 @@ def build_cae_mixedlm_data(df, userid_all, K=14):
         # Decision-level arrays.
         CAE_avg = dat_user["CAE_avg_norm"].to_numpy(dtype=float)
         CAE_avg_lastweek = dat_user["CAE_avg_lastweek_norm"].to_numpy(dtype=float)
-        week = dat_user["week_norm"].to_numpy(dtype=float)
 
         fourSC = dat_user["4hour_step_norm"].to_numpy(dtype=float)
         anticipated_affect = dat_user["anticipated_affect_norm"].to_numpy(dtype=float)
@@ -479,8 +477,7 @@ def build_cae_mixedlm_data(df, userid_all, K=14):
         # Convert decision-level rows to weekly rows.
         CAE_avg_sw = CAE_avg.reshape(-1, K)[:, 0]
         CAE_avg_lastweek_sw = CAE_avg_lastweek.reshape(-1, K)[:, 0]
-        week_sw = week.reshape(-1, K)[:, 0]
-        Intercept_sw = np.ones(len(week_sw))
+        Intercept_sw = np.ones(len(CAE_avg_sw))
 
         # FourSC: 14 decision slots per week. Anticipated affect is stored on
         # both AM/PM rows; pass the 14-slot week so AM/PM averaging matches
@@ -493,7 +490,6 @@ def build_cae_mixedlm_data(df, userid_all, K=14):
             [
                 Intercept_sw,
                 CAE_avg_lastweek_sw,
-                week_sw,
                 foursc_e,
                 antic_e,
             ]
@@ -816,7 +812,6 @@ THETA_ANTIC_NAMES = [
 THETA_CAE_NAMES = [
     "intercept",
     "CAE_avg_lastweek",
-    "week",
     "fourSC_ewma",
     "anticipated_affect_ewma",
 ]
@@ -962,8 +957,8 @@ if userid_all.size == 0:
 #     an effect) asserts "this should help on average" at the *population*
 #     level while leaving each user's random effect free to land negative if
 #     their own data supports it — real heterogeneity, not reflection.
-# week and the intercept have no such prior belief, so they get
-# wide/uninformative priors and are essentially estimated by the data alone.
+# The intercept has no such prior belief, so it gets a wide prior and is
+# essentially estimated by the data alone.
 #
 # 2026-09-15: the three informative slopes (CAE_avg_lastweek, fourSC_ewma,
 # anticipated_affect_ewma) now use sign-constrained HalfNormal priors
@@ -974,13 +969,13 @@ if userid_all.size == 0:
 # antic 0.302 vs 0.324, identical residual lag-1 ACF, 0 divergences either
 # way). Note beta_prior_sd is ignored for these columns: a HalfNormal's
 # spread is tied to its mean (prior SD ~= 0.60 * mu).
-CAE_BETA_PRIOR_MU = np.array([0.0, 0.2, 0.0, 0.15, 0.3])
-# sd applies to the unsigned columns (intercept, week) only; entries for the
+CAE_BETA_PRIOR_MU = np.array([0.0, 0.2, 0.15, 0.3])
+# sd applies to the unsigned column (intercept) only; entries for the
 # three signed columns are ignored (their spread comes from the HalfNormal).
 CAE_BETA_PRIOR_SD = np.array(
-    [WEAK_BETA_PRIOR_SD, 0.15, WEAK_BETA_PRIOR_SD, 0.15, 0.15]
+    [WEAK_BETA_PRIOR_SD, 0.15, 0.15, 0.15]
 )
-CAE_BETA_PRIOR_SIGN = np.array([0.0, 1.0, 0.0, 1.0, 1.0])
+CAE_BETA_PRIOR_SIGN = np.array([0.0, 1.0, 1.0, 1.0])
 CAE_RE_SD_PRIOR_MODE = np.full(len(THETA_CAE_NAMES), RE_SD_MODE_CONTINUOUS)
 
 cae_ml_df = build_cae_mixedlm_data(df_fit, userid_all, K=14)
@@ -1265,8 +1260,6 @@ for i, userid in enumerate(userid_all):
     WalkingSuggestion = dat_user['WalkingSuggestion'].to_numpy()
 
     is_weekend = dat_user['is_weekend'].to_numpy(dtype=float)
-    day = dat_user['day_norm'].to_numpy()
-    week = dat_user['week_norm'].to_numpy()
     decision_time = dat_user['DecisionTime'].to_numpy()
     
     
@@ -1443,8 +1436,7 @@ for i, userid in enumerate(userid_all):
 
     CAE_avg_sw = CAE_avg.reshape(-1, K)[:, 0]
     CAE_avg_lastweek_sw = CAE_avg_lastweek.reshape(-1, K)[:, 0]
-    week_sw = week.reshape(-1, K)[:, 0]
-    Intercept_sw = np.ones(len(week_sw))
+    Intercept_sw = np.ones(len(CAE_avg_sw))
 
     foursc_wk = fourSC.reshape(-1, K)
     af = anticipated_affect.reshape(-1, K)
@@ -1453,7 +1445,6 @@ for i, userid in enumerate(userid_all):
     CAE_cond = np.column_stack([
         Intercept_sw,
         CAE_avg_lastweek_sw,
-        week_sw,
         foursc_e,
         antic_e,
     ])
@@ -1538,14 +1529,13 @@ for i, userid in enumerate(userid_all):
     alpha_CAE_short_avg_l2 = None
 
     # Exact baseline backcast from the first observed full CAE. c_2..c_12
-    # are the week-varying panel intercepts. c_1 uses the week-1 EWMAs in
+    # are the panel intercepts. c_1 uses the week-1 EWMAs in
     # week1_cae_inputs.csv, from the same mediator function as c_2..c_12.
     # No week-1 row falls back to c_2.
     _c_2_12 = (
         theta_CAE_mean[0]
-        + theta_CAE_mean[2] * week_sw
-        + theta_CAE_mean[3] * foursc_e
-        + theta_CAE_mean[4] * antic_e
+        + theta_CAE_mean[2] * foursc_e
+        + theta_CAE_mean[3] * antic_e
     )
     _w1 = _week1_inputs.get(int(userid))
     if _w1 is None:

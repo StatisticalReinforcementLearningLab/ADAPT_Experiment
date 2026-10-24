@@ -23,9 +23,10 @@ mean / SD. Count 0 sits at ``log(1) = 0`` before z-scoring (legacy folders:
 ``log(x)`` for positives and ``log(0.5)`` for zero). Both parts include ``E_w``,
 weekend, slot, burden, lag1, ``A``, ``A×E_w``, and the opening ``J_w``
 query (``week_present_lastweek``) on the linear predictor. ``I_w`` is not
-in this model. Pre-``week_norm`` JSON is zero-padded so those emissions
-do not get a study-week slope; CAE still uses its own ``week_norm``.
-STE-tuned folders carry edited action slopes in JSON, so they enter
+in this model. The coefficient layout is the one ``06_fit_pu.py`` writes,
+with no study-week slope. A stored week slot is dropped only when that
+coefficient is exactly 0. STE-tuned folders carry edited action slopes in
+JSON, so they enter
 both hurdle parts directly.
 
 Page-view occurrence also includes the interaction with a delivered
@@ -192,8 +193,8 @@ PARAMS_DIR = resolve_params_dir()
 # interval. Change it here only (``06_fit_pu`` imports these names).
 E_QUAD_LO = -4.0
 E_QUAD_HI = 4.0
-# Fit uses n_weeks=11 so weeks 1..11 map to [-1, 1]. Generation uses the
-# simulation horizon (same stretch as ``experiment.OnlineEnv._week_norm``).
+# Activity-process study-week covariate. Default n_weeks=11 is the MRT
+# panel scale (w - 6) / 5. Callers pass the horizon they fit or simulate.
 VANILLA_WEEK_RANGE = 11
 
 
@@ -371,7 +372,6 @@ THETA_ANTIC_NAMES = [
 THETA_CAE_NAMES = [
     "intercept",
     "CAE_avg_lastweek",
-    "week",
     "fourSC_ewma",
     "anticipated_affect_ewma",
 ]
@@ -423,22 +423,27 @@ CAE_FOURSC_SLOTS = 14
 CAE_FOURSC_SLOTS_RL = 12
 CAE_ANTIC_DAYS = 7
 CAE_ANTIC_DAYS_RL = 6
-_CAE_WEEK_IDX = THETA_CAE_NAMES.index("week")
-PV_ML_BASE_LEGACY = 8
-PV_ML_BASE = 9  # includes week_norm after recent_burden
+# Legacy env CAE vector: intercept, AR, week, fourSC, antic.
+_LEGACY_CAE_WITH_WEEK = 5
+_LEGACY_CAE_WEEK_IDX = 2
+# 06_fit_pu.py layout. PV base is intercept, E_w, weekend, slot, burden,
+# lag1, A, A×E_w. A stored week slot sits after burden and lengthens the
+# base from 8 to 9 (hurdle 23 to 25).
+PV_ML_BASE = 8
 PV_ML_QUERY = 3
-# Full hurdle JSON: occurrence (9+3) + intensity (9+3) + sigma_PV.
 PV_ML_HURDLE = PV_ML_BASE + PV_ML_QUERY + PV_ML_BASE + PV_ML_QUERY + 1
-PV_ML_HURDLE_LEGACY = (
-    PV_ML_BASE_LEGACY + PV_ML_QUERY + PV_ML_BASE_LEGACY + PV_ML_QUERY + 1
+_PV_WEEK_SLOT = 5
+_PV_BASE_WITH_WEEK = PV_ML_BASE + 1
+_PV_HURDLE_WITH_WEEK = (
+    _PV_BASE_WITH_WEEK + PV_ML_QUERY + _PV_BASE_WITH_WEEK + PV_ML_QUERY + 1
 )
-_PV_WEEK_INSERT = 5  # after intercept, E_w, weekend, slot, burden
-FW_ML_BASE_LEGACY = 9
-FW_ML_BASE = 10  # includes week_norm after recent_burden
-PJ_ML_BASE_LEGACY = 9
-PJ_ML_BASE = 10
-_FW_PJ_WEEK_INSERT = 4  # after intercept, E_w, weekend, burden
-# Query suffix: J_w × (intercept, E_w, recent_burden), jointly fit in script 4.
+# FW/PJ base is intercept, E_w, weekend, burden, lag1, then the two action
+# pairs. A stored week slot sits after burden and lengthens the base from 9 to 10.
+FW_ML_BASE = 9
+PJ_ML_BASE = 9
+_FW_PJ_WEEK_SLOT = 4
+_FW_PJ_BASE_WITH_WEEK = FW_ML_BASE + 1
+# Query suffix: J_w × (intercept, E_w, recent_burden), jointly fit in script 06.
 # Added to the linear predictor when J_w=1; I_w is not in the PV/FW/PJ model.
 FW_ML_QUERY = 3
 PJ_ML_QUERY = 3
@@ -679,22 +684,19 @@ def cae_mediator_ewma_rows(foursc_weeks, antic_weeks) -> tuple[np.ndarray, np.nd
 def c1_from_week1_ewma(theta_CAE, foursc_ewma, antic_ewma) -> float:
     """Week-1 CAE intercept from the two mediator EWMAs.
 
-    ``c_1 = intercept + beta_wk*week_norm(1) + beta_SC*fourSC_ewma
-    + beta_AA*antic_ewma``. A non-finite EWMA returns NaN so
-    :func:`impute_baseline_cae` falls back to ``c_2``. That happens only
-    when week 1 has no rows, or a length :func:`cae_mediator_ewmas` rejects.
-    An all-missing mediator is already filled inside that function.
+    ``c_1 = intercept + b_SC*fourSC_ewma + b_AA*antic_ewma``. A non-finite
+    EWMA returns NaN so :func:`impute_baseline_cae` falls back to ``c_2``.
+    That happens only when week 1 has no rows, or a length
+    :func:`cae_mediator_ewmas` rejects. An all-missing mediator is already
+    filled inside that function.
     """
-    theta_CAE = np.asarray(theta_CAE, dtype=float).ravel()
-    if theta_CAE.size < 5:
-        raise ValueError("theta_CAE must contain intercept, AR(1), week, fourSC, antic")
+    theta_CAE = trim_theta_cae(theta_CAE)
     if not (np.isfinite(foursc_ewma) and np.isfinite(antic_ewma)):
         return float("nan")
     return float(
         theta_CAE[0]
-        + theta_CAE[2] * study_week_norm(1)
-        + theta_CAE[3] * float(foursc_ewma)
-        + theta_CAE[4] * float(antic_ewma)
+        + theta_CAE[2] * float(foursc_ewma)
+        + theta_CAE[3] * float(antic_ewma)
     )
 
 
@@ -742,7 +744,6 @@ def week1_cae_input_record(foursc, antic) -> dict:
     record = {
         "foursc_ewma": float("nan"),
         "antic_ewma": float("nan"),
-        "week_norm": float(study_week_norm(1)),
         "irregular": 0,
         "n_foursc": int(foursc.size),
         "n_antic": int(antic.size),
@@ -775,7 +776,6 @@ def week1_cae_input_table(week1, std_params) -> pd.DataFrame:
         "ParticipantIdentifier",
         "foursc_ewma",
         "antic_ewma",
-        "week_norm",
         "irregular",
         "n_foursc",
         "n_antic",
@@ -875,16 +875,16 @@ def impute_baseline_cae(
     return float(y1_hat), f"backcast_{k - 1}w{src_suffix}"
 
 
-def build_CAE_features(CAE_lastweek, week_norm, foursc_wk, antic_wk) -> np.ndarray:
+def build_CAE_features(CAE_lastweek, foursc_wk, antic_wk) -> np.ndarray:
     """Env generative CAE features matching ``THETA_CAE_NAMES``.
 
     fourSC and anticipated affect enter as EWMA summaries of the full calendar
-    week (14 slots / 7 days). ``week_norm`` is a predictor here; the PF
-    transition uses :func:`build_pf_CAE_features`, which drops it.
+    week (14 slots / 7 days). There is no study-week slope. The PF transition
+    uses :func:`build_pf_CAE_features`, which also has no week term.
     """
     foursc_e, antic_e = cae_mediator_ewmas(foursc_wk, antic_wk)
     x = np.array(
-        [1.0, float(CAE_lastweek), float(week_norm), foursc_e, antic_e],
+        [1.0, float(CAE_lastweek), foursc_e, antic_e],
         dtype=float,
     )
     if x.size != P_CAE:
@@ -941,9 +941,52 @@ def trim_theta_foursc(theta) -> np.ndarray:
     )
 
 
+_DROPPED_WEEK_WARNED: set[str] = set()
+
+
+def _warn_dropped_week(label: str, detail: str) -> None:
+    """Warn once per coefficient block when a legacy week slot is removed."""
+    if label in _DROPPED_WEEK_WARNED:
+        return
+    _DROPPED_WEEK_WARNED.add(label)
+    warnings.warn(detail, UserWarning, stacklevel=3)
+
+
+def trim_theta_cae(theta) -> np.ndarray:
+    """Current 4-vector, or a legacy 5-vector with the week coefficient removed."""
+    a = np.asarray(theta, dtype=float).ravel()
+    if a.size == 0 or a.size == P_CAE:
+        return a
+    if a.size == _LEGACY_CAE_WITH_WEEK:
+        _warn_dropped_week(
+            "theta_CAE",
+            "theta_CAE has 5 coefficients including week; dropping the week coefficient",
+        )
+        return np.delete(a, _LEGACY_CAE_WEEK_IDX)
+    raise ValueError(
+        f"theta_CAE length {a.size}; expected {P_CAE} or legacy {_LEGACY_CAE_WITH_WEEK}"
+    )
+
+
 def trim_pf_cae_prior(nu, Gamma=None):
-    """Map env 5-dim CAE prior (with ``week``) to the PF 4-dim prior (no ``week``)."""
+    """PF CAE prior has no week column. A legacy 5-vector drops that column."""
     nu = np.asarray(nu, dtype=float).ravel()
+    if nu.size == _LEGACY_CAE_WITH_WEEK:
+        _warn_dropped_week(
+            "theta_CAE",
+            "theta_CAE has 5 coefficients including week; dropping the week coefficient",
+        )
+        nu = np.delete(nu, _LEGACY_CAE_WEEK_IDX)
+        if Gamma is None:
+            return nu
+        G = np.asarray(Gamma, dtype=float)
+        if G.shape != (_LEGACY_CAE_WITH_WEEK, _LEGACY_CAE_WITH_WEEK):
+            raise ValueError(
+                "CAE prior covariance shape "
+                f"{G.shape}; expected {(_LEGACY_CAE_WITH_WEEK, _LEGACY_CAE_WITH_WEEK)}"
+            )
+        keep = [i for i in range(_LEGACY_CAE_WITH_WEEK) if i != _LEGACY_CAE_WEEK_IDX]
+        return nu, G[np.ix_(keep, keep)]
     if nu.size == P_PF_CAE:
         if Gamma is None:
             return nu
@@ -953,19 +996,8 @@ def trim_pf_cae_prior(nu, Gamma=None):
         raise ValueError(
             f"PF CAE prior covariance shape {G.shape}; expected {(P_PF_CAE, P_PF_CAE)}"
         )
-    if nu.size == P_CAE:
-        nu = np.delete(nu, _CAE_WEEK_IDX)
-        if Gamma is None:
-            return nu
-        G = np.asarray(Gamma, dtype=float)
-        if G.shape != (P_CAE, P_CAE):
-            raise ValueError(
-                f"CAE prior covariance shape {G.shape}; expected {(P_CAE, P_CAE)}"
-            )
-        keep = [i for i in range(P_CAE) if i != _CAE_WEEK_IDX]
-        return nu, G[np.ix_(keep, keep)]
     raise ValueError(
-        f"CAE prior mean length {nu.size}; expected {P_PF_CAE} or env {P_CAE}"
+        f"CAE prior mean length {nu.size}; expected {P_PF_CAE} or legacy {_LEGACY_CAE_WITH_WEEK}"
     )
 
 
@@ -1058,60 +1090,92 @@ def _split_ml_query(
     return base, q
 
 
-def _insert_week_coef(base, insert_at: int, new_len: int) -> np.ndarray:
-    """Pad a pre-week_norm coefficient vector with a 0 at ``insert_at``."""
+def _drop_zero_week_slot(base, slot: int, plain_len: int, label: str) -> np.ndarray:
+    """Drop a legacy week coefficient when it is exactly 0."""
     b = np.asarray(base, dtype=float).ravel()
-    if b.size == new_len:
+    if b.size == plain_len:
         return b.copy()
-    if b.size == new_len - 1:
-        return np.concatenate([b[:insert_at], [0.0], b[insert_at:]])
-    padded = np.zeros(max(new_len - 1, b.size), dtype=float)
-    padded[: b.size] = b
-    padded = padded[: new_len - 1]
-    return np.concatenate([padded[:insert_at], [0.0], padded[insert_at:]])
+    if b.size != plain_len + 1:
+        raise ValueError(
+            f"{label} base length {b.size}; expected {plain_len} or {plain_len + 1}"
+        )
+    coef = float(b[slot])
+    if coef != 0.0:
+        raise ValueError(
+            f"{label} study-week coefficient is {coef}; only an exact 0 can be dropped"
+        )
+    _warn_dropped_week(
+        label,
+        f"{label} includes a zero study-week coefficient; dropping it",
+    )
+    return np.concatenate([b[:slot], b[slot + 1 :]])
+
+
+def _trim_theta_j(theta) -> np.ndarray:
+    """J_w is intercept and E_w. A third slot is the legacy week slope."""
+    t = np.asarray(theta, dtype=float).ravel()
+    if t.size < 3:
+        return t
+    coef = float(t[2])
+    if coef != 0.0:
+        raise ValueError(
+            f"theta_ml_J study-week coefficient is {coef}; only an exact 0 can be dropped"
+        )
+    _warn_dropped_week(
+        "theta_ml_J",
+        "theta_ml_J includes a zero study-week coefficient; dropping it",
+    )
+    return np.concatenate([t[:2], t[3:]])
 
 
 def _split_ml_pv_hurdle(theta: np.ndarray):
-    """Split script-4 PV hurdle theta.
+    """Split script-06 PV hurdle theta.
 
-    Current JSON (25): occurrence 9+3, intensity 9+3, ``sigma_PV``.
-    Pre-week_norm hurdle (23) inserts a 0 week coefficient.
-    Legacy occurrence-only (11, or 12 with a trailing Gaussian σ dropped)
-    returns ``int_base is None`` so the generator can fall back to resampling.
+    Written layout (23): occurrence 8+3, intensity 8+3, ``sigma_PV``.
+    A 25-vector has a week slot in each base; that slot is dropped only
+    when the coefficient is exactly 0. Legacy occurrence-only vectors
+    return ``int_base is None``.
     """
     t = np.asarray(theta, dtype=float).ravel()
-    if t.size >= PV_ML_HURDLE:
-        occ_len = PV_ML_BASE + PV_ML_QUERY
+    if t.size >= _PV_HURDLE_WITH_WEEK:
+        base_w = _PV_BASE_WITH_WEEK
+        occ_len = base_w + PV_ML_QUERY
         occ, rest = t[:occ_len], t[occ_len:]
-        occ_base, occ_q = occ[:PV_ML_BASE], occ[PV_ML_BASE:]
-        int_base, int_q = rest[:PV_ML_BASE], rest[PV_ML_BASE:PV_ML_BASE + PV_ML_QUERY]
-        sigma = float(rest[PV_ML_BASE + PV_ML_QUERY]) if rest.size > PV_ML_BASE + PV_ML_QUERY else 0.1
-        if not np.isfinite(sigma) or sigma <= 0.0:
-            sigma = 0.1
-        return occ_base, occ_q, int_base, int_q, sigma
-    if t.size >= PV_ML_HURDLE_LEGACY:
-        occ_len = PV_ML_BASE_LEGACY + PV_ML_QUERY
-        occ, rest = t[:occ_len], t[occ_len:]
-        occ_base = _insert_week_coef(occ[:PV_ML_BASE_LEGACY], _PV_WEEK_INSERT, PV_ML_BASE)
-        occ_q = occ[PV_ML_BASE_LEGACY:]
-        int_base = _insert_week_coef(
-            rest[:PV_ML_BASE_LEGACY], _PV_WEEK_INSERT, PV_ML_BASE
+        occ_base = _drop_zero_week_slot(
+            occ[:base_w], _PV_WEEK_SLOT, PV_ML_BASE, "theta_ml_PV"
         )
-        int_q = rest[PV_ML_BASE_LEGACY:PV_ML_BASE_LEGACY + PV_ML_QUERY]
+        occ_q = occ[base_w:]
+        int_base = _drop_zero_week_slot(
+            rest[:base_w], _PV_WEEK_SLOT, PV_ML_BASE, "theta_ml_PV"
+        )
+        int_q = rest[base_w : base_w + PV_ML_QUERY]
         sigma = (
-            float(rest[PV_ML_BASE_LEGACY + PV_ML_QUERY])
-            if rest.size > PV_ML_BASE_LEGACY + PV_ML_QUERY
+            float(rest[base_w + PV_ML_QUERY])
+            if rest.size > base_w + PV_ML_QUERY
             else 0.1
         )
         if not np.isfinite(sigma) or sigma <= 0.0:
             sigma = 0.1
         return occ_base, occ_q, int_base, int_q, sigma
-    if t.size in (9, 12) and t.size > PV_ML_BASE_LEGACY:
-        t = np.concatenate([t[:PV_ML_BASE_LEGACY], t[PV_ML_BASE_LEGACY + 1 :]])
+    if t.size >= PV_ML_HURDLE:
+        occ_len = PV_ML_BASE + PV_ML_QUERY
+        occ, rest = t[:occ_len], t[occ_len:]
+        occ_base, occ_q = occ[:PV_ML_BASE], occ[PV_ML_BASE:]
+        int_base = rest[:PV_ML_BASE]
+        int_q = rest[PV_ML_BASE : PV_ML_BASE + PV_ML_QUERY]
+        sigma = (
+            float(rest[PV_ML_BASE + PV_ML_QUERY])
+            if rest.size > PV_ML_BASE + PV_ML_QUERY
+            else 0.1
+        )
+        if not np.isfinite(sigma) or sigma <= 0.0:
+            sigma = 0.1
+        return occ_base, occ_q, int_base, int_q, sigma
+    if t.size in (9, 12) and t.size > PV_ML_BASE:
+        t = np.concatenate([t[:PV_ML_BASE], t[PV_ML_BASE + 1 :]])
     occ_base, occ_q = _split_ml_query(
-        t, PV_ML_BASE_LEGACY, PV_ML_QUERY, _PV_QUERY_LEGACY_KEEP
+        t, PV_ML_BASE, PV_ML_QUERY, _PV_QUERY_LEGACY_KEEP
     )
-    occ_base = _insert_week_coef(occ_base, _PV_WEEK_INSERT, PV_ML_BASE)
     return occ_base, occ_q, None, None, None
 
 
@@ -1120,20 +1184,42 @@ def _split_ml_pv_full(theta: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return occ_base, occ_q
 
 
-def _split_ml_fw(theta: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _split_ml_action_block(
+    theta: np.ndarray,
+    *,
+    label: str,
+    legacy_keep: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """FW or PJ block: 9+3 as written, or 10+3 with a zero week slot."""
     t = np.asarray(theta, dtype=float).ravel()
-    if t.size >= FW_ML_BASE + FW_ML_QUERY:
-        return t[:FW_ML_BASE].copy(), t[FW_ML_BASE:FW_ML_BASE + FW_ML_QUERY].copy()
-    base, q = _split_ml_query(t, FW_ML_BASE_LEGACY, FW_ML_QUERY, _FW_PJ_QUERY_LEGACY_KEEP)
-    return _insert_week_coef(base, _FW_PJ_WEEK_INSERT, FW_ML_BASE), q
+    query_len = FW_ML_QUERY
+    if t.size >= _FW_PJ_BASE_WITH_WEEK + query_len:
+        base = _drop_zero_week_slot(
+            t[:_FW_PJ_BASE_WITH_WEEK],
+            _FW_PJ_WEEK_SLOT,
+            FW_ML_BASE,
+            label,
+        )
+        q = t[_FW_PJ_BASE_WITH_WEEK : _FW_PJ_BASE_WITH_WEEK + query_len].copy()
+        return base, q
+    if t.size >= FW_ML_BASE + query_len:
+        return (
+            t[:FW_ML_BASE].copy(),
+            t[FW_ML_BASE : FW_ML_BASE + query_len].copy(),
+        )
+    return _split_ml_query(t, FW_ML_BASE, query_len, legacy_keep)
+
+
+def _split_ml_fw(theta: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    return _split_ml_action_block(
+        theta, label="theta_ml_FW", legacy_keep=_FW_PJ_QUERY_LEGACY_KEEP
+    )
 
 
 def _split_ml_pj(theta: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    t = np.asarray(theta, dtype=float).ravel()
-    if t.size >= PJ_ML_BASE + PJ_ML_QUERY:
-        return t[:PJ_ML_BASE].copy(), t[PJ_ML_BASE:PJ_ML_BASE + PJ_ML_QUERY].copy()
-    base, q = _split_ml_query(t, PJ_ML_BASE_LEGACY, PJ_ML_QUERY, _FW_PJ_QUERY_LEGACY_KEEP)
-    return _insert_week_coef(base, _FW_PJ_WEEK_INSERT, PJ_ML_BASE), q
+    return _split_ml_action_block(
+        theta, label="theta_ml_PJ", legacy_keep=_FW_PJ_QUERY_LEGACY_KEEP
+    )
 
 
 def _ml_query_features(s) -> np.ndarray:
@@ -1446,7 +1532,12 @@ class EnvConfig:
                 _P_ANTIC_NO_BURDEN + 4,
             ),
         )
-        _validate_json_names("theta_CAE_names", p, THETA_CAE_NAMES)
+        _validate_json_names(
+            "theta_CAE_names",
+            p,
+            THETA_CAE_NAMES,
+            legacy_lengths=(_LEGACY_CAE_WITH_WEEK,),
+        )
         _validate_json_names("theta_CAE_short_avg_names", p, THETA_CAE_SHORT_AVG_NAMES)
 
         self.theta_prior2hour_step_count = _json_float_list("theta_prior2hour_step_count", p)
@@ -1462,7 +1553,7 @@ class EnvConfig:
             _json_float_list("theta_antic", p),
             names=p.get("theta_antic_names"),
         )
-        self.theta_CAE = _json_float_list("theta_CAE", p)
+        self.theta_CAE = trim_theta_cae(_json_float_list("theta_CAE", p))
         self.theta_CAE_short = _json_float_list("theta_CAE_short_avg", p)
 
         self.resid_prior2hour_step_count = _json_resid_list("resid_prior2hour_step_count", p)
@@ -1489,7 +1580,9 @@ class EnvConfig:
             ).ravel()
 
         self.theta_ml_Ew = _penalized_or_legacy("theta_penalized_Ew", "theta_ml_Ew")
-        self.theta_ml_J = _penalized_or_legacy("theta_penalized_J", "theta_ml_J")
+        self.theta_ml_J = _trim_theta_j(
+            _penalized_or_legacy("theta_penalized_J", "theta_ml_J")
+        )
         self.theta_ml_U1 = _penalized_or_legacy("theta_penalized_U1", "theta_ml_U1")
         self.theta_ml_U2 = _penalized_or_legacy("theta_penalized_U2", "theta_ml_U2")
         self.theta_ml_PV = _penalized_or_legacy("theta_penalized_PV", "theta_ml_PV")
@@ -1750,10 +1843,6 @@ class Env:
         )
         return float(np.clip(z, *self.cfg.limits_pageview))
 
-    def _sim_week_norm(self, study_week):
-        """Stretch ``week_norm`` onto ``[-1, 1]`` over ``cfg.nweek``, like CAE."""
-        return study_week_norm(study_week, n_weeks=self.cfg.nweek)
-
     def _resid_model(self, resid, name):
         key = name if name is not None else id(resid)
         model = self._resid_models.get(key)
@@ -1924,7 +2013,7 @@ class Env:
             _, q = _split_ml_pv_full(self.cfg.theta_ml_PV)
         return _ml_query_applied_shift(q, s, Jw)
 
-    def _ml_pv_linpred(self, s, Ah: float, Jw: int, base, q, *, step_idx=None) -> float:
+    def _ml_pv_linpred(self, s, Ah: float, Jw: int, base, q) -> float:
         Ew = float(s["perceivedUtilityLastWeek"])
         (
             b0,
@@ -1932,41 +2021,32 @@ class Env:
             b2_isWeekend,
             b2_dt,
             b2_rb,
-            b2_week,
             b_ar1,
             b3,
             b4,
         ) = np.asarray(base, dtype=float).ravel()
         lag1 = float(s["pageViewNext4HourLag1"])
-        week_n = 0.0
-        if step_idx is not None:
-            slots_per_week = int(self.K) * int(self.W)
-            study_week = int(step_idx) // max(slots_per_week, 1) + 1
-            week_n = self._sim_week_norm(study_week)
         eta = (
             b0
             + b1 * Ew
             + b2_isWeekend * float(s["isWeekend"])
             + b2_dt * float(s["decisionTimeSlot"])
             + b2_rb * float(s["activitySuggestionsSentLast7Days"])
-            + b2_week * week_n
             + b_ar1 * lag1
             + Ah * (b3 + b4 * Ew)
         )
         return float(eta + self._ml_pv_query_shift(s, Jw, q=q))
 
-    def _ml_pv_logit(self, s, Ah: float, Jw: int, step_idx=None) -> float:
-        """Script-4 hurdle logit for ``P(pageview count > 0)``."""
+    def _ml_pv_logit(self, s, Ah: float, Jw: int) -> float:
+        """Script-06 hurdle logit for ``P(pageview count > 0)``."""
         if not self.cfg.has_ml_stack:
             raise RuntimeError("ML parameters missing from params JSON")
         occ_base, occ_q, _int_base, _int_q, _sigma = _split_ml_pv_hurdle(
             self.cfg.theta_ml_PV
         )
-        return self._ml_pv_linpred(
-            s, float(Ah), int(Jw), occ_base, occ_q, step_idx=step_idx
-        )
+        return self._ml_pv_linpred(s, float(Ah), int(Jw), occ_base, occ_q)
 
-    def _ml_pv_intensity_mean(self, s, Ah: float, Jw: int, step_idx=None):
+    def _ml_pv_intensity_mean(self, s, Ah: float, Jw: int):
         """Mean log-then-z pageview given count>0, or None if not in JSON."""
         if not self.cfg.has_ml_stack:
             raise RuntimeError("ML parameters missing from params JSON")
@@ -1975,23 +2055,19 @@ class Env:
         )
         if int_base is None:
             return None, None
-        mu = self._ml_pv_linpred(
-            s, float(Ah), int(Jw), int_base, int_q, step_idx=step_idx
-        )
+        mu = self._ml_pv_linpred(s, float(Ah), int(Jw), int_base, int_q)
         return float(mu), float(sigma)
 
-    def _pv_hurdle_occurrence(self, s, Ah: float, Jw: int, step_idx=None):
+    def _pv_hurdle_occurrence(self, s, Ah: float, Jw: int):
         rec = self.cfg.pv_hurdle
-        p = float(self._sigmoid(self._ml_pv_logit(s, float(Ah), int(Jw), step_idx=step_idx)))
+        p = float(self._sigmoid(self._ml_pv_logit(s, float(Ah), int(Jw))))
         pool = _pv_hurdle_positive_pool(rec, Ah, self.cfg.pv_hurdle_population)
         shift = float(self.cfg.pageview_log_shift)
         scale = float(self.cfg.pageview_log_scale)
         zc = self.cfg.pageview_zero_count
         z_zero = _standardize_pageview_count(0.0, shift, scale, zero_count=zc)
         z_one = _standardize_pageview_count(1.0, shift, scale, zero_count=zc)
-        mu_int, sigma_int = self._ml_pv_intensity_mean(
-            s, float(Ah), int(Jw), step_idx=step_idx
-        )
+        mu_int, sigma_int = self._ml_pv_intensity_mean(s, float(Ah), int(Jw))
         if mu_int is None:
             z_pos = np.array(
                 [
@@ -2010,9 +2086,9 @@ class Env:
             return 0.0
         return float(self.cfg.theta_pv_interaction[0]) * float(Ah) * float(ws_interaction)
 
-    def gen_pageview_mean(self, s, Ah, Jw=0, step_idx=None, ws_interaction=None):
+    def gen_pageview_mean(self, s, Ah, Jw=0, ws_interaction=None):
         p_hat, _pool, z_zero, _z_one, mu_int, _sigma = self._pv_hurdle_occurrence(
-            s, float(Ah), int(Jw), step_idx=step_idx
+            s, float(Ah), int(Jw)
         )
         if ws_interaction is not None:
             eta = math.log(max(p_hat, 1e-12) / max(1.0 - p_hat, 1e-12))
@@ -2022,7 +2098,7 @@ class Env:
 
     def gen_pageview(self, s, Ah, Jw, step_idx, ws_interaction=None):
         p_base, pool, z_zero, z_one, mu_int, sigma_int = self._pv_hurdle_occurrence(
-            s, float(Ah), int(Jw), step_idx=step_idx
+            s, float(Ah), int(Jw)
         )
         eta = math.log(max(p_base, 1e-12) / max(1.0 - p_base, 1e-12))
         p_hat = self._sigmoid(eta + self._pv_interaction_shift(Ah, ws_interaction))
@@ -2110,29 +2186,23 @@ class Env:
         noise = self._sample_noise(self.cfg.resid_antic, day_idx, name="antic")
         return float(np.clip(mean + noise, *self.cfg.limits_antic))
 
-    def _ml_fw_eta(self, s, ws_morning, ws_afternoon, Jw: int, return_logit: bool, day_idx=None):
+    def _ml_fw_eta(self, s, ws_morning, ws_afternoon, Jw: int, return_logit: bool):
         if not self.cfg.has_ml_stack:
             raise RuntimeError("ML parameters missing from params JSON")
         Ew = float(s["perceivedUtilityLastWeek"])
         base, q = _split_ml_fw(self.cfg.theta_ml_FW)
         (
-            beta0, beta1, b2_isWeekend, b2_rb, b2_week, beta_ar1,
+            beta0, beta1, b2_isWeekend, b2_rb, beta_ar1,
             beta3, beta4, beta5, beta6,
         ) = base
         is_weekend = float(s["isWeekend"])
         rb = float(s["activitySuggestionsSentLast7Days"])
         y_lag = float(s["morningFitbitWearYesterday"])
-        week_n = 0.0
-        if day_idx is not None:
-            week_n = self._sim_week_norm(
-                int(day_idx) // max(int(self.W), 1) + 1
-            )
         eta = (
             beta0
             + beta1 * Ew
             + b2_isWeekend * is_weekend
             + b2_rb * rb
-            + b2_week * week_n
             + beta_ar1 * y_lag
             + ws_morning * (beta3 + beta4 * Ew)
             + ws_afternoon * (beta5 + beta6 * Ew)
@@ -2140,14 +2210,14 @@ class Env:
         eta += _ml_query_applied_shift(q, s, Jw)
         return eta if return_logit else self._sigmoid(eta)
 
-    def gen_fitbitwearing_mean(self, s, ws_morning, ws_afternoon, Jw=0, return_logit=False, day_idx=None):
+    def gen_fitbitwearing_mean(self, s, ws_morning, ws_afternoon, Jw=0, return_logit=False):
         return self._ml_fw_eta(
-            s, ws_morning, ws_afternoon, int(Jw), return_logit, day_idx=day_idx
+            s, ws_morning, ws_afternoon, int(Jw), return_logit
         )
 
     def gen_fitbitwearing(self, s, ws_morning, ws_afternoon, Jw, day_idx):
         eta = self._ml_fw_eta(
-            s, ws_morning, ws_afternoon, int(Jw), return_logit=True, day_idx=day_idx
+            s, ws_morning, ws_afternoon, int(Jw), return_logit=True
         )
         base_p = self._sigmoid(eta)
         noise = self._sample_noise(
@@ -2158,26 +2228,20 @@ class Env:
         p = float(np.clip(base_p + noise, *self.cfg.limits_fitbitwearing))
         return self._bernoulli(p)
 
-    def _ml_pj_eta(self, s, ws_morning, ws_afternoon, Jw: int, return_logit: bool, day_idx=None):
+    def _ml_pj_eta(self, s, ws_morning, ws_afternoon, Jw: int, return_logit: bool):
         if not self.cfg.has_ml_stack:
             raise RuntimeError("ML parameters missing from params JSON")
         Ew = float(s["perceivedUtilityLastWeek"])
         base, q = _split_ml_pj(self.cfg.theta_ml_PJ)
-        t0, t1, t2_isWeekend, t2_rb, t2_week, t_ar1, t3, t4, t5, t6 = base
+        t0, t1, t2_isWeekend, t2_rb, t_ar1, t3, t4, t5, t6 = base
         is_weekend = float(s["isWeekend"])
         rb = float(s["activitySuggestionsSentLast7Days"])
         y_lag = float(s["dailySurveyCompleteYesterday"])
-        week_n = 0.0
-        if day_idx is not None:
-            week_n = self._sim_week_norm(
-                int(day_idx) // max(int(self.W), 1) + 1
-            )
         eta = (
             t0
             + t1 * Ew
             + t2_isWeekend * is_weekend
             + t2_rb * rb
-            + t2_week * week_n
             + t_ar1 * y_lag
             + ws_morning * (t3 + t4 * Ew)
             + ws_afternoon * (t5 + t6 * Ew)
@@ -2185,14 +2249,14 @@ class Env:
         eta += _ml_query_applied_shift(q, s, Jw)
         return eta if return_logit else self._sigmoid(eta)
 
-    def gen_dailysurvey_mean(self, s, ws_morning, ws_afternoon, Jw=0, return_logit=False, day_idx=None):
+    def gen_dailysurvey_mean(self, s, ws_morning, ws_afternoon, Jw=0, return_logit=False):
         return self._ml_pj_eta(
-            s, ws_morning, ws_afternoon, int(Jw), return_logit, day_idx=day_idx
+            s, ws_morning, ws_afternoon, int(Jw), return_logit
         )
 
     def gen_dailysurvey(self, s, ws_morning, ws_afternoon, Jw, day_idx):
         eta = self._ml_pj_eta(
-            s, ws_morning, ws_afternoon, int(Jw), return_logit=True, day_idx=day_idx
+            s, ws_morning, ws_afternoon, int(Jw), return_logit=True
         )
         base_p = self._sigmoid(eta)
         noise = self._sample_noise(
@@ -2205,12 +2269,12 @@ class Env:
 
     # ----- weekly -----
 
-    def gen_CAE_mean(self, CAE_lastweek, week_norm, foursc_wk, antic_wk):
-        X = build_CAE_features(CAE_lastweek, week_norm, foursc_wk, antic_wk)
+    def gen_CAE_mean(self, CAE_lastweek, foursc_wk, antic_wk):
+        X = build_CAE_features(CAE_lastweek, foursc_wk, antic_wk)
         return float(self.cfg.theta_CAE @ X)
 
-    def gen_CAE(self, CAE_lastweek, week_norm, foursc_wk, antic_wk, week_idx):
-        mean = self.gen_CAE_mean(CAE_lastweek, week_norm, foursc_wk, antic_wk)
+    def gen_CAE(self, CAE_lastweek, foursc_wk, antic_wk, week_idx):
+        mean = self.gen_CAE_mean(CAE_lastweek, foursc_wk, antic_wk)
         noise = self._sample_noise(self.cfg.resid_CAE, week_idx, name="CAE")
         return float(np.clip(mean + noise, *self.cfg.limits_CAE))
 
@@ -2233,41 +2297,31 @@ class Env:
         pj_m = float(np.nansum(pj) / 7.0) if pj.size else 0.0
         return pv_m, fw_m, pj_m
 
-    def gen_perceivedUtility_mean(self, Ew_carry, week_norm, pw_wk, dw_wk, dp_wk):
-        """Gaussian AR on ``E_w``; ``week_norm`` kept for API compatibility (unused)."""
-        del week_norm
+    def gen_perceivedUtility_mean(self, Ew_carry, pw_wk, dw_wk, dp_wk):
+        """Gaussian AR on ``E_w`` from last week's state and this week's mediators."""
         if self.cfg.theta_ml_Ew.size < 6:
             raise RuntimeError("theta_ml_Ew required for latent E_w transition")
         a0, a1, a2, a3, a4, _sigma_e = [float(x) for x in self.cfg.theta_ml_Ew[:6]]
         pv_m, fw_m, pj_m = self._week_means_from_arrays(pw_wk, dw_wk, dp_wk)
         return float(a0 + a1 * float(Ew_carry) + a2 * pv_m + a3 * fw_m + a4 * pj_m)
 
-    def gen_perceivedUtility(self, Ew_carry, week_norm, pw_wk, dw_wk, dp_wk, week_idx):
+    def gen_perceivedUtility(self, Ew_carry, pw_wk, dw_wk, dp_wk, week_idx):
         del week_idx
-        mean = self.gen_perceivedUtility_mean(Ew_carry, week_norm, pw_wk, dw_wk, dp_wk)
+        mean = self.gen_perceivedUtility_mean(Ew_carry, pw_wk, dw_wk, dp_wk)
         sigma_e = float(self.cfg.theta_ml_Ew[5]) if self.cfg.theta_ml_Ew.size > 5 else 0.1
         noise = 0.0 if self.deterministic else float(rd.normal(0.0, sigma_e))
         return float(np.clip(mean + noise, *self.cfg.limits_perceivedUtility))
 
-    def gen_week_present_mean(self, perceivedUtility, return_logit=False, study_week=None):
+    def gen_week_present_mean(self, perceivedUtility, return_logit=False):
         if self.cfg.theta_ml_J.size < 2:
             raise RuntimeError("theta_ml_J required for week_present (J_week)")
         b0, b1 = float(self.cfg.theta_ml_J[0]), float(self.cfg.theta_ml_J[1])
-        b2 = float(self.cfg.theta_ml_J[2]) if self.cfg.theta_ml_J.size >= 3 else 0.0
-        week_n = 0.0 if study_week is None else self._sim_week_norm(study_week)
-        eta = b0 + b1 * float(perceivedUtility) + b2 * week_n
+        eta = b0 + b1 * float(perceivedUtility)
         return eta if return_logit else self._sigmoid(eta)
 
     def gen_week_present(self, perceivedUtility, week_idx):
-        # ``week_idx`` is the weekly-array index of this J (``sim_w + 1``),
-        # i.e. opening J of 0-based week ``week_idx`` = 1-based study week
-        # ``week_idx + 1``. Stretch week_norm over the simulation horizon,
-        # matching CAE.
-        eta = self.gen_week_present_mean(
-            perceivedUtility,
-            return_logit=True,
-            study_week=int(week_idx) + 1,
-        )
+        # ``week_idx`` is the weekly-array index of this J (``sim_w + 1``).
+        eta = self.gen_week_present_mean(perceivedUtility, return_logit=True)
         base_p = self._sigmoid(eta)
         noise = self._sample_noise(self.cfg.resid_ml_J_week, week_idx, name="J_week")
         if not np.isfinite(noise):

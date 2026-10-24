@@ -68,7 +68,7 @@ def analytic_gains_from(P: dict, pred: dict, std: dict) -> dict:
     """
     from vani_env import (THETA_FOURSC_NAMES, THETA_ANTIC_NAMES, THETA_CAE_NAMES,
                           THETA_PRIOR2HOUR_STEP_COUNT_NAMES,
-                          pv_hurdle_occurrence_z_gap)
+                          pv_hurdle_occurrence_z_gap, trim_theta_cae)
 
     def th(key):
         return np.asarray(P[key], dtype=float)
@@ -115,7 +115,7 @@ def analytic_gains_from(P: dict, pred: dict, std: dict) -> dict:
     # ---- g^Y: CAE -> steps / anticipated affect -> CAE -------------------------
     sc = th("theta_fourSC"); scn = THETA_FOURSC_NAMES
     aa = th("theta_antic"); aan = THETA_ANTIC_NAMES
-    cae = th("theta_CAE"); caen = THETA_CAE_NAMES
+    cae = trim_theta_cae(th("theta_CAE")); caen = THETA_CAE_NAMES
     p2 = th("theta_prior2hour_step_count"); p2n = THETA_PRIOR2HOUR_STEP_COUNT_NAMES[: p2.size]
     s4, s_y = std["4hour_step_count_scale"], std["yesterday_step_count_scale"]
     s_p, s_pe = std["prior2hour_step_count_scale"], std["EMA_prior2hour_step_count_scale"]

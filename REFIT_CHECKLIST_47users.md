@@ -1,7 +1,11 @@
 # Refit checklist: 47-user cohort (2026-10-19, revised 2026-10-22)
 
 Scope: one full refit after the October cohort/dropout/baseline-CAE/activity-process
-changes. Scripts 1–3 and the activity-process fit run LOCALLY (raw data stay on the
+changes. The generator has no study-week slope in CAE, page views, Fitbit wear,
+the daily survey, weekly presence, or perceived utility. The activity process
+still uses a study-week covariate until the month refit.
+
+Scripts 1–3 and the activity-process fit run LOCALLY (raw data stay on the
 laptop); their processed outputs are copied to the cluster by rsync (never via git);
 4b onwards run on the CLUSTER; results are rsynced back. Between running script 3 locally
 and pulling the refit back, the local `env_para_vanilla/` mixes new data files with the old

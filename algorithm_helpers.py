@@ -1615,7 +1615,7 @@ except ImportError:  # pragma: no cover
     def make_initial_state(participant_id=118):  # type: ignore[misc]
         raise ImportError("vani_env required for make_initial_state")
 
-    def build_CAE_features(CAE_lastweek, week_norm, foursc_wk, antic_wk):  # type: ignore[misc]
+    def build_CAE_features(CAE_lastweek, foursc_wk, antic_wk):  # type: ignore[misc]
         raise ImportError("vani_env required for build_CAE_features")
 
     def build_pf_CAE_features(CAE_lastweek, foursc_wk, antic_wk):  # type: ignore[misc]

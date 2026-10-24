@@ -810,18 +810,18 @@ def _never_send_centers_user(task: tuple) -> tuple[int, dict[str, float]]:
             rec["E"].append(float(s_["perceivedUtilityLastWeek"]))
             return _f(s_, Ah)
 
-        def cae(c_last, week_norm, foursc_wk, antic_wk, _f=f_cae):
-            X = build_CAE_features(c_last, week_norm, foursc_wk, antic_wk)
+        def cae(c_last, foursc_wk, antic_wk, _f=f_cae):
+            X = build_CAE_features(c_last, foursc_wk, antic_wk)
             rec["fourSC_ewma"].append(float(X[i_four]))
             rec["antic_ewma"].append(float(X[i_antic]))
-            return _f(c_last, week_norm, foursc_wk, antic_wk)
+            return _f(c_last, foursc_wk, antic_wk)
 
-        def e_mean(carry, week_norm, pw, dw, dp, _f=f_e, _env=env):
+        def e_mean(carry, pw, dw, dp, _f=f_e, _env=env):
             pv_m, fw_m, pj_m = _env._week_means_from_arrays(pw, dw, dp)
             rec["PV_week"].append(pv_m)
             rec["FW_week"].append(fw_m)
             rec["PJ_week"].append(pj_m)
-            return _f(carry, week_norm, pw, dw, dp)
+            return _f(carry, pw, dw, dp)
 
         env.gen_fourSC_mean, env.gen_CAE_mean, env.gen_perceivedUtility_mean = four, cae, e_mean
         oenv = OnlineEnv(env, nweek=int(cfg.nweek), seed=seed)

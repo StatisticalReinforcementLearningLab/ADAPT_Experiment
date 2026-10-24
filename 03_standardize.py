@@ -45,7 +45,6 @@ DIGITS = 3
 # computed on the full grid. Shared by scripts 06 and 07.
 FIRST_FIT_WEEK = 2
 DAY_RANGE = 77
-WEEK_RANGE = 11
 
 # Ordinal survey items use a 1..7 scale. Script 2 corrects invalid zeros to one
 # before this standardization step.
@@ -246,7 +245,6 @@ df_fit["day"] = (
 )
 
 df_fit["day_norm"] = (df_fit["day"] - (1 + DAY_RANGE) / 2) / ((DAY_RANGE - 1) / 2)
-df_fit["week_norm"] = (df_fit["week"] - (1 + WEEK_RANGE) / 2) / ((WEEK_RANGE - 1) / 2)
 df_fit["dow_norm"] = (df_fit["dow"] - (1 + 7) / 2) / ((7 - 1) / 2)
 
 # 3. Count transforms (step counts / pageviews)

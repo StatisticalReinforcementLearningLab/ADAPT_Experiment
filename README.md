@@ -34,8 +34,9 @@ Do not run the superseded generator-patch script in `archive/superseded/`.
 ## Library modules
 
 `activity_process.py` draws the exogenous activity path and holds the shared
-hazard, week scale, and dropout seed. `vani_env.py` is the generative model.
-`experiment.py` runs an episode. `dropout_utils.py` defines an active day and
+hazard, study-week scale, and dropout seed. `vani_env.py` is the generative
+model. CAE, page views, Fitbit wear, the daily survey, weekly presence, and
+perceived utility have no study-week slope. `experiment.py` runs an episode. `dropout_utils.py` defines an active day and
 the dropout table. `algorithm_helpers.py`, `derived_covariates.py`,
 `ewm_utils.py`, and `state_names.py` are shared by the fit and the simulator.
 `est_prior.py` and `stability.py` stay importable under those names.

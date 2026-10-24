@@ -1,6 +1,7 @@
 import numpy as np
 
 import os
+import warnings
 from pathlib import Path
 
 import pandas as pd
@@ -12,7 +13,6 @@ from vani_env import (
     impute_baseline_cae,
     load_week1_cae_inputs,
     mask_dropout_fit_outcomes,
-    study_week_norm,
     week1_cae_drift,
     week1_cae_input_record,
     week1_cae_input_table,
@@ -102,16 +102,15 @@ def test_only_first_future_observation_is_used():
     )
 
 
-def test_week1_drift_uses_study_week_norm_and_ewma():
-    a1, intercept, beta_wk, beta_sc, beta_aa = 0.5, 0.1, 0.2, 0.3, 0.4
-    theta = np.array([intercept, a1, beta_wk, beta_sc, beta_aa])
+def test_week1_drift_uses_mediator_ewma():
+    a1, intercept, beta_sc, beta_aa = 0.5, 0.1, 0.3, 0.4
+    theta = np.array([intercept, a1, beta_sc, beta_aa])
     foursc = np.arange(14, dtype=float)
     antic = np.linspace(-1.0, 1.0, 14)
     foursc_e, antic_e = cae_mediator_ewma_rows(foursc, antic)
     got = week1_cae_drift(theta, foursc, antic)
     expected = (
         intercept
-        + beta_wk * study_week_norm(1)
         + beta_sc * float(foursc_e[0])
         + beta_aa * float(antic_e[0])
     )
@@ -119,7 +118,7 @@ def test_week1_drift_uses_study_week_norm_and_ewma():
 
 
 def test_week1_drift_fills_an_all_missing_mediator_like_later_weeks():
-    theta = np.array([0.1, 0.5, 0.2, 0.3, 0.4])
+    theta = np.array([0.1, 0.5, 0.3, 0.4])
     foursc = np.arange(14, dtype=float)
     antic_missing = np.full(14, np.nan)
     foursc_e, antic_e = cae_mediator_ewma_rows(foursc, antic_missing)
@@ -127,9 +126,8 @@ def test_week1_drift_fills_an_all_missing_mediator_like_later_weeks():
     got = week1_cae_drift(theta, foursc, antic_missing)
     expected = (
         theta[0]
-        + theta[2] * study_week_norm(1)
-        + theta[3] * float(foursc_e[0])
-        + theta[4] * float(antic_e[0])
+        + theta[2] * float(foursc_e[0])
+        + theta[3] * float(antic_e[0])
     )
     assert np.isfinite(got)
     np.testing.assert_allclose(got, expected, rtol=0.0, atol=1e-12)
@@ -145,7 +143,7 @@ def test_no_week1_rows_is_the_c2_fallback():
     assert rec["reason"] == "no_rows"
     assert rec["irregular"] == 0
     assert np.isnan(rec["foursc_ewma"]) and np.isnan(rec["antic_ewma"])
-    theta = np.array([0.1, 0.5, 0.2, 0.3, 0.4])
+    theta = np.array([0.1, 0.5, 0.3, 0.4])
     assert np.isnan(c1_from_week1_ewma(theta, rec["foursc_ewma"], rec["antic_ewma"]))
 
 
@@ -161,7 +159,7 @@ def test_irregular_week_falls_back_to_c2_with_label():
     rec = week1_cae_input_record(foursc, antic)
     assert rec["irregular"] == 1
     assert np.isnan(rec["foursc_ewma"])
-    theta = np.array([0.1, 0.5, 0.2, 0.3, 0.4])
+    theta = np.array([0.1, 0.5, 0.3, 0.4])
     assert np.isnan(c1_from_week1_ewma(theta, rec["foursc_ewma"], rec["antic_ewma"]))
     c_panel = np.full(12, 0.2)
     c_panel[0] = np.nan
@@ -175,7 +173,7 @@ def test_irregular_week_falls_back_to_c2_with_label():
 
 
 def test_regular_week_c1_matches_ewma_formula():
-    theta = np.array([0.1, 0.5, 0.2, 0.3, 0.4])
+    theta = np.array([0.1, 0.5, 0.3, 0.4])
     foursc = np.arange(14, dtype=float)
     antic = np.linspace(-1.0, 1.0, 14)
     rec = week1_cae_input_record(foursc, antic)
@@ -185,11 +183,82 @@ def test_regular_week_c1_matches_ewma_formula():
     foursc_e, antic_e = cae_mediator_ewma_rows(foursc, antic)
     expected = (
         theta[0]
-        + theta[2] * study_week_norm(1)
-        + theta[3] * float(foursc_e[0])
-        + theta[4] * float(antic_e[0])
+        + theta[2] * float(foursc_e[0])
+        + theta[3] * float(antic_e[0])
     )
     np.testing.assert_allclose(got, expected, rtol=0.0, atol=1e-12)
+
+
+def test_zero_week_slot_is_dropped_and_a_nonzero_slot_raises():
+    from vani_env import (
+        _DROPPED_WEEK_WARNED,
+        _split_ml_fw,
+        _split_ml_pv_hurdle,
+        _trim_theta_j,
+    )
+
+    plain = np.arange(23, dtype=float)
+    plain[-1] = 0.2
+
+    def _insert(base):
+        return np.concatenate([base[:5], [0.0], base[5:]])
+
+    padded = np.concatenate([
+        _insert(plain[:8]),
+        plain[8:11],
+        _insert(plain[11:19]),
+        plain[19:22],
+        plain[22:],
+    ])
+    assert padded.size == 25
+    _DROPPED_WEEK_WARNED.discard("theta_ml_PV")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        dropped = _split_ml_pv_hurdle(padded)
+        written = _split_ml_pv_hurdle(plain)
+    for left, right in zip(dropped, written):
+        if left is None:
+            assert right is None
+        else:
+            np.testing.assert_allclose(left, right)
+    assert any("zero study-week coefficient" in str(w.message) for w in caught)
+    bad = padded.copy()
+    bad[5] = 0.25
+    with pytest.raises(ValueError, match="study-week coefficient"):
+        _split_ml_pv_hurdle(bad)
+
+    fw = np.arange(12, dtype=float)
+    fw_week = np.concatenate([fw[:4], [0.0], fw[4:]])
+    assert fw_week.size == 13
+    _DROPPED_WEEK_WARNED.discard("theta_ml_FW")
+    base, query = _split_ml_fw(fw_week)
+    np.testing.assert_allclose(base, fw[:9])
+    np.testing.assert_allclose(query, fw[9:])
+    fw_week[4] = 1.0
+    with pytest.raises(ValueError, match="study-week coefficient"):
+        _split_ml_fw(fw_week)
+
+    _DROPPED_WEEK_WARNED.discard("theta_ml_J")
+    np.testing.assert_allclose(_trim_theta_j(np.array([1.0, 2.0, 0.0])), [1.0, 2.0])
+    with pytest.raises(ValueError, match="study-week coefficient"):
+        _trim_theta_j(np.array([1.0, 2.0, 0.4]))
+
+
+def test_legacy_five_coefficient_cae_drops_week_once():
+    from vani_env import _DROPPED_WEEK_WARNED, trim_theta_cae
+
+    _DROPPED_WEEK_WARNED.discard("theta_CAE")
+    legacy = np.array([0.1, 0.5, 9.0, 0.3, 0.4])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        trimmed = trim_theta_cae(legacy)
+        again = trim_theta_cae(legacy)
+    np.testing.assert_allclose(trimmed, [0.1, 0.5, 0.3, 0.4])
+    np.testing.assert_allclose(again, trimmed)
+    messages = [str(w.message) for w in caught if issubclass(w.category, UserWarning)]
+    assert messages.count(
+        "theta_CAE has 5 coefficients including week; dropping the week coefficient"
+    ) == 1
 
 
 # The 42-user table from the October baseline check. The current extract also
@@ -217,7 +286,7 @@ def test_local_42_users_match_slot_ewma_c1():
     present = set(int(u) for u in table["ParticipantIdentifier"])
     missing = sorted(set(_LOCAL_42) - present)
     assert not missing, missing
-    theta = np.array([0.1, 0.4, -0.2, 0.3, -0.1])
+    theta = np.array([0.1, 0.4, 0.3, -0.1])
     for uid in sorted(present):
         dat = week1.loc[pd.to_numeric(week1["ParticipantIdentifier"], errors="coerce").eq(uid)]
         foursc, antic = week1_mediator_slots(dat, std_params)
