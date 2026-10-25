@@ -1968,6 +1968,38 @@ def _stayer_admissible(fit: dict) -> bool:
     return bool(fit["success"]) and fit["max_abs"] <= 8.0 and np.isfinite(fit["loglik"])
 
 
+# The profile is maximized at the boundary p_stay = 0, so a 95% likelihood-ratio
+# interval uses the 90th percentile of chi-square on 1 degree of freedom.
+_LR95_DROP = 2.705543454095404 / 2.0
+_STAYER_IN_USE = (0.0, 0.25, 0.5)
+
+
+def _stayer_in_use(p_stay: float) -> bool:
+    return any(abs(float(p_stay) - value) <= 1e-8 for value in _STAYER_IN_USE)
+
+
+def _lr95_upper(profile: list[dict]) -> float:
+    """Interpolated upper end of the boundary-adjusted 95% LR interval."""
+    rows = sorted(profile, key=lambda row: float(row["p_stay"]))
+    base = float(rows[0]["loglik"])
+    if abs(float(rows[0]["p_stay"])) > 1e-8:
+        raise SystemExit("The stayer profile does not start at p_stay = 0.")
+    previous = rows[0]
+    for row in rows[1:]:
+        drop = base - float(row["loglik"])
+        if drop > _LR95_DROP:
+            drop_prev = base - float(previous["loglik"])
+            span = drop - drop_prev
+            if span <= 0.0:
+                return float(previous["p_stay"])
+            weight = (_LR95_DROP - drop_prev) / span
+            return float(previous["p_stay"]) + weight * (
+                float(row["p_stay"]) - float(previous["p_stay"])
+            )
+        previous = row
+    return float(previous["p_stay"])
+
+
 def run_stayer_calibration() -> None:
     """Refit mover model 1 on the stayer grid and write the variant block."""
     panel, _meta = load_panel()
@@ -2026,40 +2058,89 @@ def run_stayer_calibration() -> None:
     missing = [value for value in required if round(value, 6) not in fitted]
     if missing:
         raise SystemExit(f"Required stayer fractions did not fit: {missing}.")
+    if round(0.24, 6) not in fitted or round(0.5, 6) not in fitted:
+        raise SystemExit("The stayer grid is missing 0.24 or 0.5.")
+    fit25 = _fit_mover(packs, 0.25, np.asarray(fitted[round(0.24, 6)]["coefficients"], dtype=float))
+    print(
+        f"p_stay={fit25['p_stay']:.3f} loglik={fit25['loglik']:.3f} "
+        f"max|coef|={fit25['max_abs']:.3f} grad={fit25['grad_norm']:.2e} "
+        f"coef={np.array2string(np.asarray(fit25['coefficients']), precision=3)}",
+        flush=True,
+    )
+    if not _stayer_admissible(fit25):
+        raise SystemExit("p_stay=0.25 did not fit.")
+    fitted[round(0.25, 6)] = fit25
+    profile.append(
+        {"p_stay": fit25["p_stay"], "loglik": fit25["loglik"], "max_abs": fit25["max_abs"]}
+    )
+    profile.sort(key=lambda row: float(row["p_stay"]))
     largest = max(fitted)
     if not largest < no_gap_share:
         raise SystemExit(f"Largest admissible p_stay {largest} is not below the no-gap share.")
-    chosen = sorted(set(required) | {largest})
+    chosen = sorted(set(required) | {largest, 0.25, 0.5})
     meta = pd.read_csv(META_PATH)
     uids = sorted(
         int(u) for u in meta.loc[meta["in_modelled"].astype(bool), "ParticipantIdentifier"]
     )
     record = json.loads(CALIBRATION_PATH.read_text(encoding="utf-8"))["activity_process"]
+    stored = {
+        round(float(item["p_stay"]), 6): item
+        for item in record.get("stayer_variants", {}).get("variants", [])
+    }
     variants = []
     for p_stay in chosen:
         fit = fitted[round(p_stay, 6)]
-        record_p = dict(record)
-        record_p["stayer_variants"] = {
-            "variants": [
-                {
-                    "p_stay": fit["p_stay"],
-                    "coefficients": fit["coefficients"],
-                }
-            ]
-        }
-        print(f"Simulating p_stay={fit['p_stay']:.3f}", flush=True)
-        sim84 = summarize_paths(
-            simulate_cohort_paths(
-                record_p, "pooled", 10000, 84, N_WEEKS_FIT, uids, 20261030,
-                stayer_fraction=fit["p_stay"], stayer_recalibrate=True,
-            )
+        previous = stored.get(round(float(fit["p_stay"]), 6))
+        reusable = (
+            previous is not None
+            and "validation_10000" in previous
+            and np.allclose(previous["coefficients"], fit["coefficients"], rtol=0.0, atol=1e-8)
         )
-        sim252 = summarize_paths(
-            simulate_cohort_paths(
-                record_p, "pooled", 10000, 252, N_WEEKS_LONG, uids, 20261031,
-                stayer_fraction=fit["p_stay"], stayer_recalibrate=True,
+        if reusable:
+            print(f"Reusing stored validation for p_stay={fit['p_stay']:.3f}", flush=True)
+            validation = dict(previous["validation_10000"])
+        else:
+            record_p = dict(record)
+            record_p["stayer_variants"] = {
+                "variants": [
+                    {
+                        "p_stay": fit["p_stay"],
+                        "coefficients": fit["coefficients"],
+                    }
+                ]
+            }
+            print(f"Simulating p_stay={fit['p_stay']:.3f}", flush=True)
+            sim84 = summarize_paths(
+                simulate_cohort_paths(
+                    record_p, "pooled", 10000, 84, N_WEEKS_FIT, uids, 20261030,
+                    stayer_fraction=fit["p_stay"], stayer_recalibrate=True,
+                )
             )
-        )
+            sim252 = summarize_paths(
+                simulate_cohort_paths(
+                    record_p, "pooled", 10000, 252, N_WEEKS_LONG, uids, 20261031,
+                    stayer_fraction=fit["p_stay"], stayer_recalibrate=True,
+                )
+            )
+            validation = {
+                "n_paths": 10000,
+                "base_seed_84": 20261030,
+                "base_seed_252": 20261031,
+                "mean_gaps": sim84["mean_gaps"],
+                "p0": sim84["p0"],
+                "p1": sim84["p1"],
+                "p2": sim84["p2"],
+                "p3plus": sim84["p3plus"],
+                "ended_p50": sim84["ended_p50"],
+                "ended_p75": sim84["ended_p75"],
+                "ended_p90": sim84["ended_p90"],
+                "km_p90": sim84["km_p90"],
+                "inactive_fraction": sim84["inactive_fraction"],
+                "terminal14": sim84["terminal14"],
+                "permanent": sim84["permanent"],
+                "permanent_252": sim252["permanent"],
+            }
+        mover_share = 1.0 - float(fit["p_stay"])
         variants.append(
             {
                 "p_stay": fit["p_stay"],
@@ -2067,24 +2148,9 @@ def run_stayer_calibration() -> None:
                 "coefficients": fit["coefficients"],
                 "loglik": fit["loglik"],
                 "largest_admissible": abs(fit["p_stay"] - largest) <= 1e-8,
-                "validation_10000": {
-                    "n_paths": 10000,
-                    "base_seed_84": 20261030,
-                    "base_seed_252": 20261031,
-                    "mean_gaps": sim84["mean_gaps"],
-                    "p0": sim84["p0"],
-                    "p1": sim84["p1"],
-                    "p2": sim84["p2"],
-                    "p3plus": sim84["p3plus"],
-                    "ended_p50": sim84["ended_p50"],
-                    "ended_p75": sim84["ended_p75"],
-                    "ended_p90": sim84["ended_p90"],
-                    "km_p90": sim84["km_p90"],
-                    "inactive_fraction": sim84["inactive_fraction"],
-                    "terminal14": sim84["terminal14"],
-                    "permanent": sim84["permanent"],
-                    "permanent_252": sim252["permanent"],
-                },
+                "in_use": _stayer_in_use(fit["p_stay"]),
+                "mover_permanent_252": float(validation["permanent_252"]) / mover_share,
+                "validation_10000": validation,
             }
         )
     block = {
@@ -2092,16 +2158,18 @@ def run_stayer_calibration() -> None:
             "Mover model 1 at a fixed stayer fraction. A stayer is drawn once per episode "
             "before the path and is active every day. The stayer property applies only before "
             "the first gap. Model 2 is the pooled return model. p_stay 0 uses the pooled "
-            "coefficients and draws no extra uniform."
+            "coefficients and draws no extra uniform. The variants in use are 0, 0.25, and 0.5."
         ),
         "observed_no_gap_share": no_gap_share,
         "observed_inactive_share": float(data["inactive_fraction"]),
         "largest_admissible": largest,
+        "variants_in_use": [0.0, 0.25, 0.5],
+        "lr95_upper": _lr95_upper(profile),
         "profile": profile,
         "variants": variants,
     }
     _write_stayer_block(block)
-    _write_stayer_figure(profile, no_gap_share)
+    _write_stayer_figure(profile, no_gap_share, block["lr95_upper"])
     _write_stayer_report(block, data)
     print(
         f"largest admissible p_stay={largest:.3f} "
@@ -2123,12 +2191,13 @@ def _write_stayer_block(block: dict) -> None:
         raise SystemExit("source_file changed while writing stayer variants.")
 
 
-def _write_stayer_figure(profile: list[dict], no_gap_share: float) -> None:
+def _write_stayer_figure(profile: list[dict], no_gap_share: float, lr_upper: float) -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     p = np.asarray([row["p_stay"] for row in profile], dtype=float)
     ll = np.asarray([row["loglik"] for row in profile], dtype=float)
     fig, ax = plt.subplots(figsize=(6.2, 3.8))
     ax.plot(p, ll - ll[0], color="black", marker="o", markersize=3, linewidth=1.2)
+    ax.axvline(lr_upper, color="0.35", linestyle=":", linewidth=1.0)
     ax.axvline(no_gap_share, color="0.5", linestyle="--", linewidth=1.0)
     ax.set_xlabel("Stayer fraction")
     ax.set_ylabel("Profile log-likelihood minus the value at 0")
@@ -2141,41 +2210,55 @@ def _write_stayer_figure(profile: list[dict], no_gap_share: float) -> None:
 def _write_stayer_report(block: dict, data: dict) -> None:
     lines = []
     a = lines.append
+    shown = [item for item in block["variants"] if item.get("in_use")]
+    if [round(float(item["p_stay"]), 6) for item in shown] != [0.0, 0.25, 0.5]:
+        raise SystemExit("The report expects the variants in use to be 0, 0.25, and 0.5.")
+    base = float(shown[0]["loglik"])
+    half = shown[2]
+    upper = float(block["lr95_upper"])
     a("## Mover–stayer model 1")
     a("")
     a("Each simulated participant is a stayer with probability `p_stay`, drawn once from the")
     a("activity stream before the path. A stayer is active every day and never gaps. The stayer")
     a("property applies only before the first gap. Movers use the model-1 coefficients refit at")
     a("that `p_stay`. Model 2 stays the pooled return model, with no month term.")
+    a("The variants in use are 0, 0.25, and 0.5. The stored grid also keeps 0.2, 0.4, 0.55, and")
+    a(f"the largest admissible value, {fmt(block['largest_admissible'], 3)}.")
     a(f"The observed no-gap share is {fmt(block['observed_no_gap_share'], 3)}. "
-      f"The largest admissible stayer fraction is {fmt(block['largest_admissible'], 3)}. "
-      "The mover coefficients stay finite on the whole grid, so the fit does not break down "
-      "before the observed no-gap share. That value is the last grid point below the share. "
-      "Above the share the mixture no-gap probability is at least `p_stay`, so it cannot match the data.")
+      "The profile is maximized at 0. Because that maximum is on the boundary, the 95% "
+      "likelihood-ratio interval uses the 90th percentile of a chi-square on one degree of freedom. "
+      f"The interval is about 0 to 0.55 (interpolated upper bound {fmt(upper, 2)}).")
+    a(f"`p_stay` = 0.5 overstates the no-gap share: 10,000 paths give "
+      f"{fmt(half['validation_10000']['p0'], 3)} against {fmt(block['observed_no_gap_share'], 3)} in the data.")
+    day252 = "; ".join(
+        f"{fmt(item['p_stay'], 2)} gives {fmt(item['validation_10000']['permanent_252'], 3)} "
+        f"(movers {fmt(item['mover_permanent_252'], 3)})"
+        for item in shown
+    )
+    a(f"Permanently gone by day 252, with the mover-only fraction in parentheses "
+      f"(the cohort fraction divided by 1 − p_stay): {day252}.")
     a("")
     a("| p_stay | Profile log-likelihood | Difference from p_stay = 0 |")
     a("|---:|---:|---:|")
-    base = float(block["variants"][0]["loglik"])
-    for item in block["variants"]:
+    for item in shown:
         a(f"| {fmt(item['p_stay'], 3)} | {fmt(item['loglik'], 2)} | {fmt(item['loglik'] - base, 2)} |")
     a("")
     a("![Profile log-likelihood](stayer_profile_loglik.png)")
     a("")
-    a("The profile is the mixture log-likelihood with `p_stay` fixed and the mover coefficients")
-    a("maximized. The figure shows every fitted point. The table keeps the reported grid and")
-    a("the largest admissible value.")
+    a("The dotted line on the figure is the likelihood-ratio bound. The dashed line is the")
+    a("observed no-gap share. The figure shows every fitted point, including 0.25.")
     a("")
-    a("| Term | " + " | ".join(fmt(item["p_stay"], 3) for item in block["variants"]) + " |")
-    a("|---|" + "|".join("---:" for _ in block["variants"]) + "|")
+    a("| Term | " + " | ".join(fmt(item["p_stay"], 3) for item in shown) + " |")
+    a("|---|" + "|".join("---:" for _ in shown) + "|")
     for i, name in enumerate(MODEL1_NAMES):
-        cells = " | ".join(fmt(item["coefficients"][i], 3) for item in block["variants"])
+        cells = " | ".join(fmt(item["coefficients"][i], 3) for item in shown)
         a(f"| {name} | {cells} |")
     a("")
-    a("84-day paths, 10,000 per variant. Seeds start at 20261030. Day 252 uses seeds starting at 20261031.")
+    a("84-day paths, 10,000 per variant in use. Seeds start at 20261030. Day 252 uses seeds starting at 20261031.")
     a("")
-    header = " | ".join(fmt(item["p_stay"], 3) for item in block["variants"])
+    header = " | ".join(fmt(item["p_stay"], 3) for item in shown)
     a(f"| Quantity | Data | {header} |")
-    a("|---|" + "|".join("---:" for _ in range(1 + len(block["variants"]))) + "|")
+    a("|---|" + "|".join("---:" for _ in range(1 + len(shown))) + "|")
     rows = (
         ("No-gap share", "p0", data["p0"], 3),
         ("Proportion with 1 gap", "p1", data["p1"], 3),
@@ -2191,15 +2274,12 @@ def _write_stayer_report(block: dict, data: dict) -> None:
     )
     for label, key, observed, digits in rows:
         cells = []
-        for item in block["variants"]:
+        for item in shown:
             cells.append(fmt(item["validation_10000"][key], digits))
         obs = "—" if observed is None else fmt(observed, digits)
         a(f"| {label} | {obs} | " + " | ".join(cells) + " |")
-    a("")
-    a("The simulated no-gap share rises with the stayer fraction. A mover who has not yet gapped")
-    a("has recent activity near 1, and that coefficient stays near −4.6, so the intercept does not")
-    a("raise the daily gap probability enough to offset the stayers. The inactive share stays near")
-    a("the data. The profile falls by about 2 log-likelihood units from 0 to the largest admissible value.")
+    mover_cells = " | ".join(fmt(item["mover_permanent_252"], 3) for item in shown)
+    a(f"| Mover-only permanently gone by day 252 | — | {mover_cells} |")
     a("")
     path = OUT_DIR / "report.md"
     text = path.read_text(encoding="utf-8") if path.is_file() else ""

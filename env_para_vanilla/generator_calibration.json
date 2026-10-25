@@ -47397,10 +47397,16 @@
       }
     },
     "stayer_variants": {
-      "note": "Mover model 1 at a fixed stayer fraction. A stayer is drawn once per episode before the path and is active every day. The stayer property applies only before the first gap. Model 2 is the pooled return model. p_stay 0 uses the pooled coefficients and draws no extra uniform.",
+      "note": "Mover model 1 at a fixed stayer fraction. A stayer is drawn once per episode before the path and is active every day. The stayer property applies only before the first gap. Model 2 is the pooled return model. p_stay 0 uses the pooled coefficients and draws no extra uniform. The variants in use are 0, 0.25, and 0.5.",
       "observed_no_gap_share": 0.6170212765957447,
       "observed_inactive_share": 0.09447821681864232,
       "largest_admissible": 0.615,
+      "variants_in_use": [
+        0.0,
+        0.25,
+        0.5
+      ],
+      "lr95_upper": 0.5361064764463118,
       "profile": [
         {
           "p_stay": 0.0,
@@ -47466,6 +47472,11 @@
           "p_stay": 0.24,
           "loglik": -199.19177899910133,
           "max_abs": 4.606206570027925
+        },
+        {
+          "p_stay": 0.25,
+          "loglik": -199.2067064167185,
+          "max_abs": 4.605844623895135
         },
         {
           "p_stay": 0.26,
@@ -47630,6 +47641,8 @@
           ],
           "loglik": -198.969226563408,
           "largest_admissible": false,
+          "in_use": true,
+          "mover_permanent_252": 0.4963,
           "validation_10000": {
             "n_paths": 10000,
             "base_seed_84": 20261030,
@@ -47665,6 +47678,8 @@
           ],
           "loglik": -199.13841773034164,
           "largest_admissible": false,
+          "in_use": false,
+          "mover_permanent_252": 0.5765,
           "validation_10000": {
             "n_paths": 10000,
             "base_seed_84": 20261030,
@@ -47685,6 +47700,43 @@
           }
         },
         {
+          "p_stay": 0.25,
+          "coefficient_names": [
+            "intercept",
+            "month",
+            "act7",
+            "prior_gap"
+          ],
+          "coefficients": [
+            -0.20939957661543884,
+            0.14544244093600314,
+            -4.605844623895135,
+            1.5430980863084023
+          ],
+          "loglik": -199.2067064167185,
+          "largest_admissible": false,
+          "in_use": true,
+          "mover_permanent_252": 0.5916,
+          "validation_10000": {
+            "n_paths": 10000,
+            "base_seed_84": 20261030,
+            "base_seed_252": 20261031,
+            "mean_gaps": 1.3645,
+            "p0": 0.6325,
+            "p1": 0.0937,
+            "p2": 0.065,
+            "p3plus": 0.2088,
+            "ended_p50": 2.0,
+            "ended_p75": 4.0,
+            "ended_p90": 9.0,
+            "km_p90": 28.0,
+            "inactive_fraction": 0.09973928571428571,
+            "terminal14": 0.0923,
+            "permanent": 0.0818,
+            "permanent_252": 0.4437
+          }
+        },
+        {
           "p_stay": 0.4,
           "coefficient_names": [
             "intercept",
@@ -47700,6 +47752,8 @@
           ],
           "loglik": -199.55390491631783,
           "largest_admissible": false,
+          "in_use": false,
+          "mover_permanent_252": 0.6428333333333334,
           "validation_10000": {
             "n_paths": 10000,
             "base_seed_84": 20261030,
@@ -47720,6 +47774,43 @@
           }
         },
         {
+          "p_stay": 0.5,
+          "coefficient_names": [
+            "intercept",
+            "month",
+            "act7",
+            "prior_gap"
+          ],
+          "coefficients": [
+            0.27452287390073526,
+            0.20070402332733597,
+            -4.592936896180682,
+            1.0267696848550278
+          ],
+          "loglik": -200.04127719746182,
+          "largest_admissible": false,
+          "in_use": true,
+          "mover_permanent_252": 0.6824,
+          "validation_10000": {
+            "n_paths": 10000,
+            "base_seed_84": 20261030,
+            "base_seed_252": 20261031,
+            "mean_gaps": 1.2517,
+            "p0": 0.667,
+            "p1": 0.0839,
+            "p2": 0.0554,
+            "p3plus": 0.1937,
+            "ended_p50": 2.0,
+            "ended_p75": 4.0,
+            "ended_p90": 9.0,
+            "km_p90": 29.0,
+            "inactive_fraction": 0.0941797619047619,
+            "terminal14": 0.0854,
+            "permanent": 0.0743,
+            "permanent_252": 0.3412
+          }
+        },
+        {
           "p_stay": 0.55,
           "coefficient_names": [
             "intercept",
@@ -47735,6 +47826,8 @@
           ],
           "loglik": -200.44864140874898,
           "largest_admissible": false,
+          "in_use": false,
+          "mover_permanent_252": 0.7060000000000001,
           "validation_10000": {
             "n_paths": 10000,
             "base_seed_84": 20261030,
@@ -47770,6 +47863,8 @@
           ],
           "loglik": -201.26389905475986,
           "largest_admissible": true,
+          "in_use": false,
+          "mover_permanent_252": 0.7280519480519481,
           "validation_10000": {
             "n_paths": 10000,
             "base_seed_84": 20261030,
