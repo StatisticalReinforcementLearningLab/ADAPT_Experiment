@@ -431,6 +431,37 @@ def test_inactive_day_zeros_presence_and_checkin_window():
     assert np.isfinite(oenv.U2_truth_all[1])
 
 
+def test_suggestion_on_inactive_day_acts_as_no_suggestion():
+    def run(saturday_action):
+        _cfg, _env, oenv = experiment._make_online_env(
+            13, seed=3, params_dir=PARAMS, dropout_hazard_day=0.0
+        )
+        oenv._activity_status[:] = 0
+        oenv._activity_status[5] = 1
+        oenv._dropout_day_planned = -1
+        oenv._reset_episode_state()
+        for k in range(2):
+            oenv.start_week(k, 1)
+            for d in range(experiment.N_RL_DAYS):
+                for t in range(oenv.K):
+                    a = saturday_action if (k == 0 and d == 5) else 1
+                    oenv.step_action(k, d, t, a, 1)
+            oenv._finalize_week(k)
+        return oenv
+
+    sent, skipped = run(1), run(0)
+    sat = slice(5 * sent.K, 6 * sent.K)
+    assert np.all(sent.action_all[sat] == 0.0)
+    for name in (
+        "stepCountNext4HourTruthAll",
+        "dailyAnticipatedAffectAll",
+        "activitySuggestionsSentLast7DaysAll",
+        "CAE_all",
+        "pu_all",
+    ):
+        np.testing.assert_array_equal(getattr(sent, name), getattr(skipped, name))
+
+
 def test_agent_freezes_after_dropout_week_and_omits_td():
     cfg, env, oenv = experiment._make_online_env(
         13, seed=5, params_dir=PARAMS, dropout_hazard_day=1.0

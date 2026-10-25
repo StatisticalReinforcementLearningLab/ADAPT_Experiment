@@ -1002,7 +1002,10 @@ class OnlineEnv:
         self._ensure_day_started(sim_w, d_w, d_global)
 
         self.s["decisionTimeSlot"] = float(t_sim)
-        Ah = 0.0 if self.dropped_out else float(action)
+        # A suggestion sent on a disengaged day (or after dropout) is not seen,
+        # so every generated variable, including recent burden, evolves as
+        # under A = 0. The agent's chosen action is still recorded by the caller.
+        Ah = 0.0 if self._content_unobserved(d_global) else float(action)
         if self.dropped_out:
             I_w = 0
 
