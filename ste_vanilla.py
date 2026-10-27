@@ -65,7 +65,57 @@ from algorithm_helpers import (
     make_state,
 )
 from experiment import OnlineEnv
+from testbed import (
+    add_testbed_arguments,
+    log_ste_activity_off,
+    resolve_testbed_spec,
+)
 from vani_env import Env, EnvConfig, resolve_params_dir
+
+
+def _ste_env_config(
+    userid,
+    params_dir: Path | None = None,
+    nweek: int | None = None,
+    *,
+    activity: str = "off",
+    misspec: str | None = None,
+    stayer_fraction: float | None = None,
+) -> EnvConfig:
+    """STE EnvConfig. Callers that want no-gap STE pass ``activity='off'``."""
+    kwargs = {"userid": userid, "activity": activity}
+    if params_dir is not None:
+        kwargs["params_dir"] = params_dir
+    if nweek is not None:
+        kwargs["nweek"] = nweek
+    if misspec is not None:
+        kwargs["misspec"] = misspec
+    if stayer_fraction is not None:
+        kwargs["activity_stayer_fraction"] = stayer_fraction
+    return EnvConfig(**kwargs)
+
+
+def resolve_ste_run_spec(
+    params_dir=None,
+    activity=None,
+    stayer_fraction=None,
+    misspec=None,
+):
+    """Requested testbed spec plus the no-gap STE spec (activity forced off)."""
+    requested = resolve_testbed_spec(
+        params_dir,
+        activity=activity,
+        stayer_fraction=stayer_fraction,
+        misspec=misspec,
+        warn_stayer=False,
+    )
+    ste = requested.ste_spec()
+    log_ste_activity_off(requested)
+    return requested, ste
+
+
+def ste_eval_dir(exp: str, spec) -> Path:
+    return Path(spec.ste_results_root) / f"exp{exp}"
 
 
 def params_fingerprint(params_dir, uid: int) -> str:
@@ -361,15 +411,21 @@ def build_offline_buffer(
     base_seed: int,
     noise: str = "ar1",
     params_dir: Path | None = None,
+    activity: str = "off",
+    misspec: str | None = None,
+    stayer_fraction: float | None = None,
 ) -> dict:
     """Stack continuing-task trajectories with one look-ahead state each."""
     chunks = {k: [] for k in ("states", "actions", "rewards", "terminals", "timeouts")}
     for i in range(n_episodes):
         simulation_weeks = nweek + 1
-        cfg = (
-            EnvConfig(userid, nweek=simulation_weeks)
-            if params_dir is None
-            else EnvConfig(userid, params_dir=params_dir, nweek=simulation_weeks)
+        cfg = _ste_env_config(
+            userid,
+            params_dir=params_dir,
+            nweek=simulation_weeks,
+            activity=activity,
+            misspec=misspec,
+            stayer_fraction=stayer_fraction,
         )
         env = Env(cfg, noise=noise)
         oenv = OnlineEnv(env, nweek=simulation_weeks, seed=base_seed + i)
@@ -444,6 +500,9 @@ def rollout_totals_for_seeds(
     noise: str,
     dqn=None,
     params_dir: Path | None = None,
+    activity: str = "off",
+    misspec: str | None = None,
+    stayer_fraction: float | None = None,
 ) -> np.ndarray:
     totals = np.empty(len(seeds), dtype=np.float64)
     for i, seed in enumerate(seeds):
@@ -455,6 +514,9 @@ def rollout_totals_for_seeds(
             dqn=dqn,
             noise=noise,
             params_dir=params_dir,
+            activity=activity,
+            misspec=misspec,
+            stayer_fraction=stayer_fraction,
         )
     return totals
 
@@ -499,6 +561,9 @@ def summarize_paired_policy(
     g_zero: np.ndarray,
     prefix: str,
     params_dir: Path | None = None,
+    activity: str = "off",
+    misspec: str | None = None,
+    stayer_fraction: float | None = None,
 ) -> dict:
     """Paired Δ / SE and treat rate for a frozen checkpoint on ``seeds``."""
     g_pi = np.empty(len(seeds), dtype=np.float64)
@@ -513,6 +578,9 @@ def summarize_paired_policy(
             noise=noise,
             params_dir=params_dir,
             return_stats=True,
+            activity=activity,
+            misspec=misspec,
+            stayer_fraction=stayer_fraction,
         )
         g_pi[i] = tot
         rates[i] = rate
@@ -675,6 +743,9 @@ def rollout_total_cae(
     params_dir: Path | None = None,
     return_weekly: bool = False,
     return_stats: bool = False,
+    activity: str = "off",
+    misspec: str | None = None,
+    stayer_fraction: float | None = None,
 ):
     """
     Run one episode; return ``sum_k CAE_k`` (primary outcome total).
@@ -685,12 +756,17 @@ def rollout_total_cae(
     rescaled copy to evaluate alternative effect sizes.  With ``return_weekly``
     the per-week CAE vector is returned alongside the total.  With
     ``return_stats`` the walking-suggestion rate is also returned.
+    STE callers pass ``activity="off"`` (no-gap). Effective STE uses the
+    testbed's own activity setting.
     """
     rd.seed(seed)
-    cfg = (
-        EnvConfig(userid, nweek=nweek)
-        if params_dir is None
-        else EnvConfig(userid, params_dir=params_dir, nweek=nweek)
+    cfg = _ste_env_config(
+        userid,
+        params_dir=params_dir,
+        nweek=nweek,
+        activity=activity,
+        misspec=misspec,
+        stayer_fraction=stayer_fraction,
     )
     env = Env(cfg, noise=noise)
     oenv = OnlineEnv(env, nweek=nweek, seed=seed)
@@ -764,10 +840,17 @@ def eval_ste_job(
     nweek: int | None = None,
     noise: str = "ar1",
     params_dir: Path | None = None,
+    activity=None,
+    stayer_fraction=None,
+    misspec=None,
+    effective_ste: bool = False,
 ) -> None:
     """Write rows ``[sum_CAE_zero, sum_CAE_opt]`` for one validated evaluation run."""
     _require_d3()
     params_path = _resolve_params_dir(params_dir)
+    requested, ste_spec = resolve_ste_run_spec(
+        params_path, activity, stayer_fraction, misspec
+    )
     uid_path = Path(userid_path) if userid_path else params_path / "user_ids.txt"
     userid_all = np.loadtxt(uid_path, dtype=int)
     userid = _userid_from_job(jobid, userid_all)
@@ -801,6 +884,7 @@ def eval_ste_job(
         "bootstrap_lookahead_weeks": 1,
         "params_dir": str(params_path),
         "params_sha256": params_fingerprint(params_path, userid),
+        "activity": "off",
     }
     for key, value in expected.items():
         if metadata.get(key) != value:
@@ -827,6 +911,9 @@ def eval_ste_job(
             policy="zero",
             noise=noise,
             params_dir=params_path,
+            activity="off",
+            misspec=ste_spec.misspec,
+            stayer_fraction=ste_spec.stayer_fraction,
         )
         rd.seed(test_seed)
         out[n, 1] = rollout_total_cae(
@@ -837,13 +924,50 @@ def eval_ste_job(
             dqn=dqn,
             noise=noise,
             params_dir=params_path,
+            activity="off",
+            misspec=ste_spec.misspec,
+            stayer_fraction=ste_spec.stayer_fraction,
         )
 
-    path = Path("results_ste") / f"exp{exp}"
+    path = ste_eval_dir(exp, ste_spec)
     path.mkdir(parents=True, exist_ok=True)
     filepath = path / f"res{exp}_{userid}.txt"
     with open(filepath, "w", encoding="utf-8") as f:
         np.savetxt(f, out, fmt="%.6f")
+    spec_payload = {
+        "testbed": requested.as_dict(),
+        "ste": ste_spec.as_dict(),
+        "activity_forced": "off",
+        "userid": userid,
+        "exp": exp,
+    }
+    if effective_ste and (
+        requested.activity != "off" or requested.misspec != ste_spec.misspec
+    ):
+        out_eff = np.zeros((n_test, 2))
+        for n in range(n_test):
+            test_seed = TEST_SEED0 + n
+            rd.seed(test_seed)
+            out_eff[n, 0] = rollout_total_cae(
+                userid, nweek=nweek, seed=test_seed, policy="zero",
+                noise=noise, params_dir=params_path,
+                activity=requested.activity, misspec=requested.misspec,
+                stayer_fraction=requested.stayer_fraction,
+            )
+            rd.seed(test_seed)
+            out_eff[n, 1] = rollout_total_cae(
+                userid, nweek=nweek, seed=test_seed, policy="dqn_greedy",
+                dqn=dqn, noise=noise, params_dir=params_path,
+                activity=requested.activity, misspec=requested.misspec,
+                stayer_fraction=requested.stayer_fraction,
+            )
+        eff_path = path / f"res{exp}_{userid}_effective.txt"
+        with open(eff_path, "w", encoding="utf-8") as f:
+            np.savetxt(f, out_eff, fmt="%.6f")
+        spec_payload["effective_ste_file"] = str(eff_path)
+        print(f"effective STE rows written to {eff_path}", flush=True)
+    with open(path / f"spec{exp}_{userid}.json", "w", encoding="utf-8") as f:
+        json.dump(spec_payload, f, indent=2)
 
 
 def train_ste_job(
@@ -862,10 +986,16 @@ def train_ste_job(
     val_every: int = VAL_EVERY_STEPS,
     val_fallback_c: float = VAL_FALLBACK_C,
     params_dir: Path | None = None,
+    activity=None,
+    stayer_fraction=None,
+    misspec=None,
 ) -> None:
     """Train DiscreteCQL for ``userid = user_ids[jobid]``."""
     _require_d3()
     params_path = _resolve_params_dir(params_dir)
+    requested, ste_spec = resolve_ste_run_spec(
+        params_path, activity, stayer_fraction, misspec
+    )
     uid_path = Path(userid_path) if userid_path else params_path / "user_ids.txt"
     userid_all = np.loadtxt(uid_path, dtype=int)
     userid = _userid_from_job(jobid, userid_all)
@@ -884,6 +1014,9 @@ def train_ste_job(
         base_seed=seed,
         noise=noise,
         params_dir=params_path,
+        activity="off",
+        misspec=ste_spec.misspec,
+        stayer_fraction=ste_spec.stayer_fraction,
     )
 
     logger_dir = Path("d3rlpy_logs") / f"ste_exp_{exp}"
@@ -917,6 +1050,9 @@ def train_ste_job(
         policy="zero",
         noise=noise,
         params_dir=params_path,
+        activity="off",
+        misspec=ste_spec.misspec,
+        stayer_fraction=ste_spec.stayer_fraction,
     )
     gate_stats = summarize_paired_policy(
         userid,
@@ -927,6 +1063,9 @@ def train_ste_job(
         g_zero=g_zero_gate,
         prefix="gate",
         params_dir=params_path,
+        activity="off",
+        misspec=ste_spec.misspec,
+        stayer_fraction=ste_spec.stayer_fraction,
     )
     would_pass_gate = decide_deploy_cql(
         gate_stats["gate_delta"],
@@ -963,6 +1102,9 @@ def train_ste_job(
         "bootstrap_lookahead_weeks": 1,
         "params_dir": str(params_path),
         "params_sha256": params_fingerprint(params_path, userid),
+        "activity": "off",
+        "testbed": requested.as_dict(),
+        "ste": ste_spec.as_dict(),
         "i_w_fixed": 1,
         "j_w_fixed": 1,
         "seed": seed,
@@ -981,11 +1123,22 @@ def train_ste_job(
         json.dump(metadata, f, indent=2)
 
 
+def _resolve_ste_eval_dir(exp: str, spec=None) -> Path:
+    if spec is not None:
+        path = ste_eval_dir(exp, spec)
+        if path.is_dir():
+            return path
+    legacy = Path("results_ste") / f"exp{exp}"
+    return legacy
+
+
 def aggregate_ste(
     exp: str = "1",
     *,
     userid_path: Path | None = None,
     burn_in_rows: int = 0,
+    spec=None,
+    effective: bool = False,
 ) -> float:
     """
     Average user STE:
@@ -999,17 +1152,19 @@ def aggregate_ste(
 
     The clip is the in-class floor (never-send), not a significance gate.
 
-    Expects ``results_ste/exp{exp}/res{exp}_{userid}.txt`` with two columns:
+    Expects ``results_ste_<spec>/exp{exp}/res{exp}_{userid}.txt`` (legacy
+    ``results_ste/exp{exp}`` is still accepted) with two columns:
     ``sum_CAE_zero``, ``sum_CAE_opt`` per Monte Carlo row.
     """
     uid_path = Path(userid_path) if userid_path else resolve_params_dir() / "user_ids.txt"
     userid_all = np.loadtxt(uid_path, dtype=int)
-    path = Path("results_ste") / f"exp{exp}"
+    path = _resolve_ste_eval_dir(exp, spec)
     idx_zero, idx_opt = 0, 1
+    suffix = "_effective" if effective else ""
 
     user_ste = []
     for userid in userid_all:
-        fp = path / f"res{exp}_{int(userid)}.txt"
+        fp = path / f"res{exp}_{int(userid)}{suffix}.txt"
         if not fp.is_file():
             raise FileNotFoundError(fp)
         reward = np.loadtxt(fp)
@@ -1060,11 +1215,12 @@ def report_ste(
     users: list[int] | None = None,
     val_curve: bool = False,
     burn_in_rows: int = 0,
+    spec=None,
 ) -> None:
     """Print per-user val Δ / SE / z, selected checkpoint, treat rate, and test STE."""
     uid_path = Path(userid_path) if userid_path else resolve_params_dir() / "user_ids.txt"
     userid_all = np.loadtxt(uid_path, dtype=int)
-    path = Path("results_ste") / f"exp{exp}"
+    path = _resolve_ste_eval_dir(exp, spec)
     logger_dir = Path("d3rlpy_logs") / f"ste_exp_{exp}"
     want = set(int(u) for u in users) if users else None
 
@@ -1185,6 +1341,7 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Parameter folder (default: vani_env.PARAMS_DIR / ADAPR_PARAMS_DIR)",
     )
+    add_testbed_arguments(pt)
 
     pe = sub.add_parser("eval", help="Evaluate zero vs DiscreteCQL for user_ids[jobid]")
     pe.add_argument("jobid", type=int)
@@ -1201,11 +1358,24 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Must match the folder recorded at train time",
     )
+    add_testbed_arguments(pe)
+    pe.add_argument(
+        "--effective-ste",
+        action="store_true",
+        help="Also evaluate with the testbed's own activity setting.",
+    )
 
     pa = sub.add_parser("aggregate", help="Print average user STE from saved eval files")
     pa.add_argument("--exp", type=str, default="1")
     pa.add_argument("--user-ids", type=str, default=None)
     pa.add_argument("--burn-in-rows", type=int, default=0)
+    pa.add_argument("--params-dir", type=str, default=None)
+    add_testbed_arguments(pa)
+    pa.add_argument(
+        "--effective-ste",
+        action="store_true",
+        help="Aggregate the effective-STE companion files.",
+    )
 
     pr = sub.add_parser(
         "report",
@@ -1230,9 +1400,21 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Print checkpoint val_Δ history from metadata",
     )
+    pr.add_argument("--params-dir", type=str, default=None)
+    add_testbed_arguments(pr)
 
     args = p.parse_args(argv)
     uid_path = Path(args.user_ids) if getattr(args, "user_ids", None) else None
+    params_arg = Path(args.params_dir) if getattr(args, "params_dir", None) else None
+    spec = None
+    if args.cmd in {"aggregate", "report"}:
+        spec = resolve_testbed_spec(
+            params_arg,
+            activity=getattr(args, "activity", None),
+            stayer_fraction=getattr(args, "stayer_fraction", None),
+            misspec=getattr(args, "misspec", None),
+            warn_stayer=False,
+        ).ste_spec()
 
     if args.cmd == "train":
         train_ste_job(
@@ -1249,7 +1431,10 @@ def main(argv: list[str] | None = None) -> None:
             n_gate=args.n_gate,
             val_every=args.val_every,
             val_fallback_c=args.val_fallback_c,
-            params_dir=Path(args.params_dir) if args.params_dir else None,
+            params_dir=params_arg,
+            activity=args.activity,
+            stayer_fraction=args.stayer_fraction,
+            misspec=args.misspec,
         )
     elif args.cmd == "eval":
         eval_ste_job(
@@ -1259,7 +1444,11 @@ def main(argv: list[str] | None = None) -> None:
             n_test=args.n_test,
             nweek=args.nweek,
             noise=args.noise,
-            params_dir=Path(args.params_dir) if args.params_dir else None,
+            params_dir=params_arg,
+            activity=args.activity,
+            stayer_fraction=args.stayer_fraction,
+            misspec=args.misspec,
+            effective_ste=args.effective_ste,
         )
     elif args.cmd == "report":
         users = None
@@ -1272,10 +1461,18 @@ def main(argv: list[str] | None = None) -> None:
             users=users,
             val_curve=args.val_curve,
             burn_in_rows=args.burn_in_rows,
+            spec=spec,
         )
     else:
-        ste = aggregate_ste(args.exp, userid_path=uid_path, burn_in_rows=args.burn_in_rows)
-        print(f"average_user_STE\t{ste:.6f}")
+        ste = aggregate_ste(
+            args.exp,
+            userid_path=uid_path,
+            burn_in_rows=args.burn_in_rows,
+            spec=spec,
+            effective=bool(getattr(args, "effective_ste", False)),
+        )
+        label = "average_user_effective_STE" if getattr(args, "effective_ste", False) else "average_user_STE"
+        print(f"{label}\t{ste:.6f}")
 
 
 if __name__ == "__main__":

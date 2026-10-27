@@ -14,6 +14,10 @@
 # Fitted environment folder under the repo root. Switch later, e.g.:
 #   ENV_VARIANT=env_para_ste0.5 sbatch run_array.sh
 ENV_VARIANT="${ENV_VARIANT:-env_para_vanilla}"
+# Testbed spec (sbatch --export=ALL,ENV_VARIANT=env_para_ste0.5,ADAPR_ACTIVITY=on,ADAPR_STAYER_FRACTION=0.25,ADAPR_MISSPEC=none).
+ADAPR_ACTIVITY="${ADAPR_ACTIVITY:-on}"
+ADAPR_STAYER_FRACTION="${ADAPR_STAYER_FRACTION:-0}"
+ADAPR_MISSPEC="${ADAPR_MISSPEC:-none}"
 # Simulated weeks (experiment.py --nweek). Default 36.
 #   sbatch --export=ALL,PRIOR_MODE=loo,NWEEK=300,RESULTS_ROOT=results_vanilla_w300_loo run_array.sh
 NWEEK="${NWEEK:-36}"
@@ -40,6 +44,9 @@ mamba activate budgeted
 
 export ADAPR_PROJECT_ROOT="$SLURM_SUBMIT_DIR"
 export ADAPR_PARAMS_DIR="$ENV_VARIANT"
+export ADAPR_ACTIVITY
+export ADAPR_STAYER_FRACTION
+export ADAPR_MISSPEC
 # Absolute folder for this shell only. Not exported: Python reads ADAPR_PARAMS_DIR.
 PARAMS_ABS="${SLURM_SUBMIT_DIR}/${ENV_VARIANT}"
 export ADAPR_PRIOR_MODE="${PRIOR_MODE}"
@@ -72,7 +79,8 @@ fi
 # _no_action_c so this batch does not mix with the default runs.
 # PRIOR_MODE=loo gets _loo so it does not mix with saved/zero-prior batches.
 if [ -z "${RESULTS_ROOT:-}" ]; then
-  RESULTS_ROOT="${SLURM_SUBMIT_DIR}/results_${ENV_VARIANT#env_para_}"
+  RESULTS_ROOT="$(python3 -c "from testbed import resolve_testbed_spec; print(resolve_testbed_spec('${ENV_VARIANT}').results_root)")"
+  RESULTS_ROOT="${SLURM_SUBMIT_DIR}/${RESULTS_ROOT}"
   if [ "${ACTION_BLOCK_C}" = "0" ]; then
     RESULTS_ROOT="${RESULTS_ROOT}_no_action_c"
   fi
@@ -91,6 +99,9 @@ export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
 echo "ENV_VARIANT=${ENV_VARIANT}"
+echo "ADAPR_ACTIVITY=${ADAPR_ACTIVITY}"
+echo "ADAPR_STAYER_FRACTION=${ADAPR_STAYER_FRACTION}"
+echo "ADAPR_MISSPEC=${ADAPR_MISSPEC}"
 echo "PARAMS_DIR=${PARAMS_ABS}"
 echo "PRIOR_MODE=${PRIOR_MODE}"
 echo "USE_ESTIMATED_PRIORS=${USE_ESTIMATED_PRIORS}"
@@ -138,6 +149,9 @@ python experiment.py \
   --params-dir "$PARAMS_ABS" \
   --prior-mode "$PRIOR_MODE" \
   --nweek "$NWEEK" \
+  --activity "$ADAPR_ACTIVITY" \
+  --stayer-fraction "$ADAPR_STAYER_FRACTION" \
+  --misspec "$ADAPR_MISSPEC" \
   --save-mode compact \
   --results-root "$RESULTS_ROOT" \
   "${EXTRA_ARGS[@]}"

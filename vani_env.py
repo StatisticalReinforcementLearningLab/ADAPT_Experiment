@@ -1392,6 +1392,8 @@ class EnvConfig:
         activity_process_mode=None,
         activity_stayer_fraction=None,
         activity_stayer_recalibrate=None,
+        activity=None,
+        misspec=None,
     ):
         self.userid = userid
         self.K = 2
@@ -1422,7 +1424,9 @@ class EnvConfig:
             )
         self.activity_process_mode = mode
         if activity_stayer_fraction is None:
-            fraction = float(os.environ.get("ADAPR_ACTIVITY_STAYER_FRACTION", "0"))
+            from testbed import parse_stayer_fraction
+
+            fraction = parse_stayer_fraction()
         else:
             fraction = float(activity_stayer_fraction)
         if not 0.0 <= fraction <= 1.0:
@@ -1438,6 +1442,34 @@ class EnvConfig:
         else:
             recalibrate = bool(activity_stayer_recalibrate)
         self.activity_stayer_recalibrate = recalibrate
+        if activity is None:
+            from testbed import parse_activity
+
+            activity = parse_activity()
+        else:
+            from testbed import parse_activity
+
+            activity = parse_activity(activity)
+        self.activity = activity
+        if misspec is None:
+            from testbed import parse_misspec
+
+            misspec = parse_misspec()
+        else:
+            from testbed import parse_misspec
+
+            misspec = parse_misspec(misspec)
+        self.misspec = misspec
+        if self.activity == "off" and self.activity_stayer_fraction != 0.0:
+            warnings.warn(
+                f"stayer fraction {self.activity_stayer_fraction:g} is ignored "
+                "when activity is off",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            self.activity_stayer_fraction = 0.0
+        if self.misspec == "D" and self.activity != "on":
+            raise ValueError("misspec D requires activity on")
         # ``activity`` and ``constant`` are exclusive. ``none`` is the
         # missing-calibration default (legacy hazard 0, with a warning).
         self.dropout_mechanism = "none"
@@ -1473,6 +1505,10 @@ class EnvConfig:
                 "dropout_hazard_day must be between 0 and 1, got "
                 f"{self.dropout_hazard_day}"
             )
+        # Activity off is the existing lambda = 0 hook. Set after the
+        # calibration load so it wins over a stored activity_process.
+        if self.activity == "off":
+            self.activity_lambda = 0.0
         std = _load_json(params_path / "std_params.json")
         self.limits_fourSC = std["4hour_step_count_limit"]
         self.fourSC_log_shift = float(std["4hour_step_count_shift"])
@@ -1634,8 +1670,50 @@ class EnvConfig:
             and self.theta_ml_FW.size >= FW_ML_BASE
             and self.theta_ml_PJ.size >= PJ_ML_BASE
         )
+        self._install_misspec_strengths()
         self._validate_shapes()
         self._apply_pv_hurdle()
+
+    def _install_misspec_strengths(self) -> None:
+        """Residual SDs and stored A/B strengths. Unused when misspec is none."""
+        from misspec import residual_sigma, strength_B, strengths_A
+
+        self.sigma_SC = residual_sigma(self.resid_fourSC)
+        self.sigma_AA = residual_sigma(self.resid_antic)
+        self.sigma_Y = residual_sigma(self.resid_CAE)
+        self.misspec_lam_Y = 0.5
+        self.misspec_lam_SC = None
+        self.misspec_lam_AA = None
+        self.misspec_beta_D = None
+        self.misspec_rho = 0.5
+        if self.misspec == "A":
+            got = strengths_A(self.params_dir)
+            self.misspec_lam_Y = float(got["lam_Y"])
+            self.misspec_rho = float(got["rho"])
+            if got["lam_SC"] is None or got["lam_AA"] is None:
+                warnings.warn(
+                    f"misspec A has no stored lam_SC/lam_AA in {self.params_dir}; "
+                    "using placeholders 0.3/0.3 until calibrate_misspec.py is run",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+                self.misspec_lam_SC = 0.3
+                self.misspec_lam_AA = 0.3
+            else:
+                self.misspec_lam_SC = float(got["lam_SC"])
+                self.misspec_lam_AA = float(got["lam_AA"])
+        elif self.misspec == "B":
+            beta = strength_B(self.params_dir)
+            if beta is None:
+                warnings.warn(
+                    f"misspec B has no stored beta_D in {self.params_dir}; "
+                    "using 0.0 until calibrate_misspec.py is run",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+                self.misspec_beta_D = 0.0
+            else:
+                self.misspec_beta_D = float(beta)
 
     def _validate_shapes(self) -> None:
         expected = {
@@ -1836,6 +1914,33 @@ class Env:
         # fresh Env (created per simulated episode) starts with fresh state.
         self._ar_prev: dict = {}
         self._resid_models: dict = {}
+        self.protocol_week = 1
+        self._confounder_C = None
+        self._week_action_frac = None
+
+    def install_confounder(self, seed, uid, nweek=None) -> None:
+        """Draw ``C_w`` from its own ``(seed, uid)`` child. No-op unless misspec A."""
+        if getattr(self.cfg, "misspec", "none") != "A":
+            self._confounder_C = None
+            return
+        from misspec import draw_confounder
+
+        n = int(self.cfg.nweek if nweek is None else nweek)
+        self._confounder_C = draw_confounder(seed, uid, n, rho=float(self.cfg.misspec_rho))
+
+    def _confounder_at_week(self) -> float:
+        c = self._confounder_C
+        if c is None:
+            return 0.0
+        idx = max(int(self.protocol_week) - 1, 0)
+        if idx >= c.size:
+            idx = int(c.size) - 1
+        return float(c[idx])
+
+    def _action_scale(self) -> float:
+        from misspec import action_scale
+
+        return action_scale(getattr(self.cfg, "misspec", "none"), self.protocol_week)
 
     def dropout_hazard(self, state) -> float:
         """Legacy constant daily hazard.
@@ -2015,11 +2120,26 @@ class Env:
             ],
             dtype=float,
         )
-        return float(self.cfg.theta_fourSC @ X)
+        miss = getattr(self.cfg, "misspec", "none")
+        if miss == "none":
+            return float(self.cfg.theta_fourSC @ X)
+        from misspec import FOURSC_ACTION_IDX, scale_action_theta
+
+        theta = scale_action_theta(
+            self.cfg.theta_fourSC, FOURSC_ACTION_IDX, self._action_scale()
+        )
+        mu = float(theta @ X)
+        if miss == "A":
+            mu = mu + float(self.cfg.misspec_lam_SC) * float(self.cfg.sigma_SC) * self._confounder_at_week()
+        return mu
 
     def gen_fourSC(self, s, Ah, step_idx):
         mean = self.gen_fourSC_mean(s, Ah)
         noise = self._sample_noise(self.cfg.resid_fourSC, step_idx, name="fourSC")
+        if getattr(self.cfg, "misspec", "none") == "A":
+            from misspec import residual_scale
+
+            noise = float(noise) * residual_scale(self.cfg.misspec_lam_SC)
         return float(np.clip(mean + noise, *self.cfg.limits_fourSC))
 
     def _ml_pv_query_shift(self, s, Jw: int, q=None) -> float:
@@ -2193,11 +2313,26 @@ class Env:
             ],
             dtype=float,
         )
-        return float(self.cfg.theta_antic @ X)
+        miss = getattr(self.cfg, "misspec", "none")
+        if miss == "none":
+            return float(self.cfg.theta_antic @ X)
+        from misspec import ANTIC_ACTION_IDX, scale_action_theta
+
+        theta = scale_action_theta(
+            self.cfg.theta_antic, ANTIC_ACTION_IDX, self._action_scale()
+        )
+        mu = float(theta @ X)
+        if miss == "A":
+            mu = mu + float(self.cfg.misspec_lam_AA) * float(self.cfg.sigma_AA) * self._confounder_at_week()
+        return mu
 
     def gen_antic(self, s, ws_morning, ws_afternoon, day_idx):
         mean = self.gen_antic_mean(s, ws_morning, ws_afternoon)
         noise = self._sample_noise(self.cfg.resid_antic, day_idx, name="antic")
+        if getattr(self.cfg, "misspec", "none") == "A":
+            from misspec import residual_scale
+
+            noise = float(noise) * residual_scale(self.cfg.misspec_lam_AA)
         return float(np.clip(mean + noise, *self.cfg.limits_antic))
 
     def _ml_fw_eta(self, s, ws_morning, ws_afternoon, Jw: int, return_logit: bool):
@@ -2285,11 +2420,28 @@ class Env:
 
     def gen_CAE_mean(self, CAE_lastweek, foursc_wk, antic_wk):
         X = build_CAE_features(CAE_lastweek, foursc_wk, antic_wk)
-        return float(self.cfg.theta_CAE @ X)
+        miss = getattr(self.cfg, "misspec", "none")
+        if miss == "none":
+            return float(self.cfg.theta_CAE @ X)
+        from misspec import CAUSAL_ALPHA_SCALE, scale_cae_alphas
+
+        theta = self.cfg.theta_CAE
+        if miss == "A":
+            theta = scale_cae_alphas(theta, CAUSAL_ALPHA_SCALE)
+        mu = float(np.asarray(theta, dtype=float) @ X)
+        if miss == "A":
+            mu = mu + float(self.cfg.misspec_lam_Y) * float(self.cfg.sigma_Y) * self._confounder_at_week()
+        if miss == "B" and self._week_action_frac is not None:
+            mu = mu + float(self.cfg.misspec_beta_D) * (float(self._week_action_frac) - 0.5)
+        return mu
 
     def gen_CAE(self, CAE_lastweek, foursc_wk, antic_wk, week_idx):
         mean = self.gen_CAE_mean(CAE_lastweek, foursc_wk, antic_wk)
         noise = self._sample_noise(self.cfg.resid_CAE, week_idx, name="CAE")
+        if getattr(self.cfg, "misspec", "none") == "A":
+            from misspec import residual_scale
+
+            noise = float(noise) * residual_scale(self.cfg.misspec_lam_Y)
         return float(np.clip(mean + noise, *self.cfg.limits_CAE))
 
     @staticmethod

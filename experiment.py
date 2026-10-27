@@ -8,6 +8,7 @@ This file also contains the RCT experiment CLI (train / eval loops over
 agents). 
 """
 import argparse
+import math
 import os
 import numpy as np
 import numpy.random as rd
@@ -20,6 +21,7 @@ from functools import partial
 
 
 from activity_process import (
+    ActivityStepper,
     activity_draw,
     dropout_seed_sequence,
     simulate_activity_paths,
@@ -348,7 +350,9 @@ class OnlineEnv:
         self.T = self.D * self.K
         self.start_dow = start_dow
         self._pv_absent = float(self.env.pageview_absent_z())
+        self._activity_stepper = None
         self._install_activity_path()
+        self.env.install_confounder(seed, env.cfg.userid, nweek=self.nweek)
 
         # Public arrays are observations. Parallel truth arrays keep the
         # latent process finite after app dropout.
@@ -640,6 +644,44 @@ class OnlineEnv:
                 1, self.D, np.zeros(4), {}, self.nweek, self._dropout_rng,
                 lambda_p=1.0, pi=1.0,
             )
+        elif getattr(cfg, "misspec", "none") == "D":
+            mode = getattr(cfg, "activity_process_mode", "pooled")
+            fraction = float(getattr(cfg, "activity_stayer_fraction", 0.0))
+            recalibrate = bool(getattr(cfg, "activity_stayer_recalibrate", True))
+            coef, fit, u, gamma, is_stayer = activity_draw(
+                record,
+                mode,
+                cfg.userid,
+                self._dropout_rng,
+                fraction,
+                recalibrate,
+            )
+            if is_stayer:
+                sim = simulate_activity_paths(
+                    1, self.D, coef, fit, self.nweek, self._dropout_rng, lambda_p=0.0,
+                )
+                self._activity_status = np.asarray(sim["status"][0], dtype=np.int8)
+                self._activity_b = np.asarray(sim["b"][0], dtype=float)
+                self._dropout_day_planned = int(sim["dropout_day"][0])
+                self.n_gaps = int(sim["n_gaps"][0])
+                self.inactive_days = int(sim["inactive_days"][0])
+                self.learned_weeks = int(self.nweek)
+                return
+            self._activity_stepper = ActivityStepper(
+                self.D, self.nweek, coef, fit, self._dropout_rng,
+                u=None if u is None else float(u),
+                gamma=gamma,
+                lambda_p=None if lam is None else float(lam),
+                pi=None if pi is None else float(pi),
+            )
+            extra = 2
+            self._activity_status = np.zeros(self.D + extra, dtype=np.int8)
+            self._activity_b = np.full(self.D + extra, np.nan)
+            self._dropout_day_planned = -1
+            self.n_gaps = 0
+            self.inactive_days = 0
+            self.learned_weeks = int(self.nweek)
+            return
         else:
             mode = getattr(cfg, "activity_process_mode", "pooled")
             fraction = float(getattr(cfg, "activity_stayer_fraction", 0.0))
@@ -674,6 +716,40 @@ class OnlineEnv:
         else:
             self.learned_weeks = int(self.nweek)
 
+    def _burden_z(self) -> float:
+        val = self.s.get("activitySuggestionsSentLast7Days", 0.0)
+        try:
+            z = float(val)
+        except (TypeError, ValueError):
+            return 0.0
+        return z if math.isfinite(z) else 0.0
+
+    def _sync_activity_stepper(self) -> None:
+        stepper = self._activity_stepper
+        if stepper is None:
+            return
+        self._activity_status = stepper.status_hist
+        self._activity_b = stepper.b_hist
+        self.n_gaps = int(stepper.n_gaps)
+        self.inactive_days = int(stepper.inactive_days)
+        self._dropout_day_planned = int(stepper.dropout_day)
+        if self._dropout_day_planned > 0:
+            self.learned_weeks = (self._dropout_day_planned - 1) // self.W_days + 1
+        else:
+            self.learned_weeks = int(self.nweek)
+        self._dropout_day_planned = int(stepper.dropout_day)
+        self.n_gaps = int(stepper.n_gaps)
+        self.inactive_days = int(stepper.inactive_days)
+        if self._dropout_day_planned > 0:
+            self.learned_weeks = (self._dropout_day_planned - 1) // self.W_days + 1
+
+    def _ensure_activity_day(self, d_global: int) -> None:
+        stepper = self._activity_stepper
+        if stepper is None:
+            return
+        stepper.ensure_day(int(d_global), self._burden_z())
+        self._sync_activity_stepper()
+
     def _day_is_active(self, d_global: int) -> bool:
         status = self._activity_status
         if status is None:
@@ -695,6 +771,8 @@ class OnlineEnv:
         """
         if self.dropped_out:
             return
+        if self._activity_stepper is not None:
+            self._sync_activity_stepper()
         if self._activity_status is not None:
             day = int(d_global) + 1
             if int(self._dropout_day_planned) == day:
@@ -709,6 +787,7 @@ class OnlineEnv:
             self._dropout_week = int(d_global) // self.W_days
 
     def start_week(self, k, I_w):
+        self.env.protocol_week = int(k) + 1
         self._Iw_per_week[k] = I_w
         # ``E_known_all[k]`` is set in ``__init__`` (k=0) or by
         # ``_finalize_week(k-1)`` (k >= 1); see ``agents.ew_hat.compute_Ew_hat_from_week``.
@@ -1114,6 +1193,7 @@ class OnlineEnv:
             self.env.cfg.recent_burden_shift,
             self.env.cfg.recent_burden_scale,
         )
+        self._ensure_activity_day(d_global)
 
         # Antic / fitbit / daily are drawn in _end_day (today’s WS). gen_pageview uses
         # yesterday_* in vani_env; fourSC uses dailyAnticipatedAffectYesterday (prior-day affect) only.
@@ -1242,6 +1322,10 @@ class OnlineEnv:
         d_global = self._day_idx(sim_w, d_w_sun)
 
         self._ensure_day_started(sim_w, d_w_sun, d_global)
+        week_base = self._step_idx(sim_w, 0, 0)
+        n_decision = N_RL_DAYS * self.K
+        week_A = np.asarray(self.action_all[week_base:week_base + n_decision], dtype=float)
+        self.env._week_action_frac = float(np.mean(week_A)) if week_A.size else 0.0
 
         for t_sim in range(self.K):
             step_idx = self._step_idx(sim_w, d_w_sun, t_sim)
@@ -2651,15 +2735,18 @@ def _make_online_env(
     uid, seed=42, params_dir=None, dropout_hazard_day=None,
     activity_lambda=None, activity_pi=None, activity_process_mode=None,
     activity_stayer_fraction=None, activity_stayer_recalibrate=None,
+    activity=None, misspec=None, nweek=None,
 ):
     params_dir = resolve_params_dir(params_dir)
     cfg = EnvConfig(
         uid,
         params_dir=params_dir,
-        nweek=NWEEK,
+        nweek=int(nweek) if nweek is not None else NWEEK,
         activity_process_mode=activity_process_mode,
         activity_stayer_fraction=activity_stayer_fraction,
         activity_stayer_recalibrate=activity_stayer_recalibrate,
+        activity=activity,
+        misspec=misspec,
     )
     if dropout_hazard_day is not None:
         cfg.dropout_hazard_day = float(dropout_hazard_day)
@@ -2889,6 +2976,9 @@ def _run_fixed_policy_fast(
     activity_process_mode=None,
     activity_stayer_fraction=None,
     activity_stayer_recalibrate=None,
+    activity=None,
+    misspec=None,
+    nweek=None,
 ):
     """Run fixed baselines without PF/RLSVI/state-feature bookkeeping."""
     _ensure_priors_configured(params_dir)
@@ -2900,6 +2990,9 @@ def _run_fixed_policy_fast(
         activity_process_mode=activity_process_mode,
         activity_stayer_fraction=activity_stayer_fraction,
         activity_stayer_recalibrate=activity_stayer_recalibrate,
+        activity=activity,
+        misspec=misspec,
+        nweek=nweek,
     )
     nweek = cfg.nweek
 
@@ -2969,28 +3062,28 @@ def _run_fixed_policy_fast(
 def _run_fixed_policy(
     agent_cls, uid, seed=42, params_dir=None, activity_process_mode=None,
     activity_stayer_fraction=None, activity_stayer_recalibrate=None,
+    activity=None, misspec=None, nweek=None,
 ):
     """Run a fixed walking-suggestion policy (never/always/random send)."""
+    extra = dict(
+        activity_process_mode=activity_process_mode,
+        activity_stayer_fraction=activity_stayer_fraction,
+        activity_stayer_recalibrate=activity_stayer_recalibrate,
+        activity=activity,
+        misspec=misspec,
+        nweek=nweek,
+    )
     if agent_cls is NeverSendAgent:
         return _run_fixed_policy_fast(
-            "never_send", uid, seed=seed, params_dir=params_dir,
-            activity_process_mode=activity_process_mode,
-            activity_stayer_fraction=activity_stayer_fraction,
-            activity_stayer_recalibrate=activity_stayer_recalibrate,
+            "never_send", uid, seed=seed, params_dir=params_dir, **extra
         )
     if agent_cls is AlwaysSendAgent:
         return _run_fixed_policy_fast(
-            "always_send", uid, seed=seed, params_dir=params_dir,
-            activity_process_mode=activity_process_mode,
-            activity_stayer_fraction=activity_stayer_fraction,
-            activity_stayer_recalibrate=activity_stayer_recalibrate,
+            "always_send", uid, seed=seed, params_dir=params_dir, **extra
         )
     if agent_cls is RandomSendAgent:
         return _run_fixed_policy_fast(
-            "random_send", uid, seed=seed, params_dir=params_dir,
-            activity_process_mode=activity_process_mode,
-            activity_stayer_fraction=activity_stayer_fraction,
-            activity_stayer_recalibrate=activity_stayer_recalibrate,
+            "random_send", uid, seed=seed, params_dir=params_dir, **extra
         )
     raise TypeError(f"unsupported fixed-policy class {agent_cls!r}")
 
@@ -2998,72 +3091,72 @@ def _run_fixed_policy(
 def run_never_send(
     uid, seed=42, params_dir=None, dropout_hazard_day=None, activity_process_mode=None,
     activity_stayer_fraction=None, activity_stayer_recalibrate=None,
+    activity=None, misspec=None, nweek=None,
 ):
     """Baseline: never send (A=0, π_A=0). Not the RLSVI clip π_A=ε."""
-    if dropout_hazard_day is None:
-        return _run_fixed_policy(
-            NeverSendAgent, uid, seed=seed, params_dir=params_dir,
-            activity_process_mode=activity_process_mode,
-            activity_stayer_fraction=activity_stayer_fraction,
-            activity_stayer_recalibrate=activity_stayer_recalibrate,
-        )
-    return _run_fixed_policy_fast(
-        "never_send",
-        uid,
-        seed=seed,
-        params_dir=params_dir,
-        dropout_hazard_day=dropout_hazard_day,
+    extra = dict(
         activity_process_mode=activity_process_mode,
         activity_stayer_fraction=activity_stayer_fraction,
         activity_stayer_recalibrate=activity_stayer_recalibrate,
+        activity=activity,
+        misspec=misspec,
+        nweek=nweek,
+    )
+    if dropout_hazard_day is None:
+        return _run_fixed_policy(
+            NeverSendAgent, uid, seed=seed, params_dir=params_dir, **extra
+        )
+    return _run_fixed_policy_fast(
+        "never_send", uid, seed=seed, params_dir=params_dir,
+        dropout_hazard_day=dropout_hazard_day, **extra
     )
 
 
 def run_always_send(
     uid, seed=42, params_dir=None, dropout_hazard_day=None, activity_process_mode=None,
     activity_stayer_fraction=None, activity_stayer_recalibrate=None,
+    activity=None, misspec=None, nweek=None,
 ):
     """Baseline: always send (A=1, π_A=1). Not the RLSVI clip π_A=1-ε."""
-    if dropout_hazard_day is None:
-        return _run_fixed_policy(
-            AlwaysSendAgent, uid, seed=seed, params_dir=params_dir,
-            activity_process_mode=activity_process_mode,
-            activity_stayer_fraction=activity_stayer_fraction,
-            activity_stayer_recalibrate=activity_stayer_recalibrate,
-        )
-    return _run_fixed_policy_fast(
-        "always_send",
-        uid,
-        seed=seed,
-        params_dir=params_dir,
-        dropout_hazard_day=dropout_hazard_day,
+    extra = dict(
         activity_process_mode=activity_process_mode,
         activity_stayer_fraction=activity_stayer_fraction,
         activity_stayer_recalibrate=activity_stayer_recalibrate,
+        activity=activity,
+        misspec=misspec,
+        nweek=nweek,
+    )
+    if dropout_hazard_day is None:
+        return _run_fixed_policy(
+            AlwaysSendAgent, uid, seed=seed, params_dir=params_dir, **extra
+        )
+    return _run_fixed_policy_fast(
+        "always_send", uid, seed=seed, params_dir=params_dir,
+        dropout_hazard_day=dropout_hazard_day, **extra
     )
 
 
 def run_random_send(
     uid, seed=42, params_dir=None, dropout_hazard_day=None, activity_process_mode=None,
     activity_stayer_fraction=None, activity_stayer_recalibrate=None,
+    activity=None, misspec=None, nweek=None,
 ):
     """Baseline: send at random with fixed propensity pi_A = 0.5."""
-    if dropout_hazard_day is None:
-        return _run_fixed_policy(
-            RandomSendAgent, uid, seed=seed, params_dir=params_dir,
-            activity_process_mode=activity_process_mode,
-            activity_stayer_fraction=activity_stayer_fraction,
-            activity_stayer_recalibrate=activity_stayer_recalibrate,
-        )
-    return _run_fixed_policy_fast(
-        "random_send",
-        uid,
-        seed=seed,
-        params_dir=params_dir,
-        dropout_hazard_day=dropout_hazard_day,
+    extra = dict(
         activity_process_mode=activity_process_mode,
         activity_stayer_fraction=activity_stayer_fraction,
         activity_stayer_recalibrate=activity_stayer_recalibrate,
+        activity=activity,
+        misspec=misspec,
+        nweek=nweek,
+    )
+    if dropout_hazard_day is None:
+        return _run_fixed_policy(
+            RandomSendAgent, uid, seed=seed, params_dir=params_dir, **extra
+        )
+    return _run_fixed_policy_fast(
+        "random_send", uid, seed=seed, params_dir=params_dir,
+        dropout_hazard_day=dropout_hazard_day, **extra
     )
 
 
@@ -3327,7 +3420,7 @@ if __name__ == "__main__":
         default=None,
         help=(
             "Parent folder for this run's timestamped output. "
-            "Default: RESULTS_ROOT env, else results_vanilla."
+            "Default: RESULTS_ROOT env, else results_<testbed suffix>."
         ),
     )
     parser.add_argument(
@@ -3370,6 +3463,9 @@ if __name__ == "__main__":
             "EnvConfig so the env horizon matches config.json."
         ),
     )
+    from testbed import add_testbed_arguments, resolve_testbed_spec
+
+    add_testbed_arguments(parser)
     args = parser.parse_args()
     NWEEK = _resolve_nweek(args.nweek)
 
@@ -3382,6 +3478,20 @@ if __name__ == "__main__":
     )
 
     params_dir = resolve_params_dir(args.params_dir)
+    testbed_spec = resolve_testbed_spec(
+        params_dir,
+        activity=args.activity,
+        stayer_fraction=args.stayer_fraction,
+        misspec=args.misspec,
+    )
+    for key, value in testbed_spec.export_env().items():
+        os.environ[key] = value
+    print(
+        f"Testbed: activity={testbed_spec.activity} "
+        f"stayer={testbed_spec.stayer_fraction:g} "
+        f"misspec={testbed_spec.misspec} "
+        f"suffix={testbed_spec.suffix}"
+    )
     _ZERO_CENTRE_POLICY_PRIORS = bool(args.zero_centre_policy_priors)
     _POLICY_PRIOR_VAR_SCALE = float(args.policy_prior_var_scale)
     _configure_priors(params_dir=params_dir, force=True)
@@ -3562,7 +3672,7 @@ if __name__ == "__main__":
     RESULTS_ROOT = Path(
         args.results_root
         if args.results_root is not None
-        else os.getenv("RESULTS_ROOT", "results_vanilla")
+        else os.getenv("RESULTS_ROOT", testbed_spec.results_root)
     )
     OUTPUT_DIR = RESULTS_ROOT / f"{ts}_{run_tag}{slurm_suffix}"
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -3590,6 +3700,10 @@ if __name__ == "__main__":
             "save_mode":      save_mode,
             "trajectory_reference_algo": TRAJECTORY_REFERENCE_ALGO,
             "params_dir":      str(params_dir),
+            "testbed":         testbed_spec.as_dict(),
+            "activity":        testbed_spec.activity,
+            "stayer_fraction": testbed_spec.stayer_fraction,
+            "misspec":         testbed_spec.misspec,
             "priors_source":   _priors_src,
             "prior_mode":      args.prior_mode,
             "zero_centre_policy_priors": _zero_centre_policy_priors_requested(),

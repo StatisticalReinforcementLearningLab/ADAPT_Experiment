@@ -46,12 +46,45 @@ the dropout table. `algorithm_helpers.py`, `derived_covariates.py`,
 `est_prior.py` and `stability.py` stay importable under those names.
 `ste_vanilla.py` is the STE evaluation used by `tune_ste.py`.
 
+## 24 testbeds
+
+A testbed is `(params dir, activity, stayer fraction, misspec)`. Select it
+with `ADAPR_PARAMS_DIR` / `--params-dir`, `ADAPR_ACTIVITY` / `--activity`
+(default `on`), `ADAPR_STAYER_FRACTION` / `--stayer-fraction` (0, 0.25, 0.5),
+and `ADAPR_MISSPEC` / `--misspec` (`none`, `A`, `B`, `C`, `D`; default `none`).
+Results folders are `results_<steX.Y>_<gapon|gapoff>_psi<frac>_misspec<letter>`.
+STE tuning and STE evaluation always force activity `off` (no gaps) and log
+that. `python proxy_ste.py` reports the no-gap proxy STE and the effective
+proxy STE under the testbed's own activity. `python calibrate_misspec.py`
+writes A/B strengths into `<params_dir>/misspec_calibration.json`.
+
+Misspecifications (off by default; the simulator is unchanged when they are off):
+
+| Code | Meaning |
+| --- | --- |
+| none | Fitted generator; no extra misspecification. |
+| A | Unmeasured weekly confounder of SC, AA, and Y; causal SC/AA→Y halved. |
+| B | Unmeasured direct A→Y path; mediator action effects halved. |
+| C | Action effects on SC/AA decay after the 12-week fit window. |
+| D | Recent burden raises the gap-start hazard; activity must be on. |
+
+| Layer | Count | params dir | activity | stayer | misspec |
+| --- | ---: | --- | --- | ---: | --- |
+| 1 | 3 | `env_para_ste0.2`, `0.5`, `0.8` | off | 0 | none |
+| 2 | 9 | the same three | on | 0, 0.25, 0.5 | none |
+| 3 | 12 | the same three | on | 0 | A, B, C, D |
+
+Example: Layer 2, STE 0.5, 25% stayers::
+
+    sbatch --export=ALL,ENV_VARIANT=env_para_ste0.5,ADAPR_ACTIVITY=on,ADAPR_STAYER_FRACTION=0.25,ADAPR_MISSPEC=none,PRIOR_MODE=loo run_array.sh
+
 ## Launchers
 
 `run_array.sh` submits the experiment array. `run_aggregate.sh` aggregates a
 results folder. `run_ste.sh` runs one STE environment. `run_tune_ste.sh` tunes
 the action knob to the STE targets. Each one is a SLURM script; `bash -n`
-checks the syntax, and the cluster runs them with `sbatch`.
+checks the syntax, and the cluster runs them with `sbatch`. Pass the testbed
+through `sbatch --export=ALL,ENV_VARIANT=...,ADAPR_ACTIVITY=...,ADAPR_STAYER_FRACTION=...,ADAPR_MISSPEC=...`.
 
 ## analysis/ and archive/
 
@@ -95,4 +128,6 @@ bash run_array.sh
 python aggregate.py
 ```
 
-`ADAPR_PARAMS_DIR=env_para_ste0.8` selects an STE copy.
+`ADAPR_PARAMS_DIR=env_para_ste0.8` selects an STE copy. Add `--activity off`
+for Layer 1 (no gaps), `--stayer-fraction 0.25` for a Layer 2 stayer mix,
+or `--misspec A` for a Layer 3 confounder.

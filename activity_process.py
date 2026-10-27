@@ -189,6 +189,144 @@ def _empty_result(n_paths: int, n_state: int) -> dict:
     }
 
 
+class ActivityStepper:
+    """One-path state machine matching ``simulate_activity_paths``.
+
+    Used only by misspec D, which needs today's recent burden in Model 1.
+    Day 1 is active. ``advance(burden_z)`` records today and decides tomorrow.
+    """
+
+    def __init__(
+        self,
+        n_days: int,
+        n_weeks: int,
+        coef: np.ndarray,
+        fit: dict,
+        rng: np.random.Generator,
+        *,
+        extra_days: int = 2,
+        u: float | None = None,
+        gamma: float = 0.0,
+        lambda_p: float | None = None,
+        pi: float | None = None,
+    ):
+        self.n_days = int(n_days)
+        self.n_state = self.n_days + int(extra_days)
+        self.coef = np.asarray(coef, dtype=float)
+        self.fit = fit
+        self.rng = rng
+        self.month = np.array([month_c_of(day) for day in range(self.n_state + 2)], dtype=float)
+        self.u = 0.0 if u is None else float(u)
+        self.gamma = float(gamma)
+        self.lambda_p = None if lambda_p is None else float(lambda_p)
+        self.pi = None if pi is None else float(pi)
+        self.status = 0
+        self.k = 0
+        self.prior = 0.0
+        self.hist = np.ones(7, dtype=float)
+        self.gap_start = 0
+        self.theta_gap = 1.0
+        self.status_hist = np.zeros(self.n_state, dtype=np.int8)
+        self.b_hist = np.full(self.n_state, np.nan)
+        self.n_gaps = 0
+        self.inactive_days = 0
+        self.dropout_day = -1
+        self.ended: list[int] = []
+        self.censored: list[int] = []
+        self.terminal14 = False
+        self._day = 1
+        self._recorded = False
+
+    def _eta(self, day: int, burden_z: float) -> float:
+        act7 = float(self.hist.mean())
+        eta = (
+            self.coef[0]
+            + self.coef[1] * self.month[day]
+            + self.coef[2] * act7
+            + self.coef[3] * self.prior
+            + self.u
+        )
+        if burden_z is not None:
+            eta = eta + math.log(1.5) * float(burden_z)
+        return float(eta)
+
+    def ensure_day(self, day_0based: int, burden_z: float = 0.0) -> int:
+        """Advance until ``status_hist[day_0based]`` is filled. Returns that status."""
+        target = int(day_0based) + 1
+        while self._day <= target and self._day <= self.n_state:
+            self._step_one(burden_z)
+        idx = int(day_0based)
+        if idx < 0 or idx >= self.n_state:
+            return 2
+        return int(self.status_hist[idx])
+
+    def _step_one(self, burden_z: float) -> None:
+        day = self._day
+        if day > self.n_state:
+            return
+        self.status_hist[day - 1] = self.status
+        inactive_now = self.status != 0
+        if day <= self.n_days and inactive_now:
+            self.inactive_days += 1
+            if day == self.n_days:
+                length = self.n_days - self.gap_start + 1
+                self.censored.append(int(length))
+                self.terminal14 = length >= 14
+        if day == self.n_state:
+            self._day = day + 1
+            return
+
+        next_status = self.status
+        next_k = self.k
+        next_prior = self.prior
+        mu, alpha = float(self.fit["mu"]), float(self.fit["alpha"])
+        if self.status == 0:
+            if self.lambda_p is None:
+                p_start = float(expit(np.asarray([self._eta(day, burden_z)]))[0])
+            else:
+                p_start = float(self.lambda_p)
+            if float(self.rng.random()) < p_start:
+                theta = math.exp(
+                    self.fit["c0"] + self.fit["c1"] * self.prior - self.gamma * self.u
+                )
+                p_perm = math.exp(-theta) if self.pi is None else float(self.pi)
+                perm = float(self.rng.random()) < p_perm
+                next_status = 2 if perm else 1
+                if not perm:
+                    next_k = 1
+                    self.theta_gap = theta
+                self.gap_start = day + 1
+                start_col = day
+                if start_col < self.n_state:
+                    self.b_hist[start_col] = 1.0 if perm else 0.0
+                if day + 1 <= self.n_days:
+                    self.n_gaps += 1
+                    if perm:
+                        self.dropout_day = day + 1
+        elif self.status == 1:
+            hu = float(
+                hazard_uncured(
+                    np.asarray([float(self.k)]),
+                    np.asarray([self.theta_gap]),
+                    mu,
+                    alpha,
+                )[0]
+            )
+            if float(self.rng.random()) < hu:
+                if day + 1 <= self.n_days:
+                    self.ended.append(int(self.k))
+                next_status = 0
+                next_prior = 1.0
+                next_k = 0
+            else:
+                next_k = self.k + 1
+        self.hist = np.concatenate([self.hist[1:], np.asarray([float(self.status == 0)])])
+        self.status, self.k, self.prior = next_status, next_k, next_prior
+        if day < self.n_state:
+            self.status_hist[day] = self.status
+        self._day = day + 1
+
+
 def simulate_activity_paths(
     n_paths: int,
     n_days: int,

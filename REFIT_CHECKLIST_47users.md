@@ -25,7 +25,7 @@ and pulling the refit back, the local `env_para_vanilla/` mixes new data files w
       `.pipeline_*.log`, `pf_cmp2*`.
       The simulator does not read `fourSC_support_aware_lag`,
       `activity_carryover_calibration`, or `interaction_pageview_calibration`.
-- [ ] Local tests pass: `python -m pytest tests` (57 tests)
+- [ ] Local tests pass: `python -m pytest tests` (67 passed, 1 skipped)
       and `python -m pytest RL_agents` (33 tests).
 - [ ] Expected numbers to check against later (from `docs/dropout_check_20261017/`
       and `docs/cohort_checks_20261017/`):
@@ -133,23 +133,38 @@ a check before the next.
       (2000 activity paths, stability, loo files, and pytest, including RL_agents when present)
 - [ ] Copy `rl_priors.json` to `RL_agents/rl/rl_priors.json` and record the diff of `nu_0`.
 
-## 6. CLUSTER: STE environments (sbatch, sequential; days)
+## 6. CLUSTER: after the 47-user refit (do not run these before the refit)
 
 The ste0.2/0.5/0.8 folders are derived from vanilla, so they must be re-tuned.
+STE tuning and confirmation always use activity off (no gaps).
 
-- [ ] `sbatch run_tune_ste.sh` (action knob → 0.2 / 0.5 / 0.8; auto-submits confirmation CQL jobs)
-- [ ] `TUNE_PHASE=validate bash run_tune_ste.sh`, then `TUNE_PHASE=ratio`
-- [ ] Re-tune any folder off target with `TUNE_PROXY_TO_TRUE=from:env_para_ste<t>`, validate again
-- [ ] Each newly tuned `env_para_ste*/generator_calibration.json` carries the same `activity_process`
-      block as vanilla; if tuning rewrote the file without it, copy it back
-- [ ] STE reported **with dropout on** only; the `h = 0` mode is for tests.
-
-## 7. CLUSTER: RL experiments
-
-- [ ] `sbatch --export=ALL,PRIOR_MODE=loo,ENV_VARIANT=env_para_vanilla,RESULTS_ROOT=results_vanilla_loo_47 run_array.sh`
-      (and the ste variants as before)
-- [ ] `sbatch run_aggregate.sh`; aggregate now includes `dropout_day` per episode —
-      report fraction dropped by week 12 / 36 and mean learned weeks alongside cumulative true CAE
+- [ ] (i) Tune STE 0.2 / 0.5 / 0.8 with activity off:
+      `sbatch run_tune_ste.sh` (forces `ADAPR_ACTIVITY=off`; action knob → 0.2 / 0.5 / 0.8;
+      auto-submits confirmation CQL jobs). Then `TUNE_PHASE=validate bash run_tune_ste.sh`
+      and `TUNE_PHASE=ratio`. Re-tune any folder off target with
+      `TUNE_PROXY_TO_TRUE=from:env_para_ste<t>`. Each newly tuned
+      `env_para_ste*/generator_calibration.json` must still carry vanilla's
+      `activity_process` block.
+- [ ] (ii) Calibrate misspec A and B once per params dir:
+      ```
+      python calibrate_misspec.py --params-dir env_para_ste0.2
+      python calibrate_misspec.py --params-dir env_para_ste0.5
+      python calibrate_misspec.py --params-dir env_para_ste0.8
+      ```
+      or `python calibrate_misspec.py --all-ste`. Writes `misspec_calibration.json`
+      (`lam_SC`, `lam_AA` for A; `beta_D` for B). No re-tuning.
+- [ ] (iii) Screen the 12 Layer-3 testbeds with the proxy STE:
+      `python proxy_ste.py --screen-layer3`. Flag any with proxy STE < 0.1.
+      The no-gap proxy uses activity off; the effective proxy uses activity on
+      (and misspec D when that is the spec).
+- [ ] (iv) Run the RL arrays for all 24 testbeds (3 Layer 1 + 9 Layer 2 + 12 Layer 3).
+      Example Layer 2:
+      `sbatch --export=ALL,PRIOR_MODE=loo,ENV_VARIANT=env_para_ste0.5,ADAPR_ACTIVITY=on,ADAPR_STAYER_FRACTION=0.25,ADAPR_MISSPEC=none run_array.sh`
+      Example Layer 3:
+      `sbatch --export=ALL,PRIOR_MODE=loo,ENV_VARIANT=env_para_ste0.5,ADAPR_ACTIVITY=on,ADAPR_STAYER_FRACTION=0,ADAPR_MISSPEC=A run_array.sh`
+      Layer 1 uses `ADAPR_ACTIVITY=off`. Folders are
+      `results_<steX.Y>_<gapon|gapoff>_psi<frac>_misspec<letter>` so specs never mix.
+      Then `sbatch --export=ALL,... run_aggregate.sh` for each spec.
 - [ ] Rerun the (B) subgroup comparison on the 47 refit models: 43 non-dropout models vs 82/138/259/379
       (replaces the provisional 39-model result in `docs/dropout_check_20261017/report.md`)
 

@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 
 from vani_env import PARAMS_DIR, PROJECT_ROOT, denormalize_CAE
 from algorithm_helpers import EXPERIMENT_ALGORITHMS, EXPERIMENT_ALGORITHM_LABELS
+from testbed import add_testbed_arguments, resolve_testbed_spec
 
 # Must match run_array.sh RESULTS_ROOT (env-overridable).
 DEFAULT_RESULTS_ROOT = Path(os.getenv("RESULTS_ROOT", "results_vanilla_loo"))
@@ -332,7 +333,19 @@ def parse_args() -> argparse.Namespace:
         help="Folder with std_params.json for CAE denormalization "
              "(default: config.json params_dir, remapped locally if needed).",
     )
-    return parser.parse_args()
+    add_testbed_arguments(parser)
+    args = parser.parse_args()
+    spec = resolve_testbed_spec(
+        args.params_dir,
+        activity=args.activity,
+        stayer_fraction=args.stayer_fraction,
+        misspec=args.misspec,
+        warn_stayer=False,
+    )
+    args.testbed = spec
+    if os.getenv("RESULTS_ROOT") is None and args.results_root == DEFAULT_RESULTS_ROOT:
+        args.results_root = Path(spec.results_root)
+    return args
 
 
 def compute_stats(all_cae_full):

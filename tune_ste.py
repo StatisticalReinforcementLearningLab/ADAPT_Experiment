@@ -802,7 +802,7 @@ def _never_send_centers_user(task: tuple) -> tuple[int, dict[str, float]]:
     for n in range(int(episodes)):
         seed = int(seed0) + n
         rd.seed(seed)
-        cfg = EnvConfig(uid, params_dir=Path(params_dir))
+        cfg = EnvConfig(uid, params_dir=Path(params_dir), activity="off")
         env = Env(cfg, noise=noise)
         f_four, f_cae, f_e = env.gen_fourSC_mean, env.gen_CAE_mean, env.gen_perceivedUtility_mean
 
@@ -1144,6 +1144,9 @@ def _rollouts(
     *,
     walk_prob: float = 0.0,
     dqn=None,
+    activity: str = "off",
+    misspec: str | None = None,
+    stayer_fraction: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Totals and per-week CAE across ``spec.episodes`` paired-seed episodes."""
     totals = np.empty(spec.episodes, dtype=float)
@@ -1160,6 +1163,9 @@ def _rollouts(
             walk_prob=walk_prob,
             params_dir=Path(params_dir),
             return_weekly=True,
+            activity=activity,
+            misspec=misspec,
+            stayer_fraction=stayer_fraction,
         )
         totals[n] = total
         weekly[n] = wk
@@ -1168,14 +1174,26 @@ def _rollouts(
 
 def _eval_user(task: tuple) -> dict:
     """Worker: one participant's control and treatment arms under common seeds."""
-    uid, params_dir, spec_kwargs, zero_totals = task
+    uid, params_dir, spec_kwargs, zero_totals, env_kwargs = task
     spec = ProxySpec(**spec_kwargs)
-    cfg = EnvConfig(uid, params_dir=Path(params_dir))
+    activity = env_kwargs.get("activity", "off")
+    misspec = env_kwargs.get("misspec")
+    stayer_fraction = env_kwargs.get("stayer_fraction")
+    cfg = EnvConfig(
+        uid,
+        params_dir=Path(params_dir),
+        activity=activity,
+        misspec=misspec,
+        activity_stayer_fraction=stayer_fraction,
+    )
     nweek = int(cfg.nweek)
     lo_cae, hi_cae = (float(x) for x in cfg.limits_CAE)
+    roll_kw = dict(activity=activity, misspec=misspec, stayer_fraction=stayer_fraction)
 
     if zero_totals is None:
-        zero_totals, zero_weekly = _rollouts(uid, params_dir, spec, "zero", nweek)
+        zero_totals, zero_weekly = _rollouts(
+            uid, params_dir, spec, "zero", nweek, **roll_kw
+        )
         zero_sat = _clip_rate(zero_weekly, lo_cae, hi_cae)
     else:
         zero_totals = np.asarray(zero_totals, dtype=float)
@@ -1184,7 +1202,9 @@ def _eval_user(task: tuple) -> dict:
     arms: dict[str, dict] = {}
 
     def add_arm(label: str, policy: str, **kw) -> None:
-        totals, weekly = _rollouts(uid, params_dir, spec, policy, nweek, **kw)
+        totals, weekly = _rollouts(
+            uid, params_dir, spec, policy, nweek, **roll_kw, **kw
+        )
         arms[label] = {
             "mean_total": float(np.mean(totals)),
             "delta": float(np.mean(totals) - np.mean(zero_totals)),
@@ -1242,16 +1262,38 @@ def evaluate(
     zero_cache: dict[int, list[float]] | None = None,
     n_jobs: int | None = None,
     proxy_to_true: float = 1.0,
+    activity: str = "off",
+    misspec: str | None = None,
+    stayer_fraction: float | None = None,
+    log_activity: bool = True,
 ) -> dict:
     """Monte-Carlo the proxy STE for every participant in ``params_dir``."""
+    if log_activity:
+        from testbed import log_ste_activity_off, resolve_testbed_spec
+
+        requested = resolve_testbed_spec(
+            params_dir,
+            activity=activity,
+            stayer_fraction=stayer_fraction,
+            misspec=misspec,
+            warn_stayer=False,
+        )
+        if activity == "off":
+            log_ste_activity_off(requested)
     spec_kwargs = asdict(spec)
     spec_kwargs["policy_grid"] = tuple(spec.policy_grid)
+    env_kwargs = {
+        "activity": activity,
+        "misspec": misspec,
+        "stayer_fraction": stayer_fraction,
+    }
     tasks = [
         (
             int(uid),
             str(params_dir),
             spec_kwargs,
             None if zero_cache is None else zero_cache.get(int(uid)),
+            env_kwargs,
         )
         for uid in user_ids
     ]
@@ -1278,6 +1320,9 @@ def evaluate(
         )
     return {
         "params_dir": str(params_dir),
+        "activity": activity,
+        "misspec": misspec if misspec is not None else "none",
+        "stayer_fraction": stayer_fraction,
         "proxy_to_true": float(proxy_to_true),
         "mean_ste": float(np.mean(finite)) if finite.size else float("nan"),
         "median_ste": float(np.median(finite)) if finite.size else float("nan"),
@@ -2570,6 +2615,9 @@ def build_parser() -> argparse.ArgumentParser:
                 "`tune_ste.py ratio` stored in <folder>/ste_tuning.json."
             ),
         )
+        from testbed import add_testbed_arguments
+
+        add_testbed_arguments(sp)
         sp.add_argument("--report", default=None)
         sp.add_argument(
             "--dqn-source-dir",
