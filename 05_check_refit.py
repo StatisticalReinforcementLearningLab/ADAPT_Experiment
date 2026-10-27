@@ -381,12 +381,20 @@ def stage_ste(report: Report) -> None:
         report.line("FAIL", "env_para_vanilla activity_process has no stayer_variants")
         return
     report.line("PASS", "env_para_vanilla has activity_process")
-    from testbed import STE_PARAM_DIRS
+    from testbed import STE_LAYER1_DIRS, STE_UNIFORM_DIRS
 
-    for name in STE_PARAM_DIRS:
+    uniform = set(STE_UNIFORM_DIRS)
+    for name in STE_LAYER1_DIRS:
         path = ROOT / name / "generator_calibration.json"
         if not path.is_file():
-            report.line("FAIL", f"{name}/generator_calibration.json is missing")
+            if name in uniform:
+                report.line("FAIL", f"{name}/generator_calibration.json is missing")
+            else:
+                report.line(
+                    "WARN",
+                    f"{name} is missing (unattainable Layer-1 folders are ok; "
+                    "uniform folders are required)",
+                )
             continue
         block = json.loads(path.read_text(encoding="utf-8")).get("activity_process")
         if not isinstance(block, dict):

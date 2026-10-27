@@ -1,7 +1,7 @@
 """Build STE-tuned environment variants from ``env_para_vanilla``.
 
-The scientific design (three-variant protocol)
-==============================================
+The scientific design (Layer 1, seven environments)
+===================================================
 The testbed's causal chain, per week ``w`` (all coefficients per-participant,
 fitted from the ADAPT MRT)::
 
@@ -9,25 +9,48 @@ fitted from the ADAPT MRT)::
     A ──(−)──> ME (PV, FW, PJ)      ──(+)──> E_{w+1} ──(+)──> MY_{w+1} ──> Y_{w+2}
                                      (ME→E)             (E→MY)
 
-Variants (``protocol`` writes three folders; every search starts from
-vanilla). The 2026-10-07 vanilla refit has a confirmed STE of 0.473
-(DiscreteCQL, exp 1), so vanilla is the middle scenario:
+Every Layer-1 folder is tuned from ``env_para_vanilla`` with activity off
+(no gaps) and must pass the stability check (|g^E|, |g^Y| < 1 under never-
+and always-send). Default knob is ``action``. Do not run these calibrations
+until the 47-user refit is on disk.
 
-1. **vanilla** — the fitted environment, untouched (STE ≈ 0.47).
-2. **STE 0.2** — knob ``benefit``: *scale* the direct action effects A→MY
-   by κ < 1 (keeps each user's A×wear / A×interact / A×steps CATE ratios).
-   The never-send arm and σ_i are exactly vanilla's.
-3. **STE 0.2, burden** — knob ``burden_path`` on vanilla
-   (``<prefix>0.2_burden``): the same STE reached through engagement
-   burden. Fixed transmissions (centered E→MY ``+κ_e``, default 0.3;
-   ME→E floored at 0.05) and a search over the A→ME mains ``−κ``.
-4. **STE 0.8** — knob ``benefit`` with κ > 1; if that misses or is
-   unstable, ``benefit_foursc`` (A→MY ×κ plus a centered fourSC→Y shift
-   ``c(κ−1)``, capped).
+The 2026-10-07 vanilla refit (28 participants) had a confirmed STE of 0.473
+(DiscreteCQL, exp 1). Re-measure after the 47-user refit; that number is
+not the Layer-1 middle target.
 
-All three targets but the burden variant move one dial, the size of the
-direct effect, so differences between them are differences in effect size
-rather than in mechanism.
+Uniform (one dial, same mechanism) — Layers 2 and 3 use only these three::
+
+    env_para_ste0.2 / 0.5 / 0.8
+    knob ``action``: scale the whole action block (A→MY and A→ME, mains
+    and interactions) by κ.
+
+Benefit pathway::
+
+    env_para_ste0.2_benefit / env_para_ste0.8_benefit
+    knob ``benefit_path``: scale A→MY (mains and interactions) by κ and
+    the mediator→CAE coefficients α^Y_SC and α^Y_AA by κ. Alpha changes
+    use ``CENTERED_COEFS`` so never-send mean CAE is unchanged. Burden
+    pathway untouched.
+
+Burden pathway::
+
+    env_para_ste0.2_burden
+    knob ``burden_path``: A→ME mains −κ, ME→E floored at 0.05, E→MY
+    +0.3 fixed (centered).
+    env_para_ste0.8_burden
+    knob ``burden``: scale A→ME mains and interactions by κ ≤ 1. First
+    scan down to κ = 0; if the maximum attainable STE is below 0.8, do
+    not write the folder — record the maximum and report it.
+
+``TUNE_PHASE=layer1`` runs all seven, writes the attainable folders,
+submits confirmation DiscreteCQL jobs, and copies vanilla's
+``activity_process`` into every written folder. Each folder's
+``ste_tuning.json`` records the knob, κ, target, proxy STE, and later
+the confirmed STE and ratio (``TUNE_PHASE=ratio``).
+
+Layers 2 and 3 (activity on, stayers, misspec A–D) attach only to the
+three uniform folders. Catalog: Layer 1 = 7, Layer 2 = 9, Layer 3 = 12,
+total 28.
 
 Shift vs scale — the rule used throughout
 -----------------------------------------
@@ -46,7 +69,7 @@ coefficient and amplifies wrong signs. In the 2026-10-07 vanilla refit
 for every participant on PV occurrence (mean −1.06) and FW (mean −0.30), and
 for 23/28 on the morning PJ main; E→fourSC is positive for only 10/28 (mean −0.08, min −0.91);
 E→antic is positive for 27/28 but small (mean 0.025); fourSC→Y has mean 0.10
-with 1/28 negative. *Scale*
+with 1/28 negative (re-check these counts after the 47-user refit). *Scale*
 (θ ← κθ) when the goal is to **amplify structure you want to keep** —
 A→MY's state-dependent CATEs. Never shift interaction terms; shifts belong on
 main effects only.
@@ -71,8 +94,8 @@ recalibrate with ``--proxy-to-true from:<folder>`` (solver then targets
 
 Commands
 --------
-    protocol    STE 0.2 via burden_path (then benefit_foursc fallback),
-                then benefit_foursc → 0.5/0.8; all from vanilla
+    layer1      the seven Layer-1 environments (``--dry-run`` lists them)
+    protocol    previous 3-variant protocol (superseded by layer1)
     diagnose    E_w and CAE loop gains (no simulation)
     eval        measure proxy STE of one parameter folder
     scan        proxy STE vs a grid of ``kappa``
@@ -80,45 +103,36 @@ Commands
     calibrate   root-find ``kappa`` per target and write the folder(s)
     ratio       after confirmation: store confirmed/proxy STE of a folder
 
-Cluster::
+Cluster (after the 47-user refit; do not run now)::
 
-    sbatch --export=ALL,TUNE_PHASE=protocol run_tune_ste.sh
-
-or stage by stage::
-
-    sbatch --export=ALL,TUNE_KNOB=burden_path,TUNE_TARGETS=0.2 run_tune_ste.sh
-    sbatch --export=ALL,TUNE_KNOB=benefit_foursc,TUNE_TARGETS="0.5 0.8" run_tune_ste.sh
+    sbatch --export=ALL,TUNE_PHASE=layer1 run_tune_ste.sh
+    python tune_ste.py layer1 --dry-run
 
 Knob reference (``--knob``)
 ---------------------------
+    action    default. Scale the whole action block (A→MY and A→ME,
+              mains and interactions) by κ. Uniform Layer-1 folders.
+    benefit_path
+              A→MY ×κ and α^Y_SC / α^Y_AA ×κ, alphas centered.
+              Burden untouched. κ=1 is a no-op.
     burden_path
-              Whole burden chain vs vanilla, but only A→ME is searched:
-              A→ME mains −κ (all mediators, after ME→E is floored);
-              ME→E ← max(ME→E, 0.05); E→MY +κ_e (default 0.3, fixed).
-              Never-send σ_i does not move with the search κ.
-    fatigue (alias burden_shift)
-              A→ME mains −κ (shift), per mediator only if that user's
-              fitted ME→E > ADAPR_FATIGUE_ME_TO_E_MIN (default 0.05);
-              E_w→fourSC / E_w→antic +κ_e (shift, κ_e =
-              ADAPR_FATIGUE_E_SHIFT, default 0.3, not tied to κ). Search
-              κ ≤ ADAPR_FATIGUE_KAPPA_MAX (default 2). Kept for scans /
-              apply; protocol no longer writes a κ=2 fatigue folder.
-    benefit_foursc
-              A→MY ×κ (scale) and fourSC_ewma→Y += c(κ−1), c =
-              ADAPR_BENEFIT_FOURSC_SHIFT (0.05) capped at _CAP (0.20).
-              κ=1 is a no-op; κ<1 lowers STE, κ>1 raises it.
-    action / benefit / burden
-              pure multiplicative dials on A→{MY,ME} — cannot create a
-              sign-definite effect from mixed-sign fits; kept for scans.
-    foursc_to_y_shift
-              +κ on fourSC_ewma→Y alone. Caps near proxy 0.36 (CAE clips;
-              job 41048118) — not a route to 0.5/0.8.
-    my_to_y / foursc_to_y / me_to_e / e_to_my
-              structural single-pathway scales, for diagnostics only.
+              A→ME mains −κ; ME→E floored at 0.05; E→MY +0.3 fixed.
+              env_para_ste0.2_burden.
+    burden    A→ME mains and interactions ×κ. env_para_ste0.8_burden
+              scans κ∈[0,1] first.
+    benefit / benefit_foursc / fatigue (alias burden_shift)
+              kept for scans and the old protocol; not Layer 1.
+    foursc_to_y_shift / my_to_y / foursc_to_y / me_to_e / e_to_my
+              diagnostics only.
 
-Recorded dead ends: burden_shift cannot reach STE 0.2 on the *old* vanilla
-(floor ≈0.27, job 40926808) — re-check after a refit; foursc_to_y_shift
-cannot reach 0.5/0.8 (job 41048118).
+Dead ends that still apply after the refit (re-check on 47 users)
+----------------------------------------------------------------
+    * burden_shift / A→ME-only shift could not reach STE 0.2 on the old
+      vanilla (floor ≈0.27, job 40926808).
+    * foursc_to_y_shift caps near proxy 0.36 (CAE clips; job 41048118)
+      — not a route to 0.5/0.8.
+    * burden (A→ME ×κ, κ∈[0,1]) may not reach STE 0.8; layer1 scans
+      first and skips the folder if the max is below target.
 
 Guarantees and guards
 ---------------------
@@ -423,6 +437,15 @@ def _benefit_foursc_multipliers(k: float) -> dict[str, float]:
 _BENEFIT_FOURSC_APPLY = {"A_to_MY": "multiply", "FOURSC_to_Y": "subtract"}
 
 
+def _benefit_path_multipliers(k: float) -> dict[str, float]:
+    """A→MY and α^Y_SC / α^Y_AA ×κ. Alpha changes are centered at write time."""
+    return {
+        "A_to_MY": float(k),
+        "FOURSC_to_Y": float(k),
+        "ANTIC_to_Y": float(k),
+    }
+
+
 @dataclass(frozen=True)
 class KnobSpec:
     name: str
@@ -459,15 +482,28 @@ KNOBS: dict[str, KnobSpec] = {
             "negative or near zero and 'action' therefore cannot reach the target."
         ),
     ),
+    "benefit_path": KnobSpec(
+        "benefit_path",
+        _benefit_path_multipliers,
+        zero_is_null=False,
+        sigma_invariant=False,
+        doc=(
+            "Scale A→MY (mains and interactions) and the mediator→CAE "
+            "coefficients α^Y_SC and α^Y_AA by κ. Alpha changes use "
+            "CENTERED_COEFS so never-send mean CAE is unchanged. The "
+            "burden pathway is untouched. κ=1 is a no-op."
+        ),
+    ),
     "burden": KnobSpec(
         "burden",
         lambda k: {"A_to_ME": k},
         zero_is_null=False,
         sigma_invariant=True,
         doc=(
-            "Multiply action -> engagement coefficients by kappa. Does not "
-            "flip sign: fitted A→ME is often positive, so kappa>1 makes "
-            "sending raise PV/FW/PJ more, not less."
+            "Scale A→ME mains and interactions by κ. Benefit pathway "
+            "untouched. Layer 1 uses κ ≤ 1 for env_para_ste0.8_burden "
+            "(scan down to 0 first; do not write the folder if the max "
+            "attainable STE is below 0.8)."
         ),
     ),
     "burden_path": KnobSpec(
@@ -584,6 +620,31 @@ KNOBS: dict[str, KnobSpec] = {
 # PV-hurdle action translation changed from ratio to additive on the same
 # date. Default E→MY addend is FATIGUE_E_SHIFT_DEFAULT, not κ.
 KNOBS["burden_shift"] = KNOBS["fatigue"]
+
+# Layer 1: seven environments, all from env_para_vanilla, activity off.
+# Layers 2/3 use only the three uniform (action-knob) folders.
+LAYER1_SPECS: tuple[dict, ...] = (
+    {"folder": "env_para_ste0.2", "target": 0.2, "knob": "action",
+     "suffix": "", "mode": "calibrate"},
+    {"folder": "env_para_ste0.5", "target": 0.5, "knob": "action",
+     "suffix": "", "mode": "calibrate"},
+    {"folder": "env_para_ste0.8", "target": 0.8, "knob": "action",
+     "suffix": "", "mode": "calibrate"},
+    {"folder": "env_para_ste0.2_benefit", "target": 0.2, "knob": "benefit_path",
+     "suffix": "_benefit", "mode": "calibrate", "kappa0": 0.5},
+    {"folder": "env_para_ste0.8_benefit", "target": 0.8, "knob": "benefit_path",
+     "suffix": "_benefit", "mode": "calibrate", "kappa0": 1.5},
+    {"folder": "env_para_ste0.2_burden", "target": 0.2, "knob": "burden_path",
+     "suffix": "_burden", "mode": "calibrate", "kappa0": 0.3},
+    {"folder": "env_para_ste0.8_burden", "target": 0.8, "knob": "burden",
+     "suffix": "_burden", "mode": "scan_then_calibrate", "kappa_hi": 1.0,
+     "scan_kappas": (1.0, 0.75, 0.5, 0.25, 0.1, 0.0)},
+)
+
+
+def layer1_jobs() -> tuple[dict, ...]:
+    """The seven Layer-1 calibrations (uniform / benefit / burden)."""
+    return LAYER1_SPECS
 
 
 def knob_sigma_invariant(knob: KnobSpec) -> bool:
@@ -1500,6 +1561,7 @@ _KNOB_SIGN_STORY: dict[str, tuple[str, ...]] = {
         "E->fourSC >= 0", "E->antic >= 0",
     ),
     "benefit_foursc": ("fourSC->Y >= 0", "antic->Y >= 0"),
+    "benefit_path": ("fourSC->Y >= 0", "antic->Y >= 0"),
 }
 
 
@@ -2114,6 +2176,12 @@ def cmd_calibrate(args) -> None:
         kappa_hi = min(kappa_hi, float(cap))
         if kappa_hi <= 0.0:
             raise SystemExit("no non-negative kappa is feasible; aborting.")
+    user_hi = getattr(args, "kappa_hi", None)
+    if user_hi is not None:
+        print(f"search hi override: kappa <= {float(user_hi):g}")
+        kappa_hi = min(kappa_hi, float(user_hi))
+        if kappa_hi <= 0.0:
+            raise SystemExit("no non-negative kappa is feasible; aborting.")
 
     zero_cache: dict[int, list[float]] | None = None
     last: dict[float, dict] = {}
@@ -2400,6 +2468,7 @@ def _stage_args(args, **overrides) -> argparse.Namespace:
         knob=None,
         targets=None,
         kappa0=None,
+        kappa_hi=None,
     )
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -2445,6 +2514,169 @@ def _calibrate_status(stage_args) -> int:
     except SystemExit as exc:
         code = exc.code if isinstance(exc.code, int) else 1
         return 0 if code is None else int(code)
+
+
+def _scan_mean_ste(
+    base_dir: Path,
+    user_ids: Sequence[int],
+    spec,
+    knob: KnobSpec,
+    kappas: Sequence[float],
+    scratch: Path,
+    *,
+    n_jobs: int | None,
+    proxy_to_true: float,
+) -> list[tuple[float, float]]:
+    """Proxy STE along a kappa grid. Returns ``[(kappa, mean_ste), ...]``."""
+    zero_cache = None
+    rows: list[tuple[float, float]] = []
+    for kappa in kappas:
+        write_knob_params(base_dir, scratch, user_ids, knob, float(kappa))
+        result = evaluate(
+            scratch,
+            user_ids,
+            spec,
+            zero_cache=zero_cache,
+            n_jobs=n_jobs,
+            proxy_to_true=proxy_to_true,
+        )
+        if zero_cache is None and knob_sigma_invariant(knob):
+            zero_cache = zero_cache_from(result)
+        rows.append((float(kappa), float(result["mean_ste"])))
+        print(
+            f"  kappa={float(kappa):8.4f}  mean STE={result['mean_ste']:7.4f}",
+            flush=True,
+        )
+    return rows
+
+
+def cmd_layer1(args) -> None:
+    """Calibrate the seven Layer-1 folders from vanilla (activity off).
+
+    Writes the folders that are attainable, records unattainable scans
+    (``env_para_ste0.8_burden`` if the max STE on κ∈[0,1] is below 0.8),
+    and lists rewritten folders for confirmation DiscreteCQL jobs. Each
+    write goes through ``write_scaled_params``, which copies vanilla's
+    ``activity_process`` block (N1).
+    """
+    jobs = layer1_jobs()
+    if getattr(args, "dry_run", False):
+        print("LAYER1 dry run (7 environments, all from env_para_vanilla, activity off)")
+        for job in jobs:
+            extra = (
+                "  scan to kappa=0 first; write only if max STE >= target"
+                if job["mode"] == "scan_then_calibrate"
+                else ""
+            )
+            print(
+                f"  {job['folder']:28}  knob={job['knob']:13}  "
+                f"target={job['target']}{extra}"
+            )
+        return
+
+    scratch = Path(args.scratch)
+    stamps = {}
+    wanted: list[Path] = []
+    for job in jobs:
+        dest = calibrated_out_dir(args.out_prefix, job["target"], job["suffix"])
+        wanted.append(dest)
+        stamps[dest] = _report_stamp(dest)
+
+    def banner(text: str) -> None:
+        print("\n" + "=" * 70 + f"\nLAYER1 {text}\n" + "=" * 70, flush=True)
+
+    unattainable: list[dict] = []
+    for job, dest in zip(jobs, wanted):
+        if job["mode"] == "scan_then_calibrate":
+            banner(
+                f"{dest.name}: scan knob {job['knob']} down to 0 "
+                f"before targeting {job['target']}"
+            )
+            base_dir = Path(args.params_dir).expanduser().resolve()
+            user_ids = load_user_ids(base_dir)
+            require_fitted_blocks(base_dir, user_ids)
+            spec = make_spec(args)
+            require_dqn_checkpoints(spec, user_ids, Path(args.dqn_source_dir))
+            knob = KNOBS[job["knob"]]
+            scan_scratch = Path(str(scratch) + f"_{dest.name}_scan")
+            grid = job.get("scan_kappas") or (1.0, 0.5, 0.0)
+            rows = _scan_mean_ste(
+                base_dir, user_ids, spec, knob, grid, scan_scratch,
+                n_jobs=args.jobs, proxy_to_true=args.proxy_to_true,
+            )
+            _cleanup_scratch(scan_scratch, keep=getattr(args, "keep_scratch", False))
+            best_k, best_ste = max(rows, key=lambda r: r[1])
+            print(
+                f"  scan max proxy STE {best_ste:.4f} at kappa={best_k:g} "
+                f"(target {job['target']})",
+                flush=True,
+            )
+            if best_ste + float(args.tol) < float(job["target"]):
+                payload = {
+                    "folder": dest.name,
+                    "knob": job["knob"],
+                    "target_mean_ste": float(job["target"]),
+                    "written": False,
+                    "reason": "max attainable proxy STE below target",
+                    "max_mean_ste": float(best_ste),
+                    "max_kappa": float(best_k),
+                    "scan": [{"kappa": k, "mean_ste": s} for k, s in rows],
+                }
+                logs = PROJECT_ROOT / "logs"
+                logs.mkdir(exist_ok=True)
+                report_path = logs / f"layer1_{dest.name}_unattainable.json"
+                write_report(report_path, payload)
+                print(
+                    f"  do not write {dest.name}: max attainable STE "
+                    f"{best_ste:.4f} < {job['target']} (recorded {report_path})"
+                )
+                unattainable.append(payload)
+                continue
+            banner(f"{dest.name}: calibrate {job['knob']} -> {job['target']}")
+            _calibrate_status(_stage_args(
+                args, knob=job["knob"], targets=[job["target"]],
+                kappa0=float(best_k),
+                kappa_hi=job.get("kappa_hi"),
+                out_suffix=job["suffix"],
+                scratch=str(scratch) + f"_{dest.name}",
+            ))
+            continue
+
+        banner(
+            f"{dest.name}: {job['knob']} on {Path(args.params_dir).name} "
+            f"-> target {job['target']}"
+        )
+        _calibrate_status(_stage_args(
+            args, knob=job["knob"], targets=[job["target"]],
+            kappa0=float(job.get("kappa0", getattr(args, "kappa0", 1.0) or 1.0)),
+            kappa_hi=job.get("kappa_hi"),
+            out_suffix=job["suffix"],
+            scratch=str(scratch) + f"_{dest.name}",
+        ))
+
+    written_dirs = [d for d in wanted if _written_this_run(d, stamps[d])]
+    written_list = Path(str(scratch) + "_written")
+    written_list.write_text("".join(f"{d}\n" for d in written_dirs), encoding="utf-8")
+    print("\nlayer1 written: " + (", ".join(d.name for d in written_dirs) or "(none)"))
+    if unattainable:
+        for row in unattainable:
+            print(
+                f"  unattainable {row['folder']}: max proxy STE "
+                f"{row['max_mean_ste']:.4f} < {row['target_mean_ste']}"
+            )
+    missing = [d.name for d in wanted if d not in written_dirs]
+    if missing and not unattainable:
+        print(f"layer1 incomplete; missing {missing}.")
+        raise SystemExit(2 if written_dirs else 1)
+    if missing and unattainable:
+        expected_missing = {row["folder"] for row in unattainable}
+        unexpected = [n for n in missing if n not in expected_missing]
+        if unexpected:
+            print(f"layer1 incomplete; missing {unexpected}.")
+            raise SystemExit(2 if written_dirs else 1)
+        print("layer1 complete (some folders unattainable; confirmation CQL on written folders only)")
+        return
+    print("layer1 complete")
 
 
 def cmd_protocol(args) -> None:
@@ -2717,6 +2949,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     sp.add_argument("--kappa0", type=float, default=1.0)
+    sp.add_argument(
+        "--kappa-hi",
+        type=float,
+        default=None,
+        help="Optional search-hi cap (in addition to the stability cap).",
+    )
     sp.add_argument("--tol", type=float, default=0.02)
     sp.add_argument("--max-iter", type=int, default=10)
     sp.add_argument(
@@ -2733,10 +2971,36 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_calibrate)
 
     sp = sub.add_parser(
+        "layer1",
+        help=(
+            "Seven Layer-1 environments from vanilla (action / benefit_path / "
+            "burden_path / burden). Activity off. Use --dry-run to list them."
+        ),
+    )
+    common(sp, needs_knob=True)
+    sp.add_argument("--out-prefix", default="env_para_ste")
+    sp.add_argument("--out-suffix", default="")
+    sp.add_argument("--overwrite", action="store_true")
+    sp.add_argument("--kappa0", type=float, default=1.0)
+    sp.add_argument("--tol", type=float, default=0.02)
+    sp.add_argument("--max-iter", type=int, default=10)
+    sp.add_argument(
+        "--require-stable",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    sp.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the seven Layer-1 targets and exit (no calibration).",
+    )
+    sp.set_defaults(func=cmd_layer1)
+
+    sp = sub.add_parser(
         "protocol",
         help=(
-            "STE 0.2 via burden_path (benefit_foursc fallback), then "
-            "benefit_foursc to 0.5/0.8; all from vanilla"
+            "Previous 3-variant protocol (superseded by layer1). "
+            "STE 0.2 via benefit + burden_path, then benefit to 0.8."
         ),
     )
     common(sp, needs_knob=True)  # --knob is accepted but ignored (fixed per stage)

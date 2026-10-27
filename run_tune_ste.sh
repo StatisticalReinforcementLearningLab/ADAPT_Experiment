@@ -45,17 +45,16 @@
 #TUNE_PROXY_TO_TRUE=from:env_para_ste<t>,TUNE_OVERWRITE=1 run_tune_ste.sh
 #   5. validate again (and ratio, to record the final confirmed STE)
 #
-# Protocol from vanilla (vanilla itself is the middle scenario, STE ≈ 0.47):
-#   STE 0.2         = benefit (A→MY ×κ, κ < 1)        -> env_para_ste0.2
-#   STE 0.2 burden  = burden_path (A→ME −κ, ME→E floor, centered E→MY)
-#                                                      -> env_para_ste0.2_burden
-#   STE 0.8         = benefit (κ > 1), else benefit_foursc -> env_para_ste0.8
-#   Needs --overwrite (TUNE_OVERWRITE=1) if folders from the old protocol
-#   are still on disk.
-#   sbatch --export=ALL,TUNE_PHASE=protocol,TUNE_OVERWRITE=1 run_tune_ste.sh
+# Layer 1 from vanilla (activity off; after the 47-user refit, not now):
+#   uniform     action          -> env_para_ste0.2 / 0.5 / 0.8
+#   benefit     benefit_path    -> env_para_ste0.2_benefit / ste0.8_benefit
+#   burden      burden_path     -> env_para_ste0.2_burden
+#               burden (κ≤1)    -> env_para_ste0.8_burden if scan to 0 reaches 0.8
+#   sbatch --export=ALL,TUNE_PHASE=layer1 run_tune_ste.sh
+#   python tune_ste.py layer1 --dry-run
 #
 # Overrides (sbatch --export=ALL,VAR=value,...):
-#   TUNE_PHASE        diagnose|eval|scan|apply|calibrate|protocol|validate|ratio  default calibrate
+#   TUNE_PHASE        diagnose|eval|scan|apply|calibrate|layer1|protocol|validate|ratio  default calibrate
 #   TUNE_PARAMS_DIR   source fit to rescale                    default env_para_vanilla
 #   TUNE_KNOB         burden_path|benefit_foursc|fatigue|... (burden_shift = fatigue)
 #   TUNE_STE02_TARGET     protocol low-STE target              default 0.2
@@ -91,14 +90,13 @@
 #   TUNE_SCRATCH      working dir for candidate params     default
 #                     .ste_tune_scratch_<knob>_<jobid>
 #
-# Protocol writes env_para_ste0.2/, env_para_ste0.5/, env_para_ste0.8/
-# when those targets are hit and every participant's E_w and CAE loops
-# are stable. There is no env_para_ste_fatigue folder. The *proxy* STE
-# is transferred vanilla CQL vs never-suggest, Δ clipped at 0; that is
-# a lower bound on the clipped oracle. Confirmation uses the same clip.
-# Each folder is a drop-in parameter set plus ste_tuning.json.
-# On success the script then submits one run_ste.sh array per folder
-# (STE_EXP=ste0.2, ...) so DiscreteCQL can measure confirmation STE.
+# layer1 writes the attainable Layer-1 folders (7 targets; 0.8_burden is
+# skipped if the κ∈[0,1] scan stays below 0.8). Every written folder
+# carries vanilla's activity_process and a ste_tuning.json (knob, κ,
+# target, proxy STE; ratio fills in confirmed STE later). The *proxy* STE
+# is transferred vanilla CQL vs never-suggest, Δ clipped at 0. Confirmation
+# uses the same clip. On success the script submits one run_ste.sh array
+# per written folder.
 
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")}"
@@ -121,6 +119,7 @@ export MPLBACKEND=Agg
 export MPLCONFIGDIR="${SLURM_SUBMIT_DIR:-$PWD}/.matplotlib"
 
 TUNE_PHASE="${TUNE_PHASE:-calibrate}"
+TUNE_DRY_RUN="${TUNE_DRY_RUN:-0}"
 TUNE_PARAMS_DIR="${TUNE_PARAMS_DIR:-env_para_vanilla}"
 # STE tuning always uses activity off (no-gap).
 export ADAPR_ACTIVITY=off
@@ -356,6 +355,58 @@ if [[ "${TUNE_OVERWRITE}" == "1" ]]; then
 fi
 
 case "${TUNE_PHASE}" in
+  layer1)
+    STABLE_FLAG=(--require-stable)
+    if [[ "${TUNE_REQUIRE_STABLE}" == "0" ]]; then
+      STABLE_FLAG=(--no-require-stable)
+    fi
+    DRY_FLAG=()
+    if [[ "${TUNE_DRY_RUN}" == "1" ]]; then
+      DRY_FLAG=(--dry-run)
+    fi
+    set +e
+    "${PY}" tune_ste.py layer1 "${COMMON_ARGS[@]}" \
+      --out-prefix "${TUNE_OUT_PREFIX}" \
+      --scratch "${TUNE_SCRATCH}" \
+      --tol "${TUNE_TOL}" \
+      --max-iter "${TUNE_MAX_ITER}" \
+      "${STABLE_FLAG[@]}" \
+      "${OVERWRITE_FLAG[@]+"${OVERWRITE_FLAG[@]}"}" \
+      "${DRY_FLAG[@]+"${DRY_FLAG[@]}"}"
+    layer1_status=$?
+    set -e
+    if [[ "${TUNE_DRY_RUN}" == "1" ]]; then
+      exit "${layer1_status}"
+    fi
+    if [[ "${TUNE_VALIDATE}" != "1" ]]; then
+      echo "TUNE_VALIDATE=0: skipping confirmation DiscreteCQL STE jobs."
+      exit "${layer1_status}"
+    fi
+    if ! command -v sbatch >/dev/null 2>&1; then
+      echo "WARNING: sbatch is not available here; written folders (if any) are on disk."
+      exit "${layer1_status}"
+    fi
+    if [[ "${layer1_status}" -eq 0 || "${layer1_status}" -eq 2 ]]; then
+      WRITTEN_LIST="${TUNE_SCRATCH}_written"
+      LAYER1_DIRS=()
+      if [[ -f "${WRITTEN_LIST}" ]]; then
+        while IFS= read -r line; do
+          [[ -n "${line}" ]] && LAYER1_DIRS+=("${line}")
+        done < "${WRITTEN_LIST}"
+      fi
+      if [[ "${#LAYER1_DIRS[@]}" -eq 0 ]]; then
+        echo "No folders rewritten this run; not submitting confirmation jobs."
+      else
+        echo "Submitting confirmation DiscreteCQL jobs for Layer-1 folders rewritten this run."
+        submit_validation_jobs "${LAYER1_DIRS[@]}" || {
+          [[ "${layer1_status}" -eq 0 ]] && exit 1
+        }
+      fi
+    else
+      echo "layer1 failed (exit ${layer1_status}); not submitting confirmation jobs." >&2
+    fi
+    exit "${layer1_status}"
+    ;;
   protocol)
     STABLE_FLAG=(--require-stable)
     if [[ "${TUNE_REQUIRE_STABLE}" == "0" ]]; then
@@ -521,16 +572,18 @@ case "${TUNE_PHASE}" in
     if [[ -n "${TUNE_VALIDATE_DIR:-}" ]]; then
       RATIO_DIRS=("${TUNE_VALIDATE_DIR}")
     else
-      for target in ${TUNE_TARGETS}; do
-        RATIO_DIRS+=("${TUNE_OUT_PREFIX}${target}${TUNE_OUT_SUFFIX}")
-      done
+      RATIO_DIRS=(
+        "${TUNE_OUT_PREFIX}0.2" "${TUNE_OUT_PREFIX}0.5" "${TUNE_OUT_PREFIX}0.8"
+        "${TUNE_OUT_PREFIX}0.2_benefit" "${TUNE_OUT_PREFIX}0.8_benefit"
+        "${TUNE_OUT_PREFIX}0.2_burden" "${TUNE_OUT_PREFIX}0.8_burden"
+      )
     fi
     for dir in "${RATIO_DIRS[@]}"; do
       "${PY}" tune_ste.py ratio --out-dir "${dir}" --tol "${TUNE_TOL}" || true
     done
     ;;
   *)
-    echo "ERROR: unknown TUNE_PHASE=${TUNE_PHASE} (use diagnose, eval, scan, apply, calibrate, validate, or ratio)" >&2
+    echo "ERROR: unknown TUNE_PHASE=${TUNE_PHASE} (use diagnose, eval, scan, apply, calibrate, layer1, protocol, validate, or ratio)" >&2
     exit 1
     ;;
 esac

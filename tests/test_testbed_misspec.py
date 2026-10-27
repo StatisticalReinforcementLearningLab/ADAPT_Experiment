@@ -12,7 +12,7 @@ import experiment
 from misspec import DECAY_C, MISSPEC_C_BLURB, decay_c, decay_m, draw_confounder
 from testbed import (
     MISSPEC_BLURBS,
-    catalog_24,
+    catalog,
     log_ste_activity_off,
     resolve_testbed_spec,
     results_suffix,
@@ -40,19 +40,23 @@ def _traj(oenv):
     }
 
 
-def test_catalog_has_24_distinct_folder_names():
-    rows = catalog_24(ROOT)
-    assert len(rows) == 24
+def test_catalog_has_28_distinct_folder_names():
+    rows = catalog(ROOT)
+    assert len(rows) == 28
     suffixes = [r.suffix for r in rows]
-    assert len(set(suffixes)) == 24
+    assert len(set(suffixes)) == 28
     roots = [r.results_root for r in rows]
-    assert len(set(roots)) == 24
+    assert len(set(roots)) == 28
     layer1 = [r for r in rows if r.layer == 1]
     layer2 = [r for r in rows if r.layer == 2]
     layer3 = [r for r in rows if r.layer == 3]
-    assert len(layer1) == 3 and all(r.activity == "off" and r.misspec == "none" for r in layer1)
+    assert len(layer1) == 7 and all(r.activity == "off" and r.misspec == "none" for r in layer1)
     assert len(layer2) == 9 and all(r.activity == "on" and r.misspec == "none" for r in layer2)
     assert len(layer3) == 12 and all(r.activity == "on" and r.stayer_fraction == 0.0 for r in layer3)
+    layer2_dirs = {r.params_dir.name for r in layer2}
+    layer3_dirs = {r.params_dir.name for r in layer3}
+    assert layer2_dirs == {"env_para_ste0.2", "env_para_ste0.5", "env_para_ste0.8"}
+    assert layer3_dirs == layer2_dirs
 
 
 def test_results_suffix_changes_with_each_axis():

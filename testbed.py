@@ -1,6 +1,6 @@
 """Testbed spec: params dir, activity, stayer fraction, and misspecification.
 
-A testbed is the four-tuple used by the 24-environment catalog. The same
+A testbed is the four-tuple used by the 28-environment catalog. The same
 object is read from ``ADAPR_*`` environment variables or CLI flags, written
 into run metadata, and turned into a results-folder suffix so two specs
 never share an output directory.
@@ -27,6 +27,16 @@ ACTIVITY_CHOICES = ("on", "off")
 MISSPEC_CHOICES = ("none", "A", "B", "C", "D")
 STAYER_CHOICES = (0.0, 0.25, 0.5)
 STE_PARAM_DIRS = ("env_para_ste0.2", "env_para_ste0.5", "env_para_ste0.8")
+STE_UNIFORM_DIRS = STE_PARAM_DIRS
+STE_LAYER1_DIRS = (
+    "env_para_ste0.2",
+    "env_para_ste0.5",
+    "env_para_ste0.8",
+    "env_para_ste0.2_benefit",
+    "env_para_ste0.8_benefit",
+    "env_para_ste0.2_burden",
+    "env_para_ste0.8_burden",
+)
 
 _TRUE = {"1", "true", "yes", "on"}
 _FALSE = {"0", "false", "no", "off"}
@@ -229,27 +239,35 @@ def add_testbed_arguments(parser: argparse.ArgumentParser, *, params_dir: bool =
     )
 
 
-def catalog_24(params_root: Path | None = None) -> list[TestbedSpec]:
-    """The 24 official testbeds (3 + 9 + 12)."""
+def catalog(params_root: Path | None = None) -> list[TestbedSpec]:
+    """The 28 official testbeds (7 Layer 1 + 9 Layer 2 + 12 Layer 3).
+
+    Layers 2 and 3 use only the three uniform (action-knob) folders.
+    """
     root = Path(params_root) if params_root is not None else Path(".")
     rows: list[TestbedSpec] = []
-    for name in STE_PARAM_DIRS:
+    for name in STE_LAYER1_DIRS:
         rows.append(
             TestbedSpec(root / name, "off", 0.0, "none", layer=1)
         )
-    for name in STE_PARAM_DIRS:
+    for name in STE_UNIFORM_DIRS:
         for psi in STAYER_CHOICES:
             rows.append(
                 TestbedSpec(root / name, "on", psi, "none", layer=2)
             )
-    for name in STE_PARAM_DIRS:
+    for name in STE_UNIFORM_DIRS:
         for miss in ("A", "B", "C", "D"):
             rows.append(
                 TestbedSpec(root / name, "on", 0.0, miss, layer=3)
             )
-    if len(rows) != 24:
-        raise RuntimeError(f"expected 24 testbeds, got {len(rows)}")
+    if len(rows) != 28:
+        raise RuntimeError(f"expected 28 testbeds, got {len(rows)}")
     return rows
+
+
+def catalog_24(params_root: Path | None = None) -> list[TestbedSpec]:
+    """Alias for :func:`catalog` (28 testbeds)."""
+    return catalog(params_root)
 
 
 MISSPEC_BLURBS = {

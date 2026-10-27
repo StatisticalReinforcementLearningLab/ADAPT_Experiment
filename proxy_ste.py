@@ -6,8 +6,9 @@ Given a testbed, this reports:
 * the effective proxy STE under the testbed's own activity setting;
 * a scaled proxy STE = proxy STE × the confirmed/proxy ratio in the
   params dir's ``ste_tuning.json`` (written by ``TUNE_PHASE=ratio``).
-  That is an approximate full STE. If the ratio is missing, the proxy
-  is printed alone with the reason.
+  That is an approximate full STE. Layer 3 uses only the three uniform
+  folders, so the ratio is the uniform folder's. If the ratio is missing,
+  the proxy is printed alone with the reason.
 
 Layer-3 screening flags any spec whose no-gap proxy STE is below 0.1::
 
@@ -31,7 +32,7 @@ from pathlib import Path
 from testbed import (
     MISSPEC_BLURBS,
     add_testbed_arguments,
-    catalog_24,
+    catalog,
     log_ste_activity_off,
     resolve_testbed_spec,
 )
@@ -161,7 +162,7 @@ def measure_spec(spec, args) -> dict:
 
 
 def screen_layer3(args) -> int:
-    rows = [s for s in catalog_24() if s.layer == 3]
+    rows = [s for s in catalog() if s.layer == 3]
     print(f"Screening {len(rows)} Layer-3 testbeds (flag proxy STE < {SCREEN_THRESHOLD})")
     flagged = []
     reports = []

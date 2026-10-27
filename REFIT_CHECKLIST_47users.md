@@ -138,17 +138,23 @@ a check before the next.
 
 ## 6. CLUSTER: after the 47-user refit (do not run these before the refit)
 
-The ste0.2/0.5/0.8 folders are derived from vanilla, so they must be re-tuned.
-STE tuning and confirmation always use activity off (no gaps).
+The seven Layer-1 folders are derived from vanilla, so they must be re-tuned
+after the 47-user refit. STE tuning and confirmation always use activity off
+(no gaps). Do not run these before the refit.
 
-- [ ] (i) Tune STE 0.2 / 0.5 / 0.8 with activity off:
-      `sbatch run_tune_ste.sh` (forces `ADAPR_ACTIVITY=off`; action knob → 0.2 / 0.5 / 0.8;
-      auto-submits confirmation CQL jobs). Then `TUNE_PHASE=validate bash run_tune_ste.sh`
-      and `TUNE_PHASE=ratio`. Re-tune any folder off target with
-      `TUNE_PROXY_TO_TRUE=from:env_para_ste<t>`. Each newly tuned
-      `env_para_ste*/generator_calibration.json` must still carry vanilla's
-      `activity_process` block (`tune_ste.py` copies it). Then
+- [ ] (i) Tune Layer 1 (7 environments) with activity off:
+      `sbatch --export=ALL,TUNE_PHASE=layer1 run_tune_ste.sh`
+      (forces `ADAPR_ACTIVITY=off`). Uniform: knob `action` → `env_para_ste0.2`
+      / `0.5` / `0.8`. Benefit: knob `benefit_path` → `ste0.2_benefit` /
+      `ste0.8_benefit`. Burden: `burden_path` → `ste0.2_burden`; `burden` →
+      `ste0.8_burden` only if a scan down to κ=0 reaches 0.8. Auto-submits
+      confirmation CQL jobs for written folders. Then
+      `TUNE_PHASE=validate bash run_tune_ste.sh` and `TUNE_PHASE=ratio`.
+      Re-tune any folder off target with `TUNE_PROXY_TO_TRUE=from:<folder>`.
+      Each newly tuned `env_para_ste*/generator_calibration.json` must still
+      carry vanilla's `activity_process` block (`tune_ste.py` copies it). Then
       `python 05_check_refit.py --stage ste`.
+      Dry run (lists the seven targets): `python tune_ste.py layer1 --dry-run`.
 - [ ] (ii) Calibrate misspec A and B once per params dir:
       ```
       python calibrate_misspec.py --params-dir env_para_ste0.2
@@ -164,10 +170,11 @@ STE tuning and confirmation always use activity off (no gaps).
       The no-gap proxy uses activity off; the effective proxy uses activity on
       (and misspec D when that is the spec). Also reports a *scaled proxy STE* =
       proxy STE × the confirmed/proxy ratio in `<params_dir>/ste_tuning.json`
-      (from `TUNE_PHASE=ratio`); that is an approximate full STE. Do not run
+      (from `TUNE_PHASE=ratio` on the uniform folder); that is an approximate
+      full STE. Do not run
       `ste_vanilla.py` for Layer 3 now. Full DiscreteCQL STE for Layer 3 is
       optional later if time allows.
-- [ ] (iv) Run the RL arrays for all 24 testbeds (3 Layer 1 + 9 Layer 2 + 12 Layer 3).
+- [ ] (iv) Run the RL arrays for all 28 testbeds (7 Layer 1 + 9 Layer 2 + 12 Layer 3).
       Example Layer 2:
       `sbatch --export=ALL,PRIOR_MODE=loo,ENV_VARIANT=env_para_ste0.5,ADAPR_ACTIVITY=on,ADAPR_STAYER_FRACTION=0.25,ADAPR_MISSPEC=none run_array.sh`
       Example Layer 3:

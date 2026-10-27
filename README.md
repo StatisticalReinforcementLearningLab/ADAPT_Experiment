@@ -50,7 +50,7 @@ the dropout table. `algorithm_helpers.py`, `derived_covariates.py`,
 `est_prior.py` and `stability.py` stay importable under those names.
 `ste_vanilla.py` is the STE evaluation used by `tune_ste.py`.
 
-## 24 testbeds
+## 28 testbeds
 
 A testbed is `(params dir, activity, stayer fraction, misspec)`. Select it
 with `ADAPR_PARAMS_DIR` / `--params-dir`, `ADAPR_ACTIVITY` / `--activity`
@@ -58,11 +58,14 @@ with `ADAPR_PARAMS_DIR` / `--params-dir`, `ADAPR_ACTIVITY` / `--activity`
 and `ADAPR_MISSPEC` / `--misspec` (`none`, `A`, `B`, `C`, `D`; default `none`).
 Results folders are `results_<steX.Y>_<gapon|gapoff>_psi<frac>_misspec<letter>`.
 STE tuning and STE evaluation always force activity `off` (no gaps) and log
-that. `python proxy_ste.py` reports the no-gap proxy STE, the effective
-proxy STE under the testbed's own activity, and a scaled proxy STE
-(proxy × the confirmed/proxy ratio in `ste_tuning.json`). `python
-calibrate_misspec.py` writes A/B strengths into
-`<params_dir>/misspec_calibration.json` (A on 12-week episodes, B on 36).
+that. Layer 1 is seven folders tuned from vanilla (three uniform `action`
+knobs, two `benefit_path`, two burden). Layers 2 and 3 use only the three
+uniform folders. `python proxy_ste.py` reports the no-gap proxy STE, the
+effective proxy STE under the testbed's own activity, and a scaled proxy
+STE (proxy × the confirmed/proxy ratio in the uniform folder's
+`ste_tuning.json`). `python calibrate_misspec.py` writes A/B strengths
+into `<params_dir>/misspec_calibration.json` (A on 12-week episodes, B on
+36).
 
 Misspecifications (off by default; the simulator is unchanged when they are off):
 
@@ -76,9 +79,9 @@ Misspecifications (off by default; the simulator is unchanged when they are off)
 
 | Layer | Count | params dir | activity | stayer | misspec |
 | --- | ---: | --- | --- | ---: | --- |
-| 1 | 3 | `env_para_ste0.2`, `0.5`, `0.8` | off | 0 | none |
-| 2 | 9 | the same three | on | 0, 0.25, 0.5 | none |
-| 3 | 12 | the same three | on | 0 | A, B, C, D |
+| 1 | 7 | three uniform (`ste0.2`/`0.5`/`0.8`, knob `action`); `ste0.2_benefit`/`ste0.8_benefit` (`benefit_path`); `ste0.2_burden` (`burden_path`); `ste0.8_burden` (`burden`, written only if STE 0.8 is attainable) | off | 0 | none |
+| 2 | 9 | the three uniform folders | on | 0, 0.25, 0.5 | none |
+| 3 | 12 | the three uniform folders | on | 0 | A, B, C, D |
 
 Example: Layer 2, STE 0.5, 25% stayers::
 
