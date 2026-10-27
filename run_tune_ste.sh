@@ -46,10 +46,10 @@
 #   5. validate again (and ratio, to record the final confirmed STE)
 #
 # Layer 1 from vanilla (activity off; after the 47-user refit, not now):
-#   uniform     action          -> env_para_ste0.2 / 0.5 / 0.8
-#   benefit     benefit_path    -> env_para_ste0.2_benefit / ste0.8_benefit
-#   burden      burden_path     -> env_para_ste0.2_burden
-#               burden (κ≤1)    -> env_para_ste0.8_burden if scan to 0 reaches 0.8
+#   uniform        action         kappa_m = kappa_b  -> env_para_ste0.2 / 0.5 / 0.8
+#   benefit only   benefit_only   kappa_m = 0        -> env_para_ste0.2_benefitonly / ste0.8_benefitonly
+#   heavy burden   heavy_burden   kappa_m = 2        -> env_para_ste0.2_heavyburden / ste0.8_heavyburden
+#                   (STE 0.8 falls back to kappa_m = 1.5 then 1.0)
 #   sbatch --export=ALL,TUNE_PHASE=layer1 run_tune_ste.sh
 #   python tune_ste.py layer1 --dry-run
 #
@@ -90,13 +90,13 @@
 #   TUNE_SCRATCH      working dir for candidate params     default
 #                     .ste_tune_scratch_<knob>_<jobid>
 #
-# layer1 writes the attainable Layer-1 folders (7 targets; 0.8_burden is
-# skipped if the κ∈[0,1] scan stays below 0.8). Every written folder
-# carries vanilla's activity_process and a ste_tuning.json (knob, κ,
-# target, proxy STE; ratio fills in confirmed STE later). The *proxy* STE
-# is transferred vanilla CQL vs never-suggest, Δ clipped at 0. Confirmation
-# uses the same clip. On success the script submits one run_ste.sh array
-# per written folder.
+# layer1 writes the attainable Layer-1 folders (7 targets; 0.8_heavyburden
+# retries kappa_m = 1.5 then 1.0 if 2 is unattainable). Every written folder
+# carries vanilla's activity_process and a ste_tuning.json (knob, kappa_b,
+# kappa_m, target, proxy STE, burden share; ratio fills in confirmed STE
+# and the confirmed burden share later). The *proxy* STE is transferred
+# vanilla CQL vs never-suggest, Δ clipped at 0. Confirmation uses the same
+# clip. On success the script submits one run_ste.sh array per written folder.
 
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")}"
@@ -574,8 +574,8 @@ case "${TUNE_PHASE}" in
     else
       RATIO_DIRS=(
         "${TUNE_OUT_PREFIX}0.2" "${TUNE_OUT_PREFIX}0.5" "${TUNE_OUT_PREFIX}0.8"
-        "${TUNE_OUT_PREFIX}0.2_benefit" "${TUNE_OUT_PREFIX}0.8_benefit"
-        "${TUNE_OUT_PREFIX}0.2_burden" "${TUNE_OUT_PREFIX}0.8_burden"
+        "${TUNE_OUT_PREFIX}0.2_benefitonly" "${TUNE_OUT_PREFIX}0.8_benefitonly"
+        "${TUNE_OUT_PREFIX}0.2_heavyburden" "${TUNE_OUT_PREFIX}0.8_heavyburden"
       )
     fi
     for dir in "${RATIO_DIRS[@]}"; do

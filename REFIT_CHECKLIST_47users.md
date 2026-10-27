@@ -144,17 +144,25 @@ after the 47-user refit. STE tuning and confirmation always use activity off
 
 - [ ] (i) Tune Layer 1 (7 environments) with activity off:
       `sbatch --export=ALL,TUNE_PHASE=layer1 run_tune_ste.sh`
-      (forces `ADAPR_ACTIVITY=off`). Uniform: knob `action` → `env_para_ste0.2`
-      / `0.5` / `0.8`. Benefit: knob `benefit_path` → `ste0.2_benefit` /
-      `ste0.8_benefit`. Burden: `burden_path` → `ste0.2_burden`; `burden` →
-      `ste0.8_burden` only if a scan down to κ=0 reaches 0.8. Auto-submits
-      confirmation CQL jobs for written folders. Then
-      `TUNE_PHASE=validate bash run_tune_ste.sh` and `TUNE_PHASE=ratio`.
-      Re-tune any folder off target with `TUNE_PROXY_TO_TRUE=from:<folder>`.
-      Each newly tuned `env_para_ste*/generator_calibration.json` must still
-      carry vanilla's `activity_process` block (`tune_ste.py` copies it). Then
+      (forces `ADAPR_ACTIVITY=off`). Two-dial search on `kappa_b` only.
+      Uniform (`kappa_m = kappa_b`, knob `action`) → `env_para_ste0.2` /
+      `0.5` / `0.8`. Benefit only (`kappa_m = 0`) → `ste0.2_benefitonly` /
+      `ste0.8_benefitonly`. Heavy burden (`kappa_m = 2`, ME→E floored at
+      0.05, E→MY +0.3 centered) → `ste0.2_heavyburden` /
+      `ste0.8_heavyburden`; if 0.8 is unattainable with stability, retry
+      `kappa_m = 1.5` then `1.0` (keep the strengthened transmission) and
+      record which `kappa_m` was used or the max attainable STE. Each
+      folder stores the burden share
+      `1 - proxy_STE / proxy_STE(kappa_m=0, same kappa_b)`; `TUNE_PHASE=ratio`
+      later stores the confirmed share. Auto-submits confirmation CQL jobs
+      for written folders. Then `TUNE_PHASE=validate bash run_tune_ste.sh`
+      and `TUNE_PHASE=ratio`. Re-tune any folder off target with
+      `TUNE_PROXY_TO_TRUE=from:<folder>`. Each newly tuned
+      `env_para_ste*/generator_calibration.json` must still carry vanilla's
+      `activity_process` block (`tune_ste.py` copies it). Then
       `python 05_check_refit.py --stage ste`.
-      Dry run (lists the seven targets): `python tune_ste.py layer1 --dry-run`.
+      Dry run (lists the seven targets with their `kappa_m`):
+      `python tune_ste.py layer1 --dry-run`.
 - [ ] (ii) Calibrate misspec A and B once per params dir:
       ```
       python calibrate_misspec.py --params-dir env_para_ste0.2

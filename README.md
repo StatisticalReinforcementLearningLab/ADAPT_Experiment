@@ -58,9 +58,11 @@ with `ADAPR_PARAMS_DIR` / `--params-dir`, `ADAPR_ACTIVITY` / `--activity`
 and `ADAPR_MISSPEC` / `--misspec` (`none`, `A`, `B`, `C`, `D`; default `none`).
 Results folders are `results_<steX.Y>_<gapon|gapoff>_psi<frac>_misspec<letter>`.
 STE tuning and STE evaluation always force activity `off` (no gaps) and log
-that. Layer 1 is seven folders tuned from vanilla (three uniform `action`
-knobs, two `benefit_path`, two burden). Layers 2 and 3 use only the three
-uniform folders. `python proxy_ste.py` reports the no-gap proxy STE, the
+that. Layer 1 is seven folders tuned from vanilla with a two-dial design
+(`kappa_b` on A→MY, `kappa_m` on A→ME; mediator→CAE alphas are not
+scaled): three uniform (`kappa_m = kappa_b`), two benefit-only
+(`kappa_m = 0`), two heavy-burden (`kappa_m = 2` plus floored ME→E and
+centered E→MY +0.3). Layers 2 and 3 use only the three uniform folders. `python proxy_ste.py` reports the no-gap proxy STE, the
 effective proxy STE under the testbed's own activity, and a scaled proxy
 STE (proxy × the confirmed/proxy ratio in the uniform folder's
 `ste_tuning.json`). `python calibrate_misspec.py` writes A/B strengths
@@ -79,7 +81,7 @@ Misspecifications (off by default; the simulator is unchanged when they are off)
 
 | Layer | Count | params dir | activity | stayer | misspec |
 | --- | ---: | --- | --- | ---: | --- |
-| 1 | 7 | three uniform (`ste0.2`/`0.5`/`0.8`, knob `action`); `ste0.2_benefit`/`ste0.8_benefit` (`benefit_path`); `ste0.2_burden` (`burden_path`); `ste0.8_burden` (`burden`, written only if STE 0.8 is attainable) | off | 0 | none |
+| 1 | 7 | three uniform (`ste0.2`/`0.5`/`0.8`, `kappa_m = kappa_b`); `ste0.2_benefitonly`/`ste0.8_benefitonly` (`kappa_m = 0`); `ste0.2_heavyburden`/`ste0.8_heavyburden` (`kappa_m = 2`, then 1.5 / 1.0 if 0.8 is unattainable; ME→E floored at 0.05, E→MY +0.3 centered) | off | 0 | none |
 | 2 | 9 | the three uniform folders | on | 0, 0.25, 0.5 | none |
 | 3 | 12 | the three uniform folders | on | 0 | A, B, C, D |
 

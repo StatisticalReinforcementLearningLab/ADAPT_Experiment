@@ -9,44 +9,55 @@ fitted from the ADAPT MRT)::
     A ──(−)──> ME (PV, FW, PJ)      ──(+)──> E_{w+1} ──(+)──> MY_{w+1} ──> Y_{w+2}
                                      (ME→E)             (E→MY)
 
-Every Layer-1 folder is tuned from ``env_para_vanilla`` with activity off
-(no gaps) and must pass the stability check (|g^E|, |g^Y| < 1 under never-
-and always-send). Default knob is ``action``. Do not run these calibrations
-until the 47-user refit is on disk.
+Layer 1 is a two-dial design. Search is on the benefit dial ``kappa_b``
+only (activity off, from ``env_para_vanilla``). Do not run these
+calibrations until the 47-user refit is on disk. Every written folder
+must pass the stability check (|g^E|, |g^Y| < 1 under never- and
+always-send) and carries vanilla's ``activity_process``.
+
+    kappa_b  multiply the action effects (mains and interactions) in
+             M^{Y,SC} and M^{Y,AA} (pathway ``A_to_MY``).
+    kappa_m  multiply the action effects (mains and interactions) in
+             M^{E,PV} occurrence and intensity, M^{E,FW} and M^{E,PJ}
+             (pathway ``A_to_ME``).
+
+Do **not** change the mediator→CAE coefficients α^Y_SC / α^Y_AA. The
+older ``benefit_path`` knob's alpha scaling is not used here (kept for
+scans only).
 
 The 2026-10-07 vanilla refit (28 participants) had a confirmed STE of 0.473
 (DiscreteCQL, exp 1). Re-measure after the 47-user refit; that number is
 not the Layer-1 middle target.
 
-Uniform (one dial, same mechanism) — Layers 2 and 3 use only these three::
+Uniform (``kappa_m = kappa_b``, the existing ``action`` knob) — Layers 2
+and 3 use only these three::
 
     env_para_ste0.2 / 0.5 / 0.8
-    knob ``action``: scale the whole action block (A→MY and A→ME, mains
-    and interactions) by κ.
 
-Benefit pathway::
+Benefit only (``kappa_m = 0``)::
 
-    env_para_ste0.2_benefit / env_para_ste0.8_benefit
-    knob ``benefit_path``: scale A→MY (mains and interactions) by κ and
-    the mediator→CAE coefficients α^Y_SC and α^Y_AA by κ. Alpha changes
-    use ``CENTERED_COEFS`` so never-send mean CAE is unchanged. Burden
-    pathway untouched.
+    env_para_ste0.2_benefitonly / env_para_ste0.8_benefitonly
+    knob ``benefit_only``: A→MY ×κ_b, A→ME ×0. Alphas untouched.
 
-Burden pathway::
+Heavy burden (``kappa_m = 2``, plus strengthened transmission)::
 
-    env_para_ste0.2_burden
-    knob ``burden_path``: A→ME mains −κ, ME→E floored at 0.05, E→MY
-    +0.3 fixed (centered).
-    env_para_ste0.8_burden
-    knob ``burden``: scale A→ME mains and interactions by κ ≤ 1. First
-    scan down to κ = 0; if the maximum attainable STE is below 0.8, do
-    not write the folder — record the maximum and report it.
+    env_para_ste0.2_heavyburden / env_para_ste0.8_heavyburden
+    knob ``heavy_burden``: A→MY ×κ_b, A→ME ×κ_m, a2/a3/a4 floored at
+    0.05, and E_w → M^{Y,SC} / M^{Y,AA} shifted by +0.3 (centered as
+    in ``CENTERED_COEFS``). If STE 0.8 is unattainable with stability
+    at κ_m = 2, try 1.5 then 1.0 (keep the strengthened transmission);
+    record which κ_m was used, or the maximum attainable STE if none
+    works.
 
-``TUNE_PHASE=layer1`` runs all seven, writes the attainable folders,
-submits confirmation DiscreteCQL jobs, and copies vanilla's
-``activity_process`` into every written folder. Each folder's
-``ste_tuning.json`` records the knob, κ, target, proxy STE, and later
-the confirmed STE and ratio (``TUNE_PHASE=ratio``).
+Each written folder's ``ste_tuning.json`` records κ_b, κ_m, the knob,
+target, proxy STE, and the burden share
+``1 - proxy_STE / proxy_STE(κ_m = 0, same κ_b)``. ``TUNE_PHASE=ratio``
+later stores the confirmed STE, the confirmed/proxy ratio, and the
+confirmed burden share.
+
+``TUNE_PHASE=layer1`` runs all seven and submits confirmation
+DiscreteCQL jobs for written folders. The older ``*_benefit`` /
+``*_burden`` knobs stay available for scans; they are not Layer 1.
 
 Layers 2 and 3 (activity on, stayers, misspec A–D) attach only to the
 three uniform folders. Catalog: Layer 1 = 7, Layer 2 = 9, Layer 3 = 12,
@@ -110,16 +121,19 @@ Cluster (after the 47-user refit; do not run now)::
 
 Knob reference (``--knob``)
 ---------------------------
-    action    default. Scale the whole action block (A→MY and A→ME,
-              mains and interactions) by κ. Uniform Layer-1 folders.
-    benefit_path
-              A→MY ×κ and α^Y_SC / α^Y_AA ×κ, alphas centered.
-              Burden untouched. κ=1 is a no-op.
-    burden_path
-              A→ME mains −κ; ME→E floored at 0.05; E→MY +0.3 fixed.
-              env_para_ste0.2_burden.
-    burden    A→ME mains and interactions ×κ. env_para_ste0.8_burden
-              scans κ∈[0,1] first.
+    action    default. Uniform two-dial: A→MY ×κ_b and A→ME ×κ_m with
+              κ_m = κ_b. Layer-1 ``env_para_ste0.2`` / ``0.5`` / ``0.8``.
+    benefit_only
+              A→MY ×κ_b, A→ME ×0. Alphas untouched. Layer-1
+              ``env_para_ste0.2_benefitonly`` / ``ste0.8_benefitonly``.
+              κ_b = 1 is vanilla with the burden action effects zeroed.
+    heavy_burden
+              A→MY ×κ_b, A→ME ×κ_m (default 2), ME→E floored at 0.05,
+              E→MY +0.3 centered. Layer-1 ``*_heavyburden``. STE 0.8
+              falls back to κ_m = 1.5 then 1.0 if 2 is unattainable.
+    benefit_path / burden / burden_path
+              kept for scans; not Layer 1. ``benefit_path`` still
+              scales α^Y_SC / α^Y_AA (do not use that for Layer 1).
     benefit / benefit_foursc / fatigue (alias burden_shift)
               kept for scans and the old protocol; not Layer 1.
     foursc_to_y_shift / my_to_y / foursc_to_y / me_to_e / e_to_my
@@ -131,8 +145,8 @@ Dead ends that still apply after the refit (re-check on 47 users)
       vanilla (floor ≈0.27, job 40926808).
     * foursc_to_y_shift caps near proxy 0.36 (CAE clips; job 41048118)
       — not a route to 0.5/0.8.
-    * burden (A→ME ×κ, κ∈[0,1]) may not reach STE 0.8; layer1 scans
-      first and skips the folder if the max is below target.
+    * heavy_burden at κ_m = 2 may miss STE 0.8 with stability; layer1
+      retries κ_m = 1.5 then 1.0 and records the max if none works.
 
 Guarantees and guards
 ---------------------
@@ -224,6 +238,12 @@ FATIGUE_ME_TO_E_MIN = 0.05
 # order-of-magnitude engagement cost. Override with
 # ADAPR_FATIGUE_KAPPA_MAX.
 FATIGUE_KAPPA_MAX = 2.0
+
+# Two-dial Layer-1 heavy-burden defaults. Search is on κ_b; κ_m starts at
+# 2 and falls back to 1.5 then 1.0 if STE 0.8 is unattainable. The
+# strengthened ME→E floor and E→MY shift stay on at every κ_m.
+HEAVY_BURDEN_KAPPA_M = 2.0
+HEAVY_BURDEN_KAPPA_M_FALLBACK = (2.0, 1.5, 1.0)
 
 # Copied verbatim into every tuned parameter directory so it can be handed to
 # ``ste_vanilla.py`` / ``experiment.py`` as a drop-in replacement.
@@ -446,6 +466,67 @@ def _benefit_path_multipliers(k: float) -> dict[str, float]:
     }
 
 
+_TWO_DIAL_HEAVY_APPLY = {
+    "A_to_MY": "multiply",
+    "A_to_ME": "multiply",
+    "ME_to_E_PV": "subtract",
+    "ME_to_E_FW": "subtract",
+    "ME_to_E_PJ": "subtract",
+    "E_to_MY": "subtract",
+}
+
+
+def two_dial_multipliers(
+    kappa_b: float, kappa_m: float, *, heavy: bool = False
+) -> dict[str, float]:
+    """Benefit dial on A→MY, burden dial on A→ME. Heavy adds E→MY +0.3.
+
+    ME→E floors are per-user and attached at write time (see
+    ``_heavy_burden_for_user``).
+    """
+    mult: dict[str, float] = {
+        "A_to_MY": float(kappa_b),
+        "A_to_ME": float(kappa_m),
+    }
+    if heavy:
+        mult["E_to_MY"] = -float(FATIGUE_E_SHIFT_DEFAULT)
+    return mult
+
+
+def _heavy_burden_for_user(
+    kappa_b: float, params: dict, kappa_m: float
+) -> dict[str, float]:
+    """A→MY ×κ_b, A→ME ×κ_m, ME→E floored, E→MY +0.3."""
+    mult = two_dial_multipliers(kappa_b, kappa_m, heavy=True)
+    for m in ("PV", "FW", "PJ"):
+        floor_sub = _me_to_e_floor_subtract(params, m)
+        if floor_sub != 0.0:
+            mult[f"ME_to_E_{m}"] = floor_sub
+    return mult
+
+
+def make_heavy_burden_knob(kappa_m: float) -> KnobSpec:
+    """``heavy_burden`` knob at a fixed burden dial ``kappa_m`` (search is κ_b)."""
+    km = float(kappa_m)
+
+    def build(k: float) -> dict[str, float]:
+        return two_dial_multipliers(k, km, heavy=True)
+
+    return KnobSpec(
+        "heavy_burden",
+        build,
+        zero_is_null=False,
+        sigma_invariant=False,
+        apply=_TWO_DIAL_HEAVY_APPLY,
+        kappa_m=km,
+        heavy=True,
+        doc=(
+            f"Two-dial heavy burden: A→MY ×κ_b, A→ME ×{km:g}, ME→E floored "
+            "at 0.05, E→MY +0.3 centered. Search is on κ_b. Alphas untouched."
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class KnobSpec:
     name: str
@@ -455,6 +536,8 @@ class KnobSpec:
     doc: str
     apply: str | dict[str, str] = "multiply"  # or per-pathway map
     kappa_cap: float | None = None  # search hi; fatigue uses FATIGUE_KAPPA_MAX
+    kappa_m: float | None = None  # fixed burden dial when the search variable is κ_b
+    heavy: bool = False  # ME→E floor + centered E→MY +0.3
 
 
 KNOBS: dict[str, KnobSpec] = {
@@ -464,11 +547,24 @@ KNOBS: dict[str, KnobSpec] = {
         zero_is_null=True,
         sigma_invariant=True,
         doc=(
-            "Scale the whole action block, benefit and burden together. Keeps the "
-            "fitted benefit/burden balance, leaves sigma_i and control-arm "
-            "stability exactly unchanged, and is exactly null at kappa=0. "
-            "Recommended, and raises STE as long as the fitted net action effect "
-            "is positive."
+            "Uniform two-dial: scale A→MY and A→ME (mains and interactions) "
+            "by the same κ (κ_m = κ_b). Keeps the fitted benefit/burden "
+            "balance, leaves sigma_i and control-arm stability exactly "
+            "unchanged, and is exactly null at kappa=0. Layer-1 "
+            "env_para_ste0.2 / 0.5 / 0.8."
+        ),
+    ),
+    "benefit_only": KnobSpec(
+        "benefit_only",
+        lambda k: two_dial_multipliers(k, 0.0),
+        zero_is_null=True,
+        sigma_invariant=True,
+        kappa_m=0.0,
+        doc=(
+            "Benefit-only two-dial: A→MY ×κ_b, A→ME ×0. Mediator→CAE "
+            "alphas are not changed. κ_b = 1 is vanilla with the burden "
+            "action effects zeroed. Layer-1 env_para_ste0.2_benefitonly / "
+            "ste0.8_benefitonly."
         ),
     ),
     "benefit": KnobSpec(
@@ -501,9 +597,7 @@ KNOBS: dict[str, KnobSpec] = {
         sigma_invariant=True,
         doc=(
             "Scale A→ME mains and interactions by κ. Benefit pathway "
-            "untouched. Layer 1 uses κ ≤ 1 for env_para_ste0.8_burden "
-            "(scan down to 0 first; do not write the folder if the max "
-            "attainable STE is below 0.8)."
+            "untouched. Kept for scans; not Layer 1."
         ),
     ),
     "burden_path": KnobSpec(
@@ -518,9 +612,10 @@ KNOBS: dict[str, KnobSpec] = {
             "ADAPR_FATIGUE_ME_TO_E_MIN (default 0.05), and add a fixed κ_e "
             "to E→MY (ADAPR_FATIGUE_E_SHIFT, default 0.3). Transmissions "
             "do not grow with the search variable, so never-send σ_i is "
-            "constant on the κ ladder. First attempt for STE 0.2."
+            "constant on the κ ladder. Kept for scans; not Layer 1."
         ),
     ),
+    "heavy_burden": make_heavy_burden_knob(HEAVY_BURDEN_KAPPA_M),
     "fatigue": KnobSpec(
         "fatigue",
         _fatigue_multipliers,
@@ -622,29 +717,47 @@ KNOBS: dict[str, KnobSpec] = {
 KNOBS["burden_shift"] = KNOBS["fatigue"]
 
 # Layer 1: seven environments, all from env_para_vanilla, activity off.
-# Layers 2/3 use only the three uniform (action-knob) folders.
+# Search is on κ_b. Layers 2/3 use only the three uniform (action-knob) folders.
 LAYER1_SPECS: tuple[dict, ...] = (
     {"folder": "env_para_ste0.2", "target": 0.2, "knob": "action",
-     "suffix": "", "mode": "calibrate"},
+     "suffix": "", "mode": "calibrate", "kappa_m": "kappa_b"},
     {"folder": "env_para_ste0.5", "target": 0.5, "knob": "action",
-     "suffix": "", "mode": "calibrate"},
+     "suffix": "", "mode": "calibrate", "kappa_m": "kappa_b"},
     {"folder": "env_para_ste0.8", "target": 0.8, "knob": "action",
-     "suffix": "", "mode": "calibrate"},
-    {"folder": "env_para_ste0.2_benefit", "target": 0.2, "knob": "benefit_path",
-     "suffix": "_benefit", "mode": "calibrate", "kappa0": 0.5},
-    {"folder": "env_para_ste0.8_benefit", "target": 0.8, "knob": "benefit_path",
-     "suffix": "_benefit", "mode": "calibrate", "kappa0": 1.5},
-    {"folder": "env_para_ste0.2_burden", "target": 0.2, "knob": "burden_path",
-     "suffix": "_burden", "mode": "calibrate", "kappa0": 0.3},
-    {"folder": "env_para_ste0.8_burden", "target": 0.8, "knob": "burden",
-     "suffix": "_burden", "mode": "scan_then_calibrate", "kappa_hi": 1.0,
-     "scan_kappas": (1.0, 0.75, 0.5, 0.25, 0.1, 0.0)},
+     "suffix": "", "mode": "calibrate", "kappa_m": "kappa_b"},
+    {"folder": "env_para_ste0.2_benefitonly", "target": 0.2, "knob": "benefit_only",
+     "suffix": "_benefitonly", "mode": "calibrate", "kappa_m": 0.0, "kappa0": 0.5},
+    {"folder": "env_para_ste0.8_benefitonly", "target": 0.8, "knob": "benefit_only",
+     "suffix": "_benefitonly", "mode": "calibrate", "kappa_m": 0.0, "kappa0": 1.5},
+    {"folder": "env_para_ste0.2_heavyburden", "target": 0.2, "knob": "heavy_burden",
+     "suffix": "_heavyburden", "mode": "calibrate", "kappa_m": 2.0, "kappa0": 1.0},
+    {"folder": "env_para_ste0.8_heavyburden", "target": 0.8, "knob": "heavy_burden",
+     "suffix": "_heavyburden", "mode": "heavy_fallback",
+     "kappa_m": 2.0, "kappa_m_grid": HEAVY_BURDEN_KAPPA_M_FALLBACK, "kappa0": 1.5},
 )
 
 
 def layer1_jobs() -> tuple[dict, ...]:
-    """The seven Layer-1 calibrations (uniform / benefit / burden)."""
+    """The seven Layer-1 calibrations (uniform / benefit-only / heavy burden)."""
     return LAYER1_SPECS
+
+
+def _fmt_kappa_m(value) -> str:
+    """Pretty-print a κ_m (keep a tenth so 1.0 does not collapse to 1)."""
+    v = float(value)
+    return f"{v:.1f}" if abs(v * 10.0 - round(v * 10.0)) < 1e-9 else f"{v:g}"
+
+
+def layer1_kappa_m_display(job: dict) -> str:
+    """κ_m label for ``layer1 --dry-run``."""
+    grid = job.get("kappa_m_grid")
+    if grid:
+        rest = ", ".join(_fmt_kappa_m(x) for x in grid[1:])
+        return f"{_fmt_kappa_m(grid[0])} (fallback {rest})" if rest else _fmt_kappa_m(grid[0])
+    km = job.get("kappa_m", "kappa_b")
+    if km == "kappa_b":
+        return "kappa_b"
+    return _fmt_kappa_m(km)
 
 
 def knob_sigma_invariant(knob: KnobSpec) -> bool:
@@ -693,6 +806,41 @@ def _log_fatigue_e_shift(knob: KnobSpec, *, log=print) -> None:
     log(
         f"  fatigue κ cap: {_fatigue_kappa_max():g}  "
         "(ADAPR_FATIGUE_KAPPA_MAX)"
+    )
+
+
+def _two_dial_report_fields(knob: KnobSpec, kappa: float | None = None) -> dict:
+    """κ_b / κ_m recorded on every two-dial write."""
+    if knob.name == "action":
+        kb = None if kappa is None else float(kappa)
+        return {"kappa_b": kb, "kappa_m": kb, "design": "uniform"}
+    if knob.name == "benefit_only":
+        return {
+            "kappa_b": None if kappa is None else float(kappa),
+            "kappa_m": 0.0,
+            "design": "benefit_only",
+        }
+    if knob.heavy or knob.name == "heavy_burden":
+        return {
+            "kappa_b": None if kappa is None else float(kappa),
+            "kappa_m": float(
+                knob.kappa_m if knob.kappa_m is not None else HEAVY_BURDEN_KAPPA_M
+            ),
+            "design": "heavy_burden",
+            "me_to_e_floor": _fatigue_me_to_e_min(),
+            "e_to_my_shift": _fatigue_e_shift(0.0),
+        }
+    return {}
+
+
+def _log_heavy_burden(knob: KnobSpec, *, log=print) -> None:
+    if not (knob.heavy or knob.name == "heavy_burden"):
+        return
+    km = knob.kappa_m if knob.kappa_m is not None else HEAVY_BURDEN_KAPPA_M
+    log(f"  heavy_burden: A→MY ×κ_b, A→ME ×{float(km):g}")
+    log(
+        f"  ME→E floored at {_fatigue_me_to_e_min():g}; "
+        f"E→MY shift +{_fatigue_e_shift(0.0):g} (centered)"
     )
 
 
@@ -787,6 +935,9 @@ def _knob_multipliers_fn(
         return lambda params: _fatigue_multipliers_for_user(k, params)
     if knob.name == "burden_path":
         return lambda params: _burden_path_multipliers_for_user(k, params)
+    if knob.heavy or knob.name == "heavy_burden":
+        km = float(knob.kappa_m if knob.kappa_m is not None else HEAVY_BURDEN_KAPPA_M)
+        return lambda params: _heavy_burden_for_user(k, params, km)
     return lambda params: knob.build(k)
 
 
@@ -1145,6 +1296,44 @@ def write_knob_params(
         apply=knob.apply,
         multipliers_for=_knob_multipliers_fn(knob, kappa),
     )
+
+
+def write_two_dial_params(
+    src_dir: Path,
+    dst_dir: Path,
+    user_ids: Sequence[int],
+    kappa_b: float,
+    kappa_m: float,
+    *,
+    heavy: bool = False,
+) -> list[dict]:
+    """Apply the two-dial map and copy vanilla's ``activity_process``.
+
+    ``heavy`` adds the ME→E floor at 0.05 and the centered E→MY +0.3
+    shift. ``kappa_b = kappa_m = 1`` with ``heavy=False`` is a no-op.
+    """
+    if heavy:
+        return write_knob_params(
+            src_dir,
+            dst_dir,
+            user_ids,
+            make_heavy_burden_knob(float(kappa_m)),
+            float(kappa_b),
+        )
+    return write_scaled_params(
+        src_dir,
+        dst_dir,
+        user_ids,
+        two_dial_multipliers(kappa_b, kappa_m),
+        apply="multiply",
+    )
+
+
+def burden_share(ste: float, ste_km0: float) -> float | None:
+    """``1 - STE / STE(κ_m = 0, same κ_b)``. ``None`` if the ratio is undefined."""
+    if ste_km0 is None or not np.isfinite(float(ste_km0)) or float(ste_km0) == 0.0:
+        return None
+    return float(1.0 - float(ste) / float(ste_km0))
 
 
 # ---------------------------------------------------------------------------
@@ -1562,6 +1751,12 @@ _KNOB_SIGN_STORY: dict[str, tuple[str, ...]] = {
     ),
     "benefit_foursc": ("fourSC->Y >= 0", "antic->Y >= 0"),
     "benefit_path": ("fourSC->Y >= 0", "antic->Y >= 0"),
+    "heavy_burden": (
+        "A->PV main <= 0", "A->PV intensity main <= 0",
+        "A->FW main <= 0", "A->PJ main <= 0",
+        "PV->E >= 0", "FW->E >= 0", "PJ->E >= 0",
+        "E->fourSC >= 0", "E->antic >= 0",
+    ),
 }
 
 
@@ -2102,6 +2297,57 @@ def _knob_stack(src_dir: Path, knob: KnobSpec, kappa: float) -> list[dict]:
     return stack
 
 
+def _attach_burden_share(
+    report: dict,
+    src_dir: Path,
+    user_ids: Sequence[int],
+    spec,
+    *,
+    scratch: Path,
+    n_jobs: int | None,
+    proxy_to_true: float,
+    zero_cache: dict | None = None,
+    keep_scratch: bool = False,
+) -> None:
+    """Store ``burden_share = 1 - proxy_STE / proxy_STE(κ_m=0, same κ_b)``."""
+    if report.get("kappa_b") is None:
+        return
+    kappa_b = float(report["kappa_b"])
+    kappa_m = report.get("kappa_m")
+    proxy = report.get("achieved_mean_ste")
+    if proxy is None:
+        proxy = report.get("mean_ste")
+    if proxy is None:
+        return
+    if kappa_m is None:
+        return
+    if float(kappa_m) == 0.0:
+        report["proxy_ste_kappa_m0"] = float(proxy)
+        report["burden_share"] = 0.0
+        return
+    scratch = Path(scratch)
+    write_two_dial_params(src_dir, scratch, user_ids, kappa_b, 0.0, heavy=False)
+    result = evaluate(
+        scratch,
+        user_ids,
+        spec,
+        zero_cache=zero_cache,
+        n_jobs=n_jobs,
+        proxy_to_true=proxy_to_true,
+    )
+    ste_km0 = float(result["mean_ste"])
+    report["proxy_ste_kappa_m0"] = ste_km0
+    report["burden_share"] = burden_share(float(proxy), ste_km0)
+    print(
+        f"  burden share: 1 - {float(proxy):.4f} / {ste_km0:.4f} "
+        f"= {report['burden_share']}"
+        if report["burden_share"] is not None
+        else f"  burden share undefined (STE(κ_m=0)={ste_km0:.4f})",
+        flush=True,
+    )
+    _cleanup_scratch(scratch, keep=keep_scratch)
+
+
 def refuse_knob_overwrite(out_dir: Path, knob_name: str, *, overwrite: bool) -> None:
     """Block clobbering a folder that was calibrated with a different knob."""
     report_path = out_dir / "ste_tuning.json"
@@ -2132,6 +2378,7 @@ def cmd_calibrate(args) -> None:
     print(f"knob '{knob.name}': {knob.doc}")
     _log_fatigue_e_shift(knob)
     _log_burden_path(knob)
+    _log_heavy_burden(knob)
     fatigue_gates = (
         _log_fatigue_gates(base_dir, user_ids) if knob.name == "fatigue" else None
     )
@@ -2322,10 +2569,22 @@ def cmd_calibrate(args) -> None:
             "sign_violations": {k: sorted(v) for k, v in sign_violations.items()},
             "sigma_ratios": sigma_ratios,
             **_fatigue_report_fields(knob, kappa),
+            **_two_dial_report_fields(knob, kappa),
             **({"fatigue_gates": fatigue_gates} if fatigue_gates is not None else {}),
             **result,
         }
         report["params_dir"] = str(out_dir)
+        _attach_burden_share(
+            report,
+            base_dir,
+            user_ids,
+            spec,
+            scratch=scratch / f"burden_share_{out_dir.name}",
+            n_jobs=args.jobs,
+            proxy_to_true=args.proxy_to_true,
+            zero_cache=zero_cache,
+            keep_scratch=getattr(args, "keep_scratch", False),
+        )
         write_report(out_dir / "ste_tuning.json", report)
         solutions.append((float(target), float(kappa), float(achieved), out_dir))
 
@@ -2366,6 +2625,7 @@ def cmd_apply(args) -> None:
     print(f"knob '{knob.name}': {knob.doc}")
     _log_fatigue_e_shift(knob)
     _log_burden_path(knob)
+    _log_heavy_burden(knob)
     fatigue_gates = (
         _log_fatigue_gates(base_dir, user_ids) if knob.name == "fatigue" else None
     )
@@ -2416,6 +2676,7 @@ def cmd_apply(args) -> None:
         "sign_violations": {k: sorted(v) for k, v in sign_violations.items()},
         "params_dir": str(out_dir),
         **_fatigue_report_fields(knob, kappa),
+        **_two_dial_report_fields(knob, kappa),
         **({"fatigue_gates": fatigue_gates} if fatigue_gates is not None else {}),
     }
 
@@ -2436,6 +2697,16 @@ def cmd_apply(args) -> None:
         ):
             if key in result:
                 report[key] = result[key]
+        _attach_burden_share(
+            report,
+            base_dir,
+            user_ids,
+            spec,
+            scratch=Path(args.scratch).expanduser().resolve() / f"burden_share_{out_dir.name}",
+            n_jobs=args.jobs,
+            proxy_to_true=args.proxy_to_true,
+            keep_scratch=getattr(args, "keep_scratch", False),
+        )
 
     write_report(out_dir / "ste_tuning.json", report)
 
@@ -2550,27 +2821,32 @@ def _scan_mean_ste(
     return rows
 
 
+def _install_heavy_burden_kappa_m(kappa_m: float) -> KnobSpec:
+    """Point ``KNOBS['heavy_burden']`` at a fixed κ_m for one calibrate call."""
+    knob = make_heavy_burden_knob(float(kappa_m))
+    KNOBS["heavy_burden"] = knob
+    return knob
+
+
 def cmd_layer1(args) -> None:
     """Calibrate the seven Layer-1 folders from vanilla (activity off).
 
-    Writes the folders that are attainable, records unattainable scans
-    (``env_para_ste0.8_burden`` if the max STE on κ∈[0,1] is below 0.8),
-    and lists rewritten folders for confirmation DiscreteCQL jobs. Each
-    write goes through ``write_scaled_params``, which copies vanilla's
-    ``activity_process`` block (N1).
+    Uniform (κ_m = κ_b), benefit-only (κ_m = 0), and heavy burden
+    (κ_m = 2, with 1.5 / 1.0 fallback on the 0.8 target). Writes the
+    folders that are attainable and lists them for confirmation
+    DiscreteCQL jobs. Each write goes through ``write_scaled_params``,
+    which copies vanilla's ``activity_process`` block.
     """
     jobs = layer1_jobs()
     if getattr(args, "dry_run", False):
         print("LAYER1 dry run (7 environments, all from env_para_vanilla, activity off)")
         for job in jobs:
-            extra = (
-                "  scan to kappa=0 first; write only if max STE >= target"
-                if job["mode"] == "scan_then_calibrate"
-                else ""
-            )
+            extra = ""
+            if job["mode"] == "heavy_fallback":
+                extra = "  try kappa_m=2, then 1.5, then 1.0 if 0.8 is unattainable"
             print(
-                f"  {job['folder']:28}  knob={job['knob']:13}  "
-                f"target={job['target']}{extra}"
+                f"  {job['folder']:32}  knob={job['knob']:13}  "
+                f"target={job['target']}  kappa_m={layer1_kappa_m_display(job)}{extra}"
             )
         return
 
@@ -2587,40 +2863,78 @@ def cmd_layer1(args) -> None:
 
     unattainable: list[dict] = []
     for job, dest in zip(jobs, wanted):
-        if job["mode"] == "scan_then_calibrate":
-            banner(
-                f"{dest.name}: scan knob {job['knob']} down to 0 "
-                f"before targeting {job['target']}"
-            )
-            base_dir = Path(args.params_dir).expanduser().resolve()
-            user_ids = load_user_ids(base_dir)
-            require_fitted_blocks(base_dir, user_ids)
-            spec = make_spec(args)
-            require_dqn_checkpoints(spec, user_ids, Path(args.dqn_source_dir))
-            knob = KNOBS[job["knob"]]
-            scan_scratch = Path(str(scratch) + f"_{dest.name}_scan")
-            grid = job.get("scan_kappas") or (1.0, 0.5, 0.0)
-            rows = _scan_mean_ste(
-                base_dir, user_ids, spec, knob, grid, scan_scratch,
-                n_jobs=args.jobs, proxy_to_true=args.proxy_to_true,
-            )
-            _cleanup_scratch(scan_scratch, keep=getattr(args, "keep_scratch", False))
-            best_k, best_ste = max(rows, key=lambda r: r[1])
-            print(
-                f"  scan max proxy STE {best_ste:.4f} at kappa={best_k:g} "
-                f"(target {job['target']})",
-                flush=True,
-            )
-            if best_ste + float(args.tol) < float(job["target"]):
+        if job["mode"] == "heavy_fallback":
+            grid = tuple(job.get("kappa_m_grid") or HEAVY_BURDEN_KAPPA_M_FALLBACK)
+            prev = KNOBS["heavy_burden"]
+            used_km = None
+            try:
+                for km in grid:
+                    banner(
+                        f"{dest.name}: heavy_burden kappa_m={float(km):g} "
+                        f"-> target {job['target']}"
+                    )
+                    _install_heavy_burden_kappa_m(float(km))
+                    _calibrate_status(_stage_args(
+                        args, knob="heavy_burden", targets=[job["target"]],
+                        kappa0=float(job.get("kappa0", getattr(args, "kappa0", 1.0) or 1.0)),
+                        out_suffix=job["suffix"],
+                        scratch=str(scratch) + f"_{dest.name}_km{float(km):g}",
+                    ))
+                    if _written_this_run(dest, stamps[dest]):
+                        used_km = float(km)
+                        print(
+                            f"  {dest.name}: wrote with kappa_m={used_km:g}",
+                            flush=True,
+                        )
+                        break
+            finally:
+                KNOBS["heavy_burden"] = prev
+            if used_km is None:
+                banner(
+                    f"{dest.name}: no kappa_m in {grid} reached {job['target']} "
+                    "with stability; scanning max attainable STE"
+                )
+                base_dir = Path(args.params_dir).expanduser().resolve()
+                user_ids = load_user_ids(base_dir)
+                require_fitted_blocks(base_dir, user_ids)
+                spec = make_spec(args)
+                require_dqn_checkpoints(spec, user_ids, Path(args.dqn_source_dir))
+                scan_rows: list[dict] = []
+                best_ste = float("-inf")
+                best_k = None
+                best_km = None
+                try:
+                    for km in grid:
+                        _install_heavy_burden_kappa_m(float(km))
+                        scan_scratch = Path(str(scratch) + f"_{dest.name}_max_km{float(km):g}")
+                        rows = _scan_mean_ste(
+                            base_dir, user_ids, spec, KNOBS["heavy_burden"],
+                            (1.0, 2.0, 4.0), scan_scratch,
+                            n_jobs=args.jobs, proxy_to_true=args.proxy_to_true,
+                        )
+                        _cleanup_scratch(
+                            scan_scratch, keep=getattr(args, "keep_scratch", False)
+                        )
+                        for k, s in rows:
+                            scan_rows.append(
+                                {"kappa_b": k, "kappa_m": float(km), "mean_ste": s}
+                            )
+                            if s > best_ste:
+                                best_ste, best_k, best_km = float(s), float(k), float(km)
+                finally:
+                    KNOBS["heavy_burden"] = prev
                 payload = {
                     "folder": dest.name,
                     "knob": job["knob"],
                     "target_mean_ste": float(job["target"]),
                     "written": False,
-                    "reason": "max attainable proxy STE below target",
-                    "max_mean_ste": float(best_ste),
-                    "max_kappa": float(best_k),
-                    "scan": [{"kappa": k, "mean_ste": s} for k, s in rows],
+                    "reason": "max attainable proxy STE below target at all kappa_m",
+                    "kappa_m_tried": [float(x) for x in grid],
+                    "max_mean_ste": None if best_k is None else float(best_ste),
+                    "max_kappa_b": best_k,
+                    "max_kappa_m": best_km,
+                    "scan": scan_rows,
+                    "strengthened_transmission": True,
                 }
                 logs = PROJECT_ROOT / "logs"
                 logs.mkdir(exist_ok=True)
@@ -2628,31 +2942,30 @@ def cmd_layer1(args) -> None:
                 write_report(report_path, payload)
                 print(
                     f"  do not write {dest.name}: max attainable STE "
-                    f"{best_ste:.4f} < {job['target']} (recorded {report_path})"
+                    f"{payload['max_mean_ste']} at kappa_m={best_km} "
+                    f"kappa_b={best_k} (recorded {report_path})"
                 )
                 unattainable.append(payload)
-                continue
-            banner(f"{dest.name}: calibrate {job['knob']} -> {job['target']}")
-            _calibrate_status(_stage_args(
-                args, knob=job["knob"], targets=[job["target"]],
-                kappa0=float(best_k),
-                kappa_hi=job.get("kappa_hi"),
-                out_suffix=job["suffix"],
-                scratch=str(scratch) + f"_{dest.name}",
-            ))
             continue
 
         banner(
             f"{dest.name}: {job['knob']} on {Path(args.params_dir).name} "
-            f"-> target {job['target']}"
+            f"-> target {job['target']}  kappa_m={layer1_kappa_m_display(job)}"
         )
-        _calibrate_status(_stage_args(
-            args, knob=job["knob"], targets=[job["target"]],
-            kappa0=float(job.get("kappa0", getattr(args, "kappa0", 1.0) or 1.0)),
-            kappa_hi=job.get("kappa_hi"),
-            out_suffix=job["suffix"],
-            scratch=str(scratch) + f"_{dest.name}",
-        ))
+        prev = KNOBS.get("heavy_burden")
+        try:
+            if job["knob"] == "heavy_burden":
+                _install_heavy_burden_kappa_m(float(job.get("kappa_m", HEAVY_BURDEN_KAPPA_M)))
+            _calibrate_status(_stage_args(
+                args, knob=job["knob"], targets=[job["target"]],
+                kappa0=float(job.get("kappa0", getattr(args, "kappa0", 1.0) or 1.0)),
+                kappa_hi=job.get("kappa_hi"),
+                out_suffix=job["suffix"],
+                scratch=str(scratch) + f"_{dest.name}",
+            ))
+        finally:
+            if prev is not None:
+                KNOBS["heavy_burden"] = prev
 
     written_dirs = [d for d in wanted if _written_this_run(d, stamps[d])]
     written_list = Path(str(scratch) + "_written")
@@ -2662,7 +2975,8 @@ def cmd_layer1(args) -> None:
         for row in unattainable:
             print(
                 f"  unattainable {row['folder']}: max proxy STE "
-                f"{row['max_mean_ste']:.4f} < {row['target_mean_ste']}"
+                f"{row['max_mean_ste']} < {row['target_mean_ste']} "
+                f"(kappa_m tried {row.get('kappa_m_tried')})"
             )
     missing = [d.name for d in wanted if d not in written_dirs]
     if missing and not unattainable:
@@ -2835,6 +3149,20 @@ def cmd_ratio(args) -> None:
         "tol": float(args.tol),
         "on_target": bool(on_target),
     }
+    km0 = report.get("proxy_ste_kappa_m0")
+    kappa_m = report.get("kappa_m")
+    if kappa_m is not None and float(kappa_m) == 0.0:
+        report["confirmation"]["burden_share"] = 0.0
+        report["confirmed_burden_share"] = 0.0
+    elif km0 is not None and np.isfinite(float(km0)) and float(km0) > 0.0:
+        # Confirmed denominator is the κ_m=0 proxy scaled by this folder's
+        # confirmation ratio (no CQL is retrained at the counterfactual).
+        confirmed_km0 = float(km0) * float(ratio)
+        share = burden_share(confirmed, confirmed_km0)
+        report["confirmation"]["proxy_ste_kappa_m0"] = float(km0)
+        report["confirmation"]["confirmed_ste_kappa_m0"] = confirmed_km0
+        report["confirmation"]["burden_share"] = share
+        report["confirmed_burden_share"] = share
     write_report(report_path, report)
     print(f"{out_dir.name}: confirmed STE {confirmed:.4f} (exp {exp}), raw proxy "
           f"{raw_proxy:.4f}, ratio {ratio:.3f}")
@@ -2973,8 +3301,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser(
         "layer1",
         help=(
-            "Seven Layer-1 environments from vanilla (action / benefit_path / "
-            "burden_path / burden). Activity off. Use --dry-run to list them."
+            "Seven Layer-1 environments from vanilla (uniform action / "
+            "benefit_only / heavy_burden). Activity off. Use --dry-run to "
+            "list them with their kappa_m."
         ),
     )
     common(sp, needs_knob=True)

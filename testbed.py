@@ -32,10 +32,10 @@ STE_LAYER1_DIRS = (
     "env_para_ste0.2",
     "env_para_ste0.5",
     "env_para_ste0.8",
-    "env_para_ste0.2_benefit",
-    "env_para_ste0.8_benefit",
-    "env_para_ste0.2_burden",
-    "env_para_ste0.8_burden",
+    "env_para_ste0.2_benefitonly",
+    "env_para_ste0.8_benefitonly",
+    "env_para_ste0.2_heavyburden",
+    "env_para_ste0.8_heavyburden",
 )
 
 _TRUE = {"1", "true", "yes", "on"}
