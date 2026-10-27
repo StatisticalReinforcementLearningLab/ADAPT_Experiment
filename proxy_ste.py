@@ -3,7 +3,11 @@
 Given a testbed, this reports:
 
 * the no-gap proxy STE (activity forced off), the number used to screen;
-* the effective proxy STE under the testbed's own activity setting.
+* the effective proxy STE under the testbed's own activity setting;
+* a scaled proxy STE = proxy STE × the confirmed/proxy ratio in the
+  params dir's ``ste_tuning.json`` (written by ``TUNE_PHASE=ratio``).
+  That is an approximate full STE. If the ratio is missing, the proxy
+  is printed alone with the reason.
 
 Layer-3 screening flags any spec whose no-gap proxy STE is below 0.1::
 
@@ -11,13 +15,16 @@ Layer-3 screening flags any spec whose no-gap proxy STE is below 0.1::
     python proxy_ste.py --params-dir env_para_ste0.5 --activity on --misspec A
 
 Uses the existing ``tune_ste.evaluate`` proxy (Bernoulli 0.5 vs never-send
-by default; pass ``--dqn-exp`` to add transferred DiscreteCQL).
+by default; pass ``--dqn-exp`` to add transferred DiscreteCQL). Layer 3
+does not run ``ste_vanilla.py`` here; a full DiscreteCQL STE is optional
+later if time allows.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -41,6 +48,49 @@ from tune_ste import (
 )
 
 SCREEN_THRESHOLD = 0.1
+
+
+def load_confirmation_ratio(params_dir) -> tuple[float | None, str]:
+    """``proxy_to_true_estimate`` from ``<params_dir>/ste_tuning.json``, or why not."""
+    path = Path(params_dir).expanduser().resolve() / "ste_tuning.json"
+    if not path.is_file():
+        return None, (
+            f"{path.name} is missing in {path.parent.name}; "
+            "run TUNE_PHASE=ratio after confirmation"
+        )
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None, f"{path} is not valid JSON"
+    conf = report.get("confirmation") or {}
+    ratio = conf.get("proxy_to_true_estimate")
+    if ratio is None:
+        return None, (
+            f"{path.parent.name}/ste_tuning.json has no confirmation.proxy_to_true_estimate; "
+            "run TUNE_PHASE=ratio first"
+        )
+    try:
+        value = float(ratio)
+    except (TypeError, ValueError):
+        return None, f"confirmation ratio in {path.parent.name} is not a number"
+    if not math.isfinite(value) or value <= 0:
+        return None, f"confirmation ratio in {path.parent.name} is {ratio!r}"
+    return value, ""
+
+
+def _format_proxy_line(report: dict) -> str:
+    line = f"  proxy STE (activity off) = {report['proxy_ste']:.4f}"
+    if report.get("scaled_proxy_ste") is not None:
+        line += (
+            f"  scaled proxy STE = {report['scaled_proxy_ste']:.4f}"
+            f"  (ratio {report['confirmation_ratio']:.3f})"
+        )
+    else:
+        reason = report.get("confirmation_ratio_reason") or "confirmation ratio missing"
+        line += f"  (scaled proxy STE omitted: {reason})"
+    if report.get("effective_proxy_ste") is not None:
+        line += f"  effective = {report['effective_proxy_ste']:.4f}"
+    return line
 
 
 def _proxy_spec(args) -> ProxySpec:
@@ -89,9 +139,15 @@ def measure_spec(spec, args) -> dict:
             log_activity=False,
         )
     flag = float(nogap["mean_ste"]) < SCREEN_THRESHOLD
+    ratio, ratio_reason = load_confirmation_ratio(params_dir)
+    proxy_ste = float(nogap["mean_ste"])
+    scaled = None if ratio is None else proxy_ste * ratio
     return {
         "testbed": spec.as_dict(),
-        "proxy_ste": nogap["mean_ste"],
+        "proxy_ste": proxy_ste,
+        "scaled_proxy_ste": scaled,
+        "confirmation_ratio": ratio,
+        "confirmation_ratio_reason": None if ratio is not None else ratio_reason,
         "effective_proxy_ste": None if effective is None else effective["mean_ste"],
         "flag_below_0.1": flag,
         "n_users": nogap["n_users"],
@@ -121,14 +177,7 @@ def screen_layer3(args) -> int:
             reports.append({"testbed": spec.as_dict(), "error": str(exc)})
             continue
         reports.append(report)
-        print(
-            f"  proxy STE (activity off) = {report['proxy_ste']:.4f}"
-            + (
-                ""
-                if report["effective_proxy_ste"] is None
-                else f"  effective = {report['effective_proxy_ste']:.4f}"
-            )
-        )
+        print(_format_proxy_line(report))
         if report["flag_below_0.1"]:
             flagged.append(spec.suffix)
             print("  FLAG: proxy STE < 0.1")
@@ -170,12 +219,7 @@ def main(argv=None) -> int:
     )
     report = measure_spec(spec, args)
     print(
-        f"{spec.suffix}: proxy STE (off) = {report['proxy_ste']:.4f}"
-        + (
-            ""
-            if report["effective_proxy_ste"] is None
-            else f"  effective = {report['effective_proxy_ste']:.4f}"
-        )
+        f"{spec.suffix}: {_format_proxy_line(report).lstrip()}"
         + ("  FLAG < 0.1" if report["flag_below_0.1"] else "")
     )
     summarise(

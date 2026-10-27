@@ -151,12 +151,18 @@ STE tuning and confirmation always use activity off (no gaps).
       python calibrate_misspec.py --params-dir env_para_ste0.5
       python calibrate_misspec.py --params-dir env_para_ste0.8
       ```
-      or `python calibrate_misspec.py --all-ste`. Writes `misspec_calibration.json`
-      (`lam_SC`, `lam_AA` for A; `beta_D` for B). No re-tuning.
+      or `python calibrate_misspec.py --all-ste`. A uses `--nweek 12` by default
+      (11-week fitting-panel horizon for `alpha^Y_SC` / `alpha^Y_AA`); B uses 36
+      weeks. Writes `misspec_calibration.json` (`lam_SC`, `lam_AA` for A; `beta_D`
+      for B). No re-tuning.
 - [ ] (iii) Screen the 12 Layer-3 testbeds with the proxy STE:
       `python proxy_ste.py --screen-layer3`. Flag any with proxy STE < 0.1.
       The no-gap proxy uses activity off; the effective proxy uses activity on
-      (and misspec D when that is the spec).
+      (and misspec D when that is the spec). Also reports a *scaled proxy STE* =
+      proxy STE × the confirmed/proxy ratio in `<params_dir>/ste_tuning.json`
+      (from `TUNE_PHASE=ratio`); that is an approximate full STE. Do not run
+      `ste_vanilla.py` for Layer 3 now. Full DiscreteCQL STE for Layer 3 is
+      optional later if time allows.
 - [ ] (iv) Run the RL arrays for all 24 testbeds (3 Layer 1 + 9 Layer 2 + 12 Layer 3).
       Example Layer 2:
       `sbatch --export=ALL,PRIOR_MODE=loo,ENV_VARIANT=env_para_ste0.5,ADAPR_ACTIVITY=on,ADAPR_STAYER_FRACTION=0.25,ADAPR_MISSPEC=none run_array.sh`

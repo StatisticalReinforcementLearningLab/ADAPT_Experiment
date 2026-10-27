@@ -54,9 +54,11 @@ with `ADAPR_PARAMS_DIR` / `--params-dir`, `ADAPR_ACTIVITY` / `--activity`
 and `ADAPR_MISSPEC` / `--misspec` (`none`, `A`, `B`, `C`, `D`; default `none`).
 Results folders are `results_<steX.Y>_<gapon|gapoff>_psi<frac>_misspec<letter>`.
 STE tuning and STE evaluation always force activity `off` (no gaps) and log
-that. `python proxy_ste.py` reports the no-gap proxy STE and the effective
-proxy STE under the testbed's own activity. `python calibrate_misspec.py`
-writes A/B strengths into `<params_dir>/misspec_calibration.json`.
+that. `python proxy_ste.py` reports the no-gap proxy STE, the effective
+proxy STE under the testbed's own activity, and a scaled proxy STE
+(proxy × the confirmed/proxy ratio in `ste_tuning.json`). `python
+calibrate_misspec.py` writes A/B strengths into
+`<params_dir>/misspec_calibration.json` (A on 12-week episodes, B on 36).
 
 Misspecifications (off by default; the simulator is unchanged when they are off):
 

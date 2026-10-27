@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -118,6 +119,43 @@ def test_misspec_d_requires_activity_on():
         EnvConfig(13, params_dir=PARAMS, activity="off", misspec="D")
     with pytest.raises(ValueError, match="misspec D requires activity on"):
         resolve_testbed_spec(PARAMS, activity="off", misspec="D")
+
+
+def test_calibrate_misspec_A_defaults_to_12_weeks():
+    """A OLS episodes match the 11-week fit panel; B stays at 36."""
+    from calibrate_misspec import _run_A_episode, build_parser
+
+    args = build_parser().parse_args([])
+    assert args.nweek == 12
+    assert args.nweek_b == 36
+    X, y = _run_A_episode(PARAMS, 13, 1, args.nweek, 0.3, 0.3)
+    assert y.size == 12
+    assert X.shape == (12, 4)
+
+
+def test_load_confirmation_ratio_from_ste_tuning(tmp_path):
+    from proxy_ste import _format_proxy_line, load_confirmation_ratio
+
+    missing, why = load_confirmation_ratio(tmp_path)
+    assert missing is None and "missing" in why
+    (tmp_path / "ste_tuning.json").write_text("{}", encoding="utf-8")
+    none, why = load_confirmation_ratio(tmp_path)
+    assert none is None and "TUNE_PHASE=ratio" in why
+    (tmp_path / "ste_tuning.json").write_text(
+        json.dumps({"confirmation": {"proxy_to_true_estimate": 1.25}}),
+        encoding="utf-8",
+    )
+    ratio, why = load_confirmation_ratio(tmp_path)
+    assert ratio == 1.25 and why == ""
+    line = _format_proxy_line(
+        {
+            "proxy_ste": 0.4,
+            "scaled_proxy_ste": 0.5,
+            "confirmation_ratio": 1.25,
+            "effective_proxy_ste": None,
+        }
+    )
+    assert "scaled proxy STE = 0.5000" in line
 
 
 def test_ste_logs_activity_off():

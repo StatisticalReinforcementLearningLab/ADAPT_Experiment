@@ -13,10 +13,12 @@ or all three STE folders::
 A. Fix ``lam_Y = 0.5``. Solve ``lam_SC``, ``lam_AA`` so that, under the
 random-0.5 policy, the pooled OLS of ``Y_{w+1}`` on
 ``(1, Y_w, SC_ewma, AA_ewma)`` recovers the population fitted
-``alpha^Y_SC`` and ``alpha^Y_AA`` within 10%.
+``alpha^Y_SC`` and ``alpha^Y_AA`` within 10%. Default horizon is 12 weeks
+(``--nweek 12``), matching the 11-week fitting panel those alphas come from.
 
 B. Solve ``beta_D`` so the always-send minus never-send 36-week cumulative
-CAE difference equals the original (misspec-off) difference.
+CAE difference equals the original (misspec-off) difference. B always uses
+36 weeks (``--nweek-b``).
 
 Writes ``<params_dir>/misspec_calibration.json``. Does not retune STE.
 """
@@ -132,7 +134,7 @@ def calibrate_A(
     target_sc, target_aa = population_cae_alphas(params_dir, user_ids)
     print(
         f"  A targets: alpha_SC={target_sc:.4f}  alpha_AA={target_aa:.4f}  "
-        f"(mean over {len(user_ids)} users)",
+        f"(mean over {len(user_ids)} users, nweek={nweek})",
         flush=True,
     )
 
@@ -316,7 +318,7 @@ def calibrate_dir(params_dir: Path, args) -> dict:
     if args.which in {"B", "both"}:
         payload["B"] = calibrate_B(
             params_dir, user_ids,
-            nweek=args.nweek, episodes=args.episodes, seed0=args.seed,
+            nweek=args.nweek_b, episodes=args.episodes, seed0=args.seed,
         )
     path = save_calibration(params_dir, {k: payload[k] for k in payload if k in {"A", "B"}})
     print(f"  wrote {path}  ({time.perf_counter() - t0:.1f}s)", flush=True)
@@ -332,7 +334,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Calibrate env_para_ste0.2 / 0.5 / 0.8",
     )
     p.add_argument("--which", choices=("A", "B", "both"), default="both")
-    p.add_argument("--nweek", type=int, default=36)
+    p.add_argument(
+        "--nweek",
+        type=int,
+        default=12,
+        help="Weeks for misspec A only (default 12; matches the 11-week fit panel).",
+    )
+    p.add_argument(
+        "--nweek-b",
+        type=int,
+        default=36,
+        help="Weeks for misspec B (default 36).",
+    )
     p.add_argument("--episodes", type=int, default=4)
     p.add_argument("--seed", type=int, default=20261026)
     p.add_argument("--max-users", type=int, default=None)
