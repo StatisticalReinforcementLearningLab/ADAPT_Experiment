@@ -1394,6 +1394,7 @@ class EnvConfig:
         activity_stayer_recalibrate=None,
         activity=None,
         misspec=None,
+        misspec_strengths=None,
     ):
         self.userid = userid
         self.K = 2
@@ -1460,6 +1461,7 @@ class EnvConfig:
 
             misspec = parse_misspec(misspec)
         self.misspec = misspec
+        self._misspec_strengths = dict(misspec_strengths or {})
         if self.activity == "off" and self.activity_stayer_fraction != 0.0:
             warnings.warn(
                 f"stayer fraction {self.activity_stayer_fraction:g} is ignored "
@@ -1470,45 +1472,31 @@ class EnvConfig:
             self.activity_stayer_fraction = 0.0
         if self.misspec == "D" and self.activity != "on":
             raise ValueError("misspec D requires activity on")
-        # ``activity`` and ``constant`` are exclusive. ``none`` is the
-        # missing-calibration default (legacy hazard 0, with a warning).
+        # ``activity`` uses the stored process. ``dropout_*`` in the same
+        # file are comparison records, not a second daily draw. The legacy
+        # constant-hazard path is used only when a caller sets
+        # ``dropout_hazard_day`` (or ``activity_lambda``) explicitly.
         self.dropout_mechanism = "none"
+        calibration_path = params_path / "generator_calibration.json"
         if calibration_enabled:
-            calibration_path = params_path / "generator_calibration.json"
             calibration = (
                 _load_json(calibration_path) if calibration_path.is_file() else {}
             )
             has_activity = isinstance(calibration.get("activity_process"), dict)
-            has_hazard = "dropout_hazard_day" in calibration
             if has_activity:
-                # dropout_* in the same file are comparison records, not a
-                # second daily draw.
                 self.activity_process = calibration["activity_process"]
                 self.dropout_mechanism = "activity"
-            elif has_hazard:
-                self.dropout_hazard_day = float(
-                    calibration["dropout_hazard_day"]
-                )
-                self.dropout_mechanism = "constant"
-            else:
-                warnings.warn(
-                    f"{calibration_path} has neither activity_process nor "
-                    "dropout_hazard_day; defaulting the legacy hazard to 0.0",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-        if (
-            self.dropout_mechanism == "constant"
-            and not 0.0 <= self.dropout_hazard_day <= 1.0
-        ):
-            raise ValueError(
-                "dropout_hazard_day must be between 0 and 1, got "
-                f"{self.dropout_hazard_day}"
-            )
         # Activity off is the existing lambda = 0 hook. Set after the
         # calibration load so it wins over a stored activity_process.
+        # Activity off needs no activity_process block.
         if self.activity == "off":
             self.activity_lambda = 0.0
+        elif self.activity_process is None:
+            raise FileNotFoundError(
+                f"{calibration_path} has no activity_process; "
+                "activity='on' requires that block (no silent zero-dropout "
+                "fallback). Use activity='off' when no activity_process is stored."
+            )
         std = _load_json(params_path / "std_params.json")
         self.limits_fourSC = std["4hour_step_count_limit"]
         self.fourSC_log_shift = float(std["4hour_step_count_shift"])
@@ -1676,7 +1664,7 @@ class EnvConfig:
 
     def _install_misspec_strengths(self) -> None:
         """Residual SDs and stored A/B strengths. Unused when misspec is none."""
-        from misspec import residual_sigma, strength_B, strengths_A
+        from misspec import require_A, require_B, residual_sigma
 
         self.sigma_SC = residual_sigma(self.resid_fourSC)
         self.sigma_AA = residual_sigma(self.resid_antic)
@@ -1686,34 +1674,17 @@ class EnvConfig:
         self.misspec_lam_AA = None
         self.misspec_beta_D = None
         self.misspec_rho = 0.5
+        overrides = self._misspec_strengths
         if self.misspec == "A":
-            got = strengths_A(self.params_dir)
+            got = require_A(self.params_dir, overrides or None)
             self.misspec_lam_Y = float(got["lam_Y"])
             self.misspec_rho = float(got["rho"])
-            if got["lam_SC"] is None or got["lam_AA"] is None:
-                warnings.warn(
-                    f"misspec A has no stored lam_SC/lam_AA in {self.params_dir}; "
-                    "using placeholders 0.3/0.3 until calibrate_misspec.py is run",
-                    RuntimeWarning,
-                    stacklevel=3,
-                )
-                self.misspec_lam_SC = 0.3
-                self.misspec_lam_AA = 0.3
-            else:
-                self.misspec_lam_SC = float(got["lam_SC"])
-                self.misspec_lam_AA = float(got["lam_AA"])
+            self.misspec_lam_SC = float(got["lam_SC"])
+            self.misspec_lam_AA = float(got["lam_AA"])
         elif self.misspec == "B":
-            beta = strength_B(self.params_dir)
-            if beta is None:
-                warnings.warn(
-                    f"misspec B has no stored beta_D in {self.params_dir}; "
-                    "using 0.0 until calibrate_misspec.py is run",
-                    RuntimeWarning,
-                    stacklevel=3,
-                )
-                self.misspec_beta_D = 0.0
-            else:
-                self.misspec_beta_D = float(beta)
+            self.misspec_beta_D = require_B(
+                self.params_dir, overrides.get("beta_D") if overrides else None
+            )
 
     def _validate_shapes(self) -> None:
         expected = {

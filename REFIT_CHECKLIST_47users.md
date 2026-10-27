@@ -59,7 +59,10 @@ a check before the next.
       ```
       python 04_fit_activity_process.py
       ```
-      then copy the activity_process block into env_para_ste0.2/0.5/0.8 (on the cluster, after their re-tuning, see section 6).
+      `tune_ste.py` copies vanilla's `activity_process` (including `stayer_variants`)
+      into each new STE folder. Do not patch the September `env_para_ste*` folders
+      by hand; they are regenerated after the refit (section 6). Then
+      `python 05_check_refit.py --stage ste`.
       - [ ] counts: 58 gaps (49 ended, 9 open), 3537 risk-set days, 58 events (or the new extract's values; record them)
       - [ ] model 2 converges inside bounds; zero check (PV/FW/PJ/J on excluded rows) = 0
       - [ ] only one dropout mechanism: activity_process present => legacy dropout_* ignored
@@ -144,7 +147,8 @@ STE tuning and confirmation always use activity off (no gaps).
       and `TUNE_PHASE=ratio`. Re-tune any folder off target with
       `TUNE_PROXY_TO_TRUE=from:env_para_ste<t>`. Each newly tuned
       `env_para_ste*/generator_calibration.json` must still carry vanilla's
-      `activity_process` block.
+      `activity_process` block (`tune_ste.py` copies it). Then
+      `python 05_check_refit.py --stage ste`.
 - [ ] (ii) Calibrate misspec A and B once per params dir:
       ```
       python calibrate_misspec.py --params-dir env_para_ste0.2

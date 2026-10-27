@@ -19,6 +19,7 @@ import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from misspec import MISSPEC_C_BLURB
 from vani_env import resolve_params_dir
 
 
@@ -255,7 +256,7 @@ MISSPEC_BLURBS = {
     "none": "Fitted generator; no extra misspecification.",
     "A": "Unmeasured weekly confounder of SC, AA, and Y; causal SC/AA→Y halved.",
     "B": "Unmeasured direct A→Y path; mediator action effects halved.",
-    "C": "Action effects on SC/AA decay after the 12-week fit window.",
+    "C": MISSPEC_C_BLURB,
     "D": "Recent burden raises the gap-start hazard; activity must be on.",
 }
 

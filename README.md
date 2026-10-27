@@ -16,7 +16,7 @@ Run from the repository root. `ADAPR_COMBINED_DIR` is the extract folder.
 | 02 | `02_combine.py` | LOCAL | script-01 tables | `df_merged.csv` | One row per decision slot, with study day and dropout day |
 | 03 | `03_standardize.py` | LOCAL | `df_merged.csv` | `df_fit.csv`, `env_para_vanilla/std_params.json`, `week1_cae_inputs.csv` | Log and z-score the fit panel; write week-1 CAE inputs |
 | 04 | `04_fit_activity_process.py` | LOCAL | the two dropout tables | `activity_process` in `generator_calibration.json`, report under `docs/` | Fit the gap and dropout process |
-| 05 | `05_check_refit.py` | both | combined dir, or the parameter folder | PASS / WARN / FAIL lines | `--stage data` after 04; `--stage fit` after 08; `--stage priors` after 10 |
+| 05 | `05_check_refit.py` | both | combined dir, or the parameter folder | PASS / WARN / FAIL lines | `--stage data` after 04; `--stage fit` after 08; `--stage priors` after 10; `--stage ste` after STE retune |
 | 06 | `06_fit_pu.py` | CLUSTER | `df_fit.csv`, daily activity, `df_weekly_filled.csv` | `params_env_*.json` (penalized block), `pu_hier_diagnostics.json` | Bayesian engagement-state fit |
 | 07 | `07_fit_testbed.py` | CLUSTER | `df_fit.csv`, `week1_cae_inputs.csv`, `std_params.json` | generator coefficients, `user_ids.txt`, `df_fit_11week.csv`, `testbed_diagnostics.json` | Hierarchical mediator and CAE fits, including the week-1 baseline |
 | 08 | `08_est_ew_weights.py` | CLUSTER | `df_fit.csv`, `user_ids.txt` | `Ew_pooled_linear_coefs.json` | Pooled linear filter for the engagement state |
@@ -34,7 +34,11 @@ Do not run the superseded generator-patch script in `archive/superseded/`.
 ## Library modules
 
 `activity_process.py` draws the exogenous activity path and holds the shared
-hazard, the protocol-month covariate, and the dropout seed. Protocol month is
+hazard, the protocol-month covariate, and the dropout seed. For the same
+`(seed, uid)` the path is identical across policies, except under
+misspecification D, where the gap-start hazard depends on recent
+suggestions; the random draws are still shared, but the path changes with
+the policy. Protocol month is
 `ceil(week / 4)` and model 1 uses that month minus 2. Months 1–3 are
 the 12-week fit; a 36-week episode uses months 1–9 on the same scale, with no
 stretch and no cap. Model 2's log theta depends on prior gap only.
@@ -67,7 +71,7 @@ Misspecifications (off by default; the simulator is unchanged when they are off)
 | none | Fitted generator; no extra misspecification. |
 | A | Unmeasured weekly confounder of SC, AA, and Y; causal SC/AA→Y halved. |
 | B | Unmeasured direct A→Y path; mediator action effects halved. |
-| C | Action effects on SC/AA decay after the 12-week fit window. |
+| C | Action effects on SC/AA decay from week 1, halving every 12 weeks, scaled so their mean over weeks 1–12 equals the fitted effect (x1.35 in week 1, x0.71 in week 12, x0.18 in week 36). |
 | D | Recent burden raises the gap-start hazard; activity must be on. |
 
 | Layer | Count | params dir | activity | stayer | misspec |

@@ -856,7 +856,7 @@ def eval_ste_job(
     userid = _userid_from_job(jobid, userid_all)
 
     if nweek is None:
-        nweek = int(EnvConfig(userid, params_dir=params_path).nweek)
+        nweek = int(EnvConfig(userid, params_dir=params_path, activity="off").nweek)
 
     logger_dir = Path("d3rlpy_logs") / f"ste_exp_{exp}"
     experiment_name = f"user{userid}"
@@ -1002,7 +1002,7 @@ def train_ste_job(
     seed = 2024 + int(jobid)
 
     if nweek is None:
-        nweek = int(EnvConfig(userid, params_dir=params_path).nweek)
+        nweek = int(EnvConfig(userid, params_dir=params_path, activity="off").nweek)
     _assert_seed_ranges_disjoint(n_val, n_gate)
 
     rd.seed(seed)

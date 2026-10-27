@@ -616,6 +616,11 @@ class OnlineEnv:
         ``lambda = 0`` is all active and does not touch that stream, so the
         rest of the episode matches the hazard-zero simulator. ``lambda = 1``
         and ``pi = 1`` drops every episode on day 2.
+
+        For a given ``(seed, uid)`` the path is identical across policies,
+        except under misspecification D, where the gap-start hazard depends
+        on recent suggestions; the random draws are still shared, but the
+        path changes with the policy.
         """
         cfg = self.env.cfg
         record = getattr(cfg, "activity_process", None)
@@ -2735,7 +2740,7 @@ def _make_online_env(
     uid, seed=42, params_dir=None, dropout_hazard_day=None,
     activity_lambda=None, activity_pi=None, activity_process_mode=None,
     activity_stayer_fraction=None, activity_stayer_recalibrate=None,
-    activity=None, misspec=None, nweek=None,
+    activity=None, misspec=None, nweek=None, misspec_strengths=None,
 ):
     params_dir = resolve_params_dir(params_dir)
     cfg = EnvConfig(
@@ -2747,6 +2752,7 @@ def _make_online_env(
         activity_stayer_recalibrate=activity_stayer_recalibrate,
         activity=activity,
         misspec=misspec,
+        misspec_strengths=misspec_strengths,
     )
     if dropout_hazard_day is not None:
         cfg.dropout_hazard_day = float(dropout_hazard_day)
@@ -2979,6 +2985,7 @@ def _run_fixed_policy_fast(
     activity=None,
     misspec=None,
     nweek=None,
+    misspec_strengths=None,
 ):
     """Run fixed baselines without PF/RLSVI/state-feature bookkeeping."""
     _ensure_priors_configured(params_dir)
@@ -2993,6 +3000,7 @@ def _run_fixed_policy_fast(
         activity=activity,
         misspec=misspec,
         nweek=nweek,
+        misspec_strengths=misspec_strengths,
     )
     nweek = cfg.nweek
 
@@ -3062,7 +3070,7 @@ def _run_fixed_policy_fast(
 def _run_fixed_policy(
     agent_cls, uid, seed=42, params_dir=None, activity_process_mode=None,
     activity_stayer_fraction=None, activity_stayer_recalibrate=None,
-    activity=None, misspec=None, nweek=None,
+    activity=None, misspec=None, nweek=None, misspec_strengths=None,
 ):
     """Run a fixed walking-suggestion policy (never/always/random send)."""
     extra = dict(
@@ -3072,6 +3080,7 @@ def _run_fixed_policy(
         activity=activity,
         misspec=misspec,
         nweek=nweek,
+        misspec_strengths=misspec_strengths,
     )
     if agent_cls is NeverSendAgent:
         return _run_fixed_policy_fast(
@@ -3091,7 +3100,7 @@ def _run_fixed_policy(
 def run_never_send(
     uid, seed=42, params_dir=None, dropout_hazard_day=None, activity_process_mode=None,
     activity_stayer_fraction=None, activity_stayer_recalibrate=None,
-    activity=None, misspec=None, nweek=None,
+    activity=None, misspec=None, nweek=None, misspec_strengths=None,
 ):
     """Baseline: never send (A=0, π_A=0). Not the RLSVI clip π_A=ε."""
     extra = dict(
@@ -3101,6 +3110,7 @@ def run_never_send(
         activity=activity,
         misspec=misspec,
         nweek=nweek,
+        misspec_strengths=misspec_strengths,
     )
     if dropout_hazard_day is None:
         return _run_fixed_policy(
@@ -3115,7 +3125,7 @@ def run_never_send(
 def run_always_send(
     uid, seed=42, params_dir=None, dropout_hazard_day=None, activity_process_mode=None,
     activity_stayer_fraction=None, activity_stayer_recalibrate=None,
-    activity=None, misspec=None, nweek=None,
+    activity=None, misspec=None, nweek=None, misspec_strengths=None,
 ):
     """Baseline: always send (A=1, π_A=1). Not the RLSVI clip π_A=1-ε."""
     extra = dict(
@@ -3125,6 +3135,7 @@ def run_always_send(
         activity=activity,
         misspec=misspec,
         nweek=nweek,
+        misspec_strengths=misspec_strengths,
     )
     if dropout_hazard_day is None:
         return _run_fixed_policy(
@@ -3139,7 +3150,7 @@ def run_always_send(
 def run_random_send(
     uid, seed=42, params_dir=None, dropout_hazard_day=None, activity_process_mode=None,
     activity_stayer_fraction=None, activity_stayer_recalibrate=None,
-    activity=None, misspec=None, nweek=None,
+    activity=None, misspec=None, nweek=None, misspec_strengths=None,
 ):
     """Baseline: send at random with fixed propensity pi_A = 0.5."""
     extra = dict(
@@ -3149,6 +3160,7 @@ def run_random_send(
         activity=activity,
         misspec=misspec,
         nweek=nweek,
+        misspec_strengths=misspec_strengths,
     )
     if dropout_hazard_day is None:
         return _run_fixed_policy(

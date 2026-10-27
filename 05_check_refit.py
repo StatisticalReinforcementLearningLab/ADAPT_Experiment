@@ -3,6 +3,7 @@
     python 05_check_refit.py --stage data     # local, after 04
     python 05_check_refit.py --stage fit      # cluster, after 08
     python 05_check_refit.py --stage priors   # cluster, after 10
+    python 05_check_refit.py --stage ste      # cluster, after STE retune
 
 Reads ``ADAPR_COMBINED_DIR`` and the parameter directory
 (``ADAPR_PARAMS_DIR``, otherwise ``env_para_vanilla``). One PASS, WARN,
@@ -364,13 +365,57 @@ def stage_priors(report: Report) -> None:
         report.line("WARN", "RL_agents is not in this checkout")
 
 
+def stage_ste(report: Report) -> None:
+    """Every Layer 2/3 params dir carries vanilla's activity_process block."""
+    vanilla_path = ROOT / "env_para_vanilla" / "generator_calibration.json"
+    if not vanilla_path.is_file():
+        report.line("FAIL", "env_para_vanilla/generator_calibration.json is missing")
+        return
+    vanilla_block = json.loads(vanilla_path.read_text(encoding="utf-8")).get(
+        "activity_process"
+    )
+    if not isinstance(vanilla_block, dict):
+        report.line("FAIL", "env_para_vanilla has no activity_process")
+        return
+    if "stayer_variants" not in vanilla_block:
+        report.line("FAIL", "env_para_vanilla activity_process has no stayer_variants")
+        return
+    report.line("PASS", "env_para_vanilla has activity_process")
+    from testbed import STE_PARAM_DIRS
+
+    for name in STE_PARAM_DIRS:
+        path = ROOT / name / "generator_calibration.json"
+        if not path.is_file():
+            report.line("FAIL", f"{name}/generator_calibration.json is missing")
+            continue
+        block = json.loads(path.read_text(encoding="utf-8")).get("activity_process")
+        if not isinstance(block, dict):
+            report.line(
+                "FAIL",
+                f"{name} has no activity_process "
+                "(do not patch by hand; retune so tune_ste.py copies vanilla's block)",
+            )
+            continue
+        if block != vanilla_block:
+            report.line("FAIL", f"{name} activity_process does not match vanilla")
+        else:
+            report.line("PASS", f"{name} activity_process matches vanilla")
+
+
 def main() -> None:
     print(f"params dir: {params_dir()}", flush=True)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", required=True, choices=("data", "fit", "priors"))
+    parser.add_argument(
+        "--stage", required=True, choices=("data", "fit", "priors", "ste")
+    )
     args = parser.parse_args()
     report = Report()
-    {"data": stage_data, "fit": stage_fit, "priors": stage_priors}[args.stage](report)
+    {
+        "data": stage_data,
+        "fit": stage_fit,
+        "priors": stage_priors,
+        "ste": stage_ste,
+    }[args.stage](report)
     if report.failed:
         raise SystemExit(1)
 

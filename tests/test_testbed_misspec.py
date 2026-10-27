@@ -9,8 +9,9 @@ import numpy as np
 import pytest
 
 import experiment
-from misspec import DECAY_C, decay_c, decay_m, draw_confounder
+from misspec import DECAY_C, MISSPEC_C_BLURB, decay_c, decay_m, draw_confounder
 from testbed import (
+    MISSPEC_BLURBS,
     catalog_24,
     log_ste_activity_off,
     resolve_testbed_spec,
@@ -21,6 +22,7 @@ from vani_env import EnvConfig
 
 ROOT = Path(__file__).resolve().parents[1]
 PARAMS = ROOT / "env_para_vanilla"
+TEST_STRENGTHS_A = {"lam_SC": 0.3, "lam_AA": 0.3}
 
 
 def _traj(oenv):
@@ -89,12 +91,20 @@ def test_misspec_none_matches_current_simulator():
 
 
 def test_confounder_and_activity_identical_across_policies():
+    """C_w and the activity path match across policies for the same (seed, uid).
+
+    Except under misspecification D, where the gap-start hazard depends on
+    recent suggestions; the random draws are still shared, but the path
+    changes with the policy. This test uses misspec A.
+    """
     seed, uid = 9, 13
     _n, never = experiment.run_never_send(
-        uid, seed=seed, params_dir=PARAMS, activity="on", misspec="A"
+        uid, seed=seed, params_dir=PARAMS, activity="on", misspec="A",
+        misspec_strengths=TEST_STRENGTHS_A,
     )
     _a, always = experiment.run_always_send(
-        uid, seed=seed, params_dir=PARAMS, activity="on", misspec="A"
+        uid, seed=seed, params_dir=PARAMS, activity="on", misspec="A",
+        misspec_strengths=TEST_STRENGTHS_A,
     )
     assert not np.array_equal(never.action_all, always.action_all)
     np.testing.assert_array_equal(never.env._confounder_C, always.env._confounder_C)
@@ -109,9 +119,46 @@ def test_decay_m_mean_and_week36_and_policy_independence():
     weeks = np.arange(1, 13)
     mean12 = float(np.mean([decay_m(w) for w in weeks]))
     assert mean12 == pytest.approx(1.0, abs=1e-12)
+    assert decay_m(1) == pytest.approx(1.35, abs=0.01)
+    assert decay_m(12) == pytest.approx(0.71, abs=0.01)
     assert decay_m(36) == pytest.approx(c * 2 ** (-35 / 12), rel=1e-12)
     assert decay_m(36) == pytest.approx(0.18, abs=0.02)
     assert decay_m(5) == decay_m(5)
+    assert "decay from week 1" in MISSPEC_C_BLURB
+    assert MISSPEC_BLURBS["C"] == MISSPEC_C_BLURB
+    assert "decay after the 12-week" not in MISSPEC_C_BLURB
+
+
+def test_misspec_A_B_require_calibration_or_explicit_strengths():
+    with pytest.raises(FileNotFoundError, match="misspec_calibration"):
+        EnvConfig(13, params_dir=PARAMS, misspec="A")
+    with pytest.raises(FileNotFoundError, match="misspec_calibration"):
+        EnvConfig(13, params_dir=PARAMS, misspec="B")
+    cfg_a = EnvConfig(
+        13, params_dir=PARAMS, misspec="A", misspec_strengths=TEST_STRENGTHS_A,
+    )
+    assert cfg_a.misspec_lam_SC == 0.3
+    assert cfg_a.misspec_lam_AA == 0.3
+    cfg_b = EnvConfig(
+        13, params_dir=PARAMS, misspec="B", misspec_strengths={"beta_D": 0.12},
+    )
+    assert cfg_b.misspec_beta_D == pytest.approx(0.12)
+
+
+def test_tuned_folder_copies_activity_process(tmp_path, monkeypatch):
+    monkeypatch.setenv("ADAPR_STE_CENTER", "0")
+    from tune_ste import write_scaled_params
+
+    dst = tmp_path / "env_para_ste_test"
+    write_scaled_params(PARAMS, dst, [13], multipliers={"A_to_MY": 1.0})
+    src_block = json.loads(
+        (PARAMS / "generator_calibration.json").read_text(encoding="utf-8")
+    )["activity_process"]
+    dst_block = json.loads(
+        (dst / "generator_calibration.json").read_text(encoding="utf-8")
+    )["activity_process"]
+    assert dst_block == src_block
+    assert "stayer_variants" in dst_block
 
 
 def test_misspec_d_requires_activity_on():

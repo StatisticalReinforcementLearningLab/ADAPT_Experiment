@@ -221,6 +221,7 @@ SUPPORTING_FILES = (
     "df_fit_11week.csv",
     "Ew_pooled_linear_coefs.json",
     "rl_priors.json",
+    "generator_calibration.json",
 )
 
 # ---------------------------------------------------------------------------
@@ -988,6 +989,36 @@ def _install_loo_priors_link(dst_dir: Path) -> None:
     dst_loo.symlink_to(rel)
 
 
+def copy_activity_process(src_dir: Path, dst_dir: Path) -> dict:
+    """Copy ``generator_calibration.json["activity_process"]`` unchanged.
+
+    Every phase that writes a new params dir calls this so Layer 2/3 STE
+    folders keep vanilla's block, including ``stayer_variants``. Raises if
+    the source file or block is missing.
+    """
+    src_path = Path(src_dir) / "generator_calibration.json"
+    if not src_path.is_file():
+        raise FileNotFoundError(
+            f"{src_path} is missing; cannot copy activity_process into {dst_dir}"
+        )
+    src_cal = json.loads(src_path.read_text(encoding="utf-8"))
+    block = src_cal.get("activity_process")
+    if not isinstance(block, dict):
+        raise FileNotFoundError(
+            f"{src_path} has no activity_process block"
+        )
+    dst_dir = Path(dst_dir)
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    dst_path = dst_dir / "generator_calibration.json"
+    if dst_path.is_file():
+        dst_cal = json.loads(dst_path.read_text(encoding="utf-8"))
+    else:
+        dst_cal = dict(src_cal)
+    dst_cal["activity_process"] = block
+    _write_json_atomic(dst_path, dst_cal)
+    return block
+
+
 def write_scaled_params(
     src_dir: Path,
     dst_dir: Path,
@@ -1014,6 +1045,7 @@ def write_scaled_params(
         src = src_dir / fname
         if src.is_file():
             shutil.copy2(src, dst_dir / fname)
+    copy_activity_process(src_dir, dst_dir)
     _install_loo_priors_link(dst_dir)
 
     audit: list[dict] = []

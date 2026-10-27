@@ -4,9 +4,13 @@ Monday-start episodes. Day 1 is active. Protocol month is ``ceil(week / 4)``
 and model 1 uses that month minus 2, on a fixed scale: months 1–3 in the
 12-week fit, months 1–9 over 36 weeks. Model 2's log theta depends on
 ``prior_gap`` only. The path is drawn once, from its own RNG, and the day
-loop only reads it. The default mode is the pooled fit. The shared-frailty
-draw, one thinned posterior ``u`` then the path, both from
-``SeedSequence([seed, uid, 771337])``, stays selectable and is not the default.
+loop only reads it. For the same ``(seed, uid)`` that path is identical
+across policies, except under misspecification D, where the gap-start
+hazard depends on recent suggestions; the random draws are still shared,
+but the path changes with the policy. The default mode is the pooled fit.
+The shared-frailty draw, one thinned posterior ``u`` then the path, both
+from ``SeedSequence([seed, uid, 771337])``, stays selectable and is not
+the default.
 """
 
 from __future__ import annotations

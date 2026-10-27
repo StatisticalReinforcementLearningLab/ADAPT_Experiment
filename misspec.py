@@ -56,9 +56,19 @@ def decay_c(n_weeks: int = DECAY_MEAN_WEEKS, half_life: float = DECAY_HALF_LIFE_
 
 DECAY_C = decay_c()
 
+MISSPEC_C_BLURB = (
+    "Action effects on SC/AA decay from week 1, halving every 12 weeks, "
+    "scaled so their mean over weeks 1–12 equals the fitted effect "
+    "(x1.35 in week 1, x0.71 in week 12, x0.18 in week 36)."
+)
+
 
 def decay_m(week, *, c: float | None = None, half_life: float = DECAY_HALF_LIFE_WEEKS) -> float:
-    """``m(w) = c * 2^(-(w-1)/12)``. ``week`` is the 1-based protocol week."""
+    """``m(w) = c * 2^(-(w-1)/12)``. ``week`` is the 1-based protocol week.
+
+    Scaled so the mean over weeks 1–12 equals the fitted effect
+    (x1.35 in week 1, x0.71 in week 12, x0.18 in week 36).
+    """
     if c is None:
         c = DECAY_C
     w = int(week)

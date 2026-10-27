@@ -87,19 +87,24 @@ def test_calibration_formula_matches_hand_count():
     np.testing.assert_allclose(got["dropout_hazard_day"], 4 / 3809)
 
 
-def test_envconfig_defaults_to_zero_when_calibration_missing(tmp_path):
+def test_activity_on_requires_activity_process(tmp_path):
     std = PARAMS / "std_params.json"
     params = PARAMS / "params_env_13.json"
     dest = tmp_path / "params"
     dest.mkdir()
     dest.joinpath("std_params.json").write_bytes(std.read_bytes())
     dest.joinpath("params_env_13.json").write_bytes(params.read_bytes())
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        cfg = EnvConfig(13, params_dir=dest, nweek=2)
-    assert cfg.dropout_hazard_day == 0.0
+    with pytest.raises(FileNotFoundError, match="generator_calibration.json"):
+        EnvConfig(13, params_dir=dest, nweek=2, activity="on")
+    dest.joinpath("generator_calibration.json").write_text(
+        json.dumps({"dropout_hazard_day": 0.01}), encoding="utf-8"
+    )
+    with pytest.raises(FileNotFoundError, match="activity_process"):
+        EnvConfig(13, params_dir=dest, nweek=2, activity="on")
+    cfg = EnvConfig(13, params_dir=dest, nweek=2, activity="off")
+    assert cfg.activity == "off"
+    assert cfg.activity_process is None
     assert cfg.dropout_mechanism == "none"
-    assert any("neither activity_process nor dropout_hazard_day" in str(w.message) for w in caught)
 
 
 def test_activity_process_and_constant_hazard_do_not_stack(tmp_path):

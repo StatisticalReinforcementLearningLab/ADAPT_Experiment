@@ -75,6 +75,7 @@ def _run_A_episode(params_dir, uid, seed, nweek, lam_sc, lam_aa) -> tuple[np.nda
     cfg, env, oenv = _make_online_env(
         int(uid), seed=seed, params_dir=params_dir,
         activity="off", misspec="A", nweek=nweek,
+        misspec_strengths={"lam_SC": lam_sc, "lam_AA": lam_aa},
     )
     _install_A(cfg, lam_sc, lam_aa)
     rec_y: list[float] = []
@@ -214,6 +215,7 @@ def _run_B_pair(params_dir, uid, seed, nweek, beta_d):
         cfg, env, oenv = _make_online_env(
             uid, seed=seed, params_dir=params_dir,
             activity="off", misspec="B", nweek=nweek,
+            misspec_strengths={"beta_D": beta_d},
         )
         cfg.misspec_beta_D = float(beta_d)
         oenv._reset_episode_state()
